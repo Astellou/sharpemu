@@ -1,4 +1,4 @@
-// Copyright (C) 2026 SharpEmu Emulator Project
+﻿// Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Globalization;
@@ -1080,7 +1080,7 @@ public static partial class Gen5MslTranslator
             {
                 var instruction = instructions[index];
                 var isTerminator = index == block.EndIndex - 1;
-                if (instruction.Opcode == "SEndpgm")
+                if (IsProgramTerminator(instruction.Opcode))
                 {
                     Line("active = false;");
                     return true;
@@ -1186,6 +1186,13 @@ public static partial class Gen5MslTranslator
                 "SCbranchVccnz" => $"(s[{VccLoRegister}] | s[{VccHiRegister}]) != 0u",
                 "SCbranchExecz" => $"(s[{ExecLoRegister}] | s[{ExecHiRegister}]) == 0u",
                 "SCbranchExecnz" => $"(s[{ExecLoRegister}] | s[{ExecHiRegister}]) != 0u",
+                // The CDBG conditions read hardware-debugger trap state,
+                // which no retail execution ever sets, so these branches
+                // are never taken.
+                "SCbranchCdbgsys" or
+                "SCbranchCdbguser" or
+                "SCbranchCdbgsysOrUser" or
+                "SCbranchCdbgsysAndUser" => "false",
                 _ => string.Empty,
             };
             return condition.Length != 0;
@@ -1972,7 +1979,7 @@ public static partial class Gen5MslTranslator
                     leaders.Add(targetPc);
                 }
 
-                if ((IsBranch(instruction.Opcode) || instruction.Opcode == "SEndpgm") &&
+                if ((IsBranch(instruction.Opcode) || IsProgramTerminator(instruction.Opcode)) &&
                     index + 1 < instructions.Count)
                 {
                     leaders.Add(instructions[index + 1].Pc);
@@ -2003,6 +2010,12 @@ public static partial class Gen5MslTranslator
 
             return blocks;
         }
+
+        // Opcodes after which control leaves the decoded program. s_setpc_b64
+        // is an indirect jump to an address the translator cannot resolve, so
+        // the shader simply stops there rather than being dropped whole.
+        private static bool IsProgramTerminator(string opcode) =>
+            opcode is "SEndpgm" or "SSetpcB64";
 
         private static bool IsBranch(string opcode) =>
             opcode == "SBranch" ||
@@ -2092,7 +2105,7 @@ public static partial class Gen5MslTranslator
                 var block = blocks[blockIndex];
                 var terminator = instructions[block.EndIndex - 1];
                 var hasFallthrough = blockIndex + 1 < blocks.Count;
-                if (terminator.Opcode == "SEndpgm")
+                if (IsProgramTerminator(terminator.Opcode))
                 {
                     continue;
                 }

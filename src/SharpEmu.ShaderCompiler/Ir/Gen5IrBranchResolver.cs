@@ -62,6 +62,9 @@ public sealed class Gen5IrBranchResolver : IIrBranchResolver
     public static bool IsUnconditionalBranch(Gen5ShaderInstruction instruction) =>
         string.Equals(instruction.Opcode, "SBranch", StringComparison.Ordinal);
 
+    // s_setpc_b64 jumps to a runtime address that is outside the decoded
+    // program, so there is nothing to continue into: it ends the shader as far
+    // as translation is concerned, the same way the scalar evaluator stops on it.
     public static bool IsTerminator(Gen5ShaderInstruction instruction) =>
-        instruction.Opcode is "SEndpgm" or "SEndpgmSaved";
+        instruction.Opcode is "SEndpgm" or "SEndpgmSaved" or "SSetpcB64";
 }

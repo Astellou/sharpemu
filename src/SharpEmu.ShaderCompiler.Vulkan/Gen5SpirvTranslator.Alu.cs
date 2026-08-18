@@ -1806,6 +1806,31 @@ public static partial class Gen5SpirvTranslator
                 return true;
             }
 
+            // Reads a register pair but writes a single dword, so it cannot go
+            // through the 64-bit path below. GLSL.std.450 FindILsb is only
+            // dependable for 32-bit operands, hence the two-half search: the
+            // low dword wins when it has any bit set, otherwise the high dword
+            // contributes its index plus 32, and an all-zero source yields -1.
+            if (instruction.Opcode == "SFF1I32B64")
+            {
+                var wide = GetRawSource64(instruction, 0);
+                var low = _module.AddInstruction(SpirvOp.UConvert, _uintType, wide);
+                var high = _module.AddInstruction(
+                    SpirvOp.UConvert,
+                    _uintType,
+                    ShiftRightLogical64(wide, _module.Constant64(_ulongType, 32)));
+                StoreS(
+                    destination,
+                    SelectU(
+                        IsNotZero(low),
+                        Ext(73, _uintType, low),
+                        SelectU(
+                            IsNotZero(high),
+                            IAdd(Ext(73, _uintType, high), UInt(32)),
+                            UInt(uint.MaxValue))));
+                return true;
+            }
+
             if (instruction.Opcode.EndsWith("B64", StringComparison.Ordinal) ||
                 instruction.Opcode is "SWqmB64" or "SBfeU64" or "SBfeI64")
             {
@@ -1874,6 +1899,28 @@ public static partial class Gen5SpirvTranslator
                     StoreS(destination, result);
                     Store(_scc, IsNotZero(result));
                     return true;
+                case "SWqmB32":
+                {
+                    // Whole-quad mode over a wave32 mask: each 4-lane group
+                    // becomes all-ones if any of its bits is set. Pixel shaders
+                    // run this on exec_lo before computing derivatives, so that
+                    // the helper lanes of partially covered quads are live.
+                    var quadAny = BitwiseAnd(
+                        BitwiseOr(
+                            BitwiseOr(left, ShiftRightLogical(left, UInt(1))),
+                            BitwiseOr(
+                                ShiftRightLogical(left, UInt(2)),
+                                ShiftRightLogical(left, UInt(3)))),
+                        UInt(0x1111_1111u));
+                    result = _module.AddInstruction(
+                        SpirvOp.IMul,
+                        _uintType,
+                        quadAny,
+                        UInt(0xF));
+                    StoreS(destination, result);
+                    Store(_scc, IsNotZero(result));
+                    return true;
+                }
                 case "SBrevB32":
                     result = _module.AddInstruction(SpirvOp.BitReverse, _uintType, left);
                     StoreS(destination, result);
@@ -2277,6 +2324,23 @@ public static partial class Gen5SpirvTranslator
                             SpirvOp.LogicalNot,
                             _boolType,
                             isSet));
+                return true;
+            }
+
+            // The only 64-bit scalar compares are equality ones. Both operands
+            // are register pairs, so they need the widening reader rather than
+            // the 32-bit sources above.
+            if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+            {
+                Store(
+                    _scc,
+                    _module.AddInstruction(
+                        instruction.Opcode == "SCmpEqU64"
+                            ? SpirvOp.IEqual
+                            : SpirvOp.INotEqual,
+                        _boolType,
+                        GetRawSource64(instruction, 0),
+                        GetRawSource64(instruction, 1)));
                 return true;
             }
 

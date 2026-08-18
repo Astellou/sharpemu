@@ -1369,6 +1369,26 @@ public static class Gen5ShaderScalarEvaluator
             return true;
         }
 
+        // Reads a register pair but writes a single dword, so it is handled
+        // before the 64-bit destination group below.
+        if (instruction.Opcode == "SFF1I32B64")
+        {
+            if (!TryEvaluateScalarOperand64(
+                    instruction.Sources[0],
+                    registers,
+                    execMask,
+                    out var wide))
+            {
+                error = $"scalar-source64 pc=0x{instruction.Pc:X} op={instruction.Opcode}";
+                return false;
+            }
+
+            registers[destination.Value] = wide == 0
+                ? uint.MaxValue
+                : (uint)BitOperations.TrailingZeroCount(wide);
+            return true;
+        }
+
         if (instruction.Opcode is "SMovB64" or "SWqmB64" or "SNotB64")
         {
             if (destination.Value >= ScalarRegisterCount - 1 ||
@@ -1556,6 +1576,7 @@ public static class Gen5ShaderScalarEvaluator
 
         if (instruction.Opcode is
             "SNotB32" or
+            "SWqmB32" or
             "SBrevB32" or
             "SBcnt1I32B32" or
             "SFF1I32B32" or
@@ -1564,6 +1585,9 @@ public static class Gen5ShaderScalarEvaluator
             registers[destination.Value] = instruction.Opcode switch
             {
                 "SNotB32" => ~left,
+                // Whole-quad mode: each 4-lane group becomes all-ones if any of
+                // its bits is set. Same expansion as SWqmB64, over 32 lanes.
+                "SWqmB32" => ((left | (left >> 1) | (left >> 2) | (left >> 3)) & 0x1111_1111u) * 0xFu,
                 "SBrevB32" => ReverseBits(left),
                 "SBcnt1I32B32" => (uint)BitOperations.PopCount(left),
                 "SFF1I32B32" => left == 0 ? uint.MaxValue : (uint)BitOperations.TrailingZeroCount(left),
@@ -1976,6 +2000,26 @@ public static class Gen5ShaderScalarEvaluator
             var bit = (int)(right & 63u);
             var isSet = ((wide >> bit) & 1UL) != 0;
             scalarConditionCode = instruction.Opcode == "SBitcmp1B64" ? isSet : !isSet;
+            return true;
+        }
+
+        // The only 64-bit scalar compares are equality ones; both operands are
+        // register pairs (or a sign-extended inline constant), so they cannot go
+        // through the 32-bit values read above.
+        if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+        {
+            if (!TryEvaluateScalarOperand64(
+                    instruction.Sources[0], registers, ulong.MaxValue, out var wideLeft) ||
+                !TryEvaluateScalarOperand64(
+                    instruction.Sources[1], registers, ulong.MaxValue, out var wideRight))
+            {
+                error = $"scalar-compare-source64 pc=0x{instruction.Pc:X} op={instruction.Opcode}";
+                return false;
+            }
+
+            scalarConditionCode = instruction.Opcode == "SCmpEqU64"
+                ? wideLeft == wideRight
+                : wideLeft != wideRight;
             return true;
         }
 

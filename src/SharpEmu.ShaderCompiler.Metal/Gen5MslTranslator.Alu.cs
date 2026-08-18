@@ -952,6 +952,17 @@ public static partial class Gen5MslTranslator
                 return true;
             }
 
+            // Reads a register pair but writes a single dword, so it cannot go
+            // through the 64-bit path below. An all-zero source yields -1.
+            if (instruction.Opcode == "SFF1I32B64")
+            {
+                var wide = Temp("ulong", RawSource64(instruction, 0));
+                StoreScalar(
+                    destination,
+                    $"{wide} == 0ul ? 0xFFFFFFFFu : (uint)ctz({wide})");
+                return true;
+            }
+
             if (instruction.Opcode.EndsWith("B64", StringComparison.Ordinal) ||
                 instruction.Opcode is "SBfeU64" or "SBfeI64")
             {
@@ -1002,6 +1013,18 @@ public static partial class Gen5MslTranslator
                 case "SNotB32":
                 {
                     var result = Temp("uint", $"~{left}");
+                    StoreScalar(destination, result);
+                    Line($"scc = {result} != 0u;");
+                    return true;
+                }
+                case "SWqmB32":
+                {
+                    // Whole-quad mode over a wave32 mask: each 4-lane group
+                    // becomes all-ones if any of its bits is set.
+                    var quadAny = Temp(
+                        "uint",
+                        $"({left} | ({left} >> 1) | ({left} >> 2) | ({left} >> 3)) & 0x11111111u");
+                    var result = Temp("uint", $"{quadAny} * 0xFu");
                     StoreScalar(destination, result);
                     Line($"scc = {result} != 0u;");
                     return true;
@@ -1235,6 +1258,16 @@ public static partial class Gen5MslTranslator
                 Line(instruction.Opcode == "SBitcmp1B32"
                     ? $"scc = {isSet};"
                     : $"scc = !({isSet});");
+                return true;
+            }
+
+            // The only 64-bit scalar compares are equality ones. Both operands
+            // are register pairs, so they need the widening reader rather than
+            // the 32-bit sources above.
+            if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+            {
+                var op = instruction.Opcode == "SCmpEqU64" ? "==" : "!=";
+                Line($"scc = {RawSource64(instruction, 0)} {op} {RawSource64(instruction, 1)};");
                 return true;
             }
 

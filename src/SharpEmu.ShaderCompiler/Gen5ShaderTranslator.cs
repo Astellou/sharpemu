@@ -1,4 +1,4 @@
-// Copyright (C) 2026 SharpEmu Emulator Project
+﻿// Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
@@ -457,6 +457,21 @@ public static class Gen5ShaderTranslator
                     out var sizeDwords,
                     out error))
             {
+                // Decoding is linear, so a word that fails to decode is often
+                // not a missing opcode but a predecessor whose size was read as
+                // one dword too few, leaving the walk out of phase. Naming that
+                // run of predecessors makes the two cases distinguishable. Everything
+                // here is already known — no extra reads, so an undecodable
+                // word still costs exactly one memory access.
+                if (instructions.Count > 0)
+                {
+                    var context = instructions
+                        .Skip(Math.Max(0, instructions.Count - 4))
+                        .Select(previous =>
+                            $"{previous.Opcode}@0x{previous.Pc:X}+{previous.Words.Count}dw");
+                    error += $" after=[{string.Join(" ", context)}]";
+                }
+
                 return false;
             }
 
@@ -483,7 +498,15 @@ public static class Gen5ShaderTranslator
             instructionCount++;
 
             pc += sizeDwords * sizeof(uint);
-            if (string.Equals(name, "SEndpgm", StringComparison.Ordinal))
+
+            // s_setpc_b64 is an unconditional indirect jump, so control never
+            // falls through it: whatever follows is another function or plain
+            // data. Sweeping past it decodes that data as instructions and
+            // fails the whole shader — Astro Bot has pixel shaders that end on
+            // s_setpc_b64 with a string blob directly after. Stop at the first
+            // one, exactly as this sweep already stops at the first s_endpgm.
+            if (string.Equals(name, "SEndpgm", StringComparison.Ordinal) ||
+                string.Equals(name, "SSetpcB64", StringComparison.Ordinal))
             {
                 program = new Gen5ShaderProgram(address, instructions);
                 return true;
@@ -716,10 +739,12 @@ public static class Gen5ShaderTranslator
             0x04 => "SMovB64",
             0x07 => "SNotB32",
             0x08 => "SNotB64",
+            0x09 => "SWqmB32",
             0x0A => "SWqmB64",
             0x0B => "SBrevB32",
             0x0F => "SBcnt1I32B32",
             0x13 => "SFF1I32B32",
+            0x14 => "SFF1I32B64",
             0x1D => "SBitset1B32",
             0x1F => "SGetpcB64",
             0x20 => "SSetpcB64",
@@ -841,10 +866,12 @@ public static class Gen5ShaderTranslator
             0x0D => "SBitcmp1B32",
             0x0E => "SBitcmp0B64",
             0x0F => "SBitcmp1B64",
+            0x12 => "SCmpEqU64",
+            0x13 => "SCmpLgU64",
             _ => string.Empty,
         };
 
-        return FinishDecode(name, $"unknown-sopc op=0x{opcode:X2}", out error);
+        return FinishDecode(name, $"unknown-sopc op=0x{opcode:X2} word=0x{word:X8}", out error);
     }
 
     private static bool DecodeSopp(uint word, out string name, out uint sizeDwords, out string error)
@@ -867,13 +894,21 @@ public static class Gen5ShaderTranslator
             0x0C => "SWaitcnt",
             0x10 => "SSendmsg",
             0x16 => "STtraceData",
+            // Conditional branches on the hardware-debugger trap state.
+            // Those flags are never set during normal execution, so the
+            // branches are never taken; the backends lower the condition
+            // to a constant false rather than dropping the shader.
+            0x17 => "SCbranchCdbgsys",
+            0x18 => "SCbranchCdbguser",
+            0x19 => "SCbranchCdbgsysOrUser",
+            0x1A => "SCbranchCdbgsysAndUser",
             0x20 => "SInstPrefetch",
             0x21 => "SClause",
             0x23 => "SWaitcntDepctr",
             _ => string.Empty,
         };
 
-        return FinishDecode(name, $"unknown-sopp op=0x{opcode:X2}", out error);
+        return FinishDecode(name, $"unknown-sopp op=0x{opcode:X2} word=0x{word:X8}", out error);
     }
 
     private static bool DecodeSopk(uint word, out string name, out uint sizeDwords, out string error)
@@ -1018,7 +1053,11 @@ public static class Gen5ShaderTranslator
             _ => string.Empty,
         };
 
-        return FinishDecode(name, $"unknown-vop2 op=0x{opcode:X2}", out error);
+        // VOP2 is the fallback for every word with bit31 clear, so any data the
+        // sweep walks into lands here — small integers in particular arrive as
+        // opcode 0x00 — and is indistinguishable from a genuinely missing
+        // opcode unless the raw word is reported.
+        return FinishDecode(name, $"unknown-vop2 op=0x{opcode:X2} word=0x{word:X8}", out error);
     }
 
     private static bool DecodeVopc(uint word, out string name, out uint sizeDwords, out string error)
@@ -1283,6 +1322,9 @@ public static class Gen5ShaderTranslator
             0x36 => "DsReadB32",
             0x37 => "DsRead2B32",
             0x38 => "DsRead2St64B32",
+            0x3D => "DsConsume",
+            0x3E => "DsAppend",
+            0x3F => "DsOrderedCount",
             0x4D => "DsWriteB64",
             0xDE => "DsWriteB96",
             0xDF => "DsWriteB128",

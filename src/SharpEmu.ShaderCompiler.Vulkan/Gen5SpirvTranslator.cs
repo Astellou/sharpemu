@@ -1,4 +1,4 @@
-// Copyright (C) 2026 SharpEmu Emulator Project
+﻿// Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.ShaderCompiler;
@@ -1647,7 +1647,7 @@ public static partial class Gen5SpirvTranslator
             for (var index = block.StartIndex; index < block.EndIndex; index++)
             {
                 var instruction = _state.Program.Instructions[index];
-                if (IsBranch(instruction.Opcode) || instruction.Opcode == "SEndpgm")
+                if (IsBranch(instruction.Opcode) || IsProgramTerminator(instruction.Opcode))
                 {
                     continue;
                 }
@@ -1665,7 +1665,7 @@ public static partial class Gen5SpirvTranslator
             }
 
             var terminator = _state.Program.Instructions[block.EndIndex - 1];
-            if (terminator.Opcode == "SEndpgm")
+            if (IsProgramTerminator(terminator.Opcode))
             {
                 Store(_programActive, _module.ConstantBool(false));
                 return true;
@@ -1780,6 +1780,14 @@ public static partial class Gen5SpirvTranslator
                 "SCbranchVccnz" => SubgroupAny(Load(_boolType, _vcc)),
                 "SCbranchExecz" => LogicalNot(SubgroupAny(Load(_boolType, _exec))),
                 "SCbranchExecnz" => SubgroupAny(Load(_boolType, _exec)),
+                // The CDBG conditions read hardware-debugger trap state,
+                // which no retail execution ever sets, so these branches
+                // are never taken. Folding them to a constant false keeps
+                // the CFG intact instead of failing the whole shader.
+                "SCbranchCdbgsys" or
+                "SCbranchCdbguser" or
+                "SCbranchCdbgsysOrUser" or
+                "SCbranchCdbgsysAndUser" => _module.ConstantBool(false),
                 _ => 0,
             };
             return condition != 0;
@@ -5560,6 +5568,12 @@ public static partial class Gen5SpirvTranslator
             return false;
         }
 
+        // Opcodes after which control leaves the decoded program. s_setpc_b64
+        // is an indirect jump to an address the translator cannot resolve, so
+        // the shader simply stops there rather than being dropped whole.
+        private static bool IsProgramTerminator(string opcode) =>
+            opcode is "SEndpgm" or "SSetpcB64";
+
         private static bool IsBranch(string opcode) =>
             opcode == "SBranch" ||
             opcode.StartsWith("SCbranch", StringComparison.Ordinal);
@@ -5606,7 +5620,7 @@ public static partial class Gen5SpirvTranslator
                     leaders.Add(targetPc);
                 }
 
-                if ((IsBranch(instruction.Opcode) || instruction.Opcode == "SEndpgm") &&
+                if ((IsBranch(instruction.Opcode) || IsProgramTerminator(instruction.Opcode)) &&
                     index + 1 < instructions.Count)
                 {
                     leaders.Add(instructions[index + 1].Pc);
@@ -5657,7 +5671,7 @@ public static partial class Gen5SpirvTranslator
                 var block = blocks[blockIndex];
                 var terminator = instructions[block.EndIndex - 1];
                 var hasFallthrough = blockIndex + 1 < blocks.Count;
-                if (terminator.Opcode == "SEndpgm")
+                if (IsProgramTerminator(terminator.Opcode))
                 {
                     continue;
                 }
