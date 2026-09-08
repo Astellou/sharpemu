@@ -271,6 +271,8 @@ public static partial class Gen5SpirvTranslator
         private uint _scalarRegisters;
         private uint _vectorRegisters;
         private uint _packedHalfRegisters;
+        private uint _packedHalfArrayType;
+        private uint _privatePackedHalfArrayPointer;
         private uint _scc;
         private uint _vcc;
         private uint _exec;
@@ -754,13 +756,13 @@ public static partial class Gen5SpirvTranslator
 
             var scalarArrayType = _module.TypeArray(_uintType, ScalarRegisterCount);
             var vectorArrayType = _module.TypeArray(_uintType, VectorRegisterCount);
-            var packedHalfArrayType = _module.TypeArray(_vec2Type, VectorRegisterCount);
+            _packedHalfArrayType = _module.TypeArray(_vec2Type, VectorRegisterCount);
             var privateScalarArrayPointer =
                 _module.TypePointer(SpirvStorageClass.Private, scalarArrayType);
             var privateVectorArrayPointer =
                 _module.TypePointer(SpirvStorageClass.Private, vectorArrayType);
-            var privatePackedHalfArrayPointer =
-                _module.TypePointer(SpirvStorageClass.Private, packedHalfArrayType);
+            _privatePackedHalfArrayPointer =
+                _module.TypePointer(SpirvStorageClass.Private, _packedHalfArrayType);
             _scalarRegisters = _module.AddGlobalVariable(
                 privateScalarArrayPointer,
                 SpirvStorageClass.Private,
@@ -769,10 +771,6 @@ public static partial class Gen5SpirvTranslator
                 privateVectorArrayPointer,
                 SpirvStorageClass.Private,
                 _module.ConstantNull(vectorArrayType));
-            _packedHalfRegisters = _module.AddGlobalVariable(
-                privatePackedHalfArrayPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantNull(packedHalfArrayType));
             _scc = _module.AddGlobalVariable(
                 _privateBoolPointer,
                 SpirvStorageClass.Private,
@@ -809,7 +807,6 @@ public static partial class Gen5SpirvTranslator
 
             _interfaces.Add(_scalarRegisters);
             _interfaces.Add(_vectorRegisters);
-            _interfaces.Add(_packedHalfRegisters);
             _interfaces.Add(_scc);
             _interfaces.Add(_vcc);
             _interfaces.Add(_exec);
@@ -818,7 +815,6 @@ public static partial class Gen5SpirvTranslator
             _interfaces.Add(_programActive);
             _module.AddName(_scalarRegisters, "sgpr");
             _module.AddName(_vectorRegisters, "vgpr");
-            _module.AddName(_packedHalfRegisters, "vgprPackedHalf");
 
             var runtimeBufferBiasCount =
                 _globalBufferBase + _evaluation.GlobalMemoryBindings.Count;
@@ -5120,12 +5116,26 @@ public static partial class Gen5SpirvTranslator
             Store(pointer, value);
         }
 
-        private uint PackedHalfPointer(uint register) =>
-            _module.AddInstruction(
+        private uint PackedHalfPointer(uint register)
+        {
+            
+            if (_packedHalfRegisters == 0)
+            {
+                _packedHalfRegisters = _module.AddGlobalVariable(
+                    _privatePackedHalfArrayPointer,
+                    SpirvStorageClass.Private,
+                    _module.ConstantNull(_packedHalfArrayType));
+                _interfaces.Add(_packedHalfRegisters);
+                _module.AddName(_packedHalfRegisters, "vgprPackedHalf");
+            }
+            
+
+            return _module.AddInstruction(
                 SpirvOp.AccessChain,
                 _privateVec2Pointer,
                 _packedHalfRegisters,
                 UInt(register));
+        }
 
         private uint LoadS(uint register) => Load(_uintType, ScalarPointer(register));
 
