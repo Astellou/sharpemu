@@ -165,6 +165,13 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 
 	private const ulong GuestThreadRegionStride = 0x0100_0000UL;
 
+
+	private const ulong GuestThreadCpuSlotOffset = 0xE0UL;
+
+	private const ushort GuestThreadCpuSlotValidBit = 0x8000;
+
+	private static int _guestThreadCpuRotation = -1;
+
 	// Unity titles routinely create more than 64 workers once native plugins,
 	// lighting, streaming, and audio are active at the same time. Keep a broad
 	// deterministic address window for their stack and TLS regions.
@@ -434,6 +441,8 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		public int Priority { get; set; }
 
 		public ulong AffinityMask { get; set; }
+
+		public ulong CpuSlot { get; set; }
 
 		public CpuContext Context { get; set; } = null!;
 
@@ -3694,7 +3703,8 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		Console.Error.WriteLine(
 			$"[LOADER][INFO] Scheduled guest thread '{thread.Name}' handle=0x{thread.ThreadHandle:X16} " +
 			$"entry=0x{thread.EntryPoint:X16} arg=0x{thread.Argument:X16} priority={thread.Priority} " +
-			$"host_priority={MapGuestThreadPriority(thread.Priority)} affinity=0x{thread.AffinityMask:X}");
+			$"host_priority={MapGuestThreadPriority(thread.Priority)} affinity=0x{thread.AffinityMask:X} " +
+			$"cpu_slot=0x{thread.CpuSlot:X}");
 		LoadProgressDiagnostics.ArmIfNorthAudioThread(thread.Name);
 		Pump(creatorContext, "pthread_create");
 		// Pump is suppressed while another cooperative dispatch is active. The
@@ -5140,7 +5150,9 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		context[CpuRegister.Rcx] = 0;
 		context[CpuRegister.R8] = 0;
 		context[CpuRegister.R9] = 0;
-		if (!InitializeGuestThreadFrame(context) || !InitializeGuestThreadTls(context, tlsBase, request.ThreadHandle))
+		var cpuSlot = ResolveGuestThreadCpuSlot(request.AffinityMask);
+		if (!InitializeGuestThreadFrame(context) ||
+			!InitializeGuestThreadTls(context, tlsBase, request.ThreadHandle, cpuSlot))
 		{
 			error = "failed to initialize guest thread stack/TLS";
 			return false;
@@ -5154,6 +5166,7 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			Name = string.IsNullOrWhiteSpace(request.Name) ? $"Thread-{request.ThreadHandle:X}" : request.Name,
 			Priority = request.Priority,
 			AffinityMask = request.AffinityMask,
+			CpuSlot = cpuSlot,
 			Context = context,
 			StackBase = stackBase,
 			StackSize = GuestThreadStackSize,
@@ -5286,9 +5299,14 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		return true;
 	}
 
-	private static bool InitializeGuestThreadTls(CpuContext context, ulong tlsBase, ulong threadHandle)
+	private static bool InitializeGuestThreadTls(
+		CpuContext context,
+		ulong tlsBase,
+		ulong threadHandle,
+		ulong cpuSlot)
 	{
 		if (!context.TryWriteUInt64(tlsBase - 0xF0, 0) ||
+			!context.TryWriteUInt64(tlsBase - GuestThreadCpuSlotOffset, cpuSlot) ||
 			!context.TryWriteUInt64(tlsBase + 0x00, tlsBase) ||
 			!context.TryWriteUInt64(tlsBase + 0x10, threadHandle) ||
 			!context.TryWriteUInt64(tlsBase + 0x28, 0xC0DEC0DECAFEBA00UL) ||
@@ -5301,6 +5319,25 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		// thread pointer so per-thread TLS matches the main thread.
 		SharpEmu.HLE.GuestTlsTemplate.SeedThreadBlock(context, tlsBase);
 		return true;
+	}
+
+	private static ulong ResolveGuestThreadCpuSlot(ulong affinityMask)
+	{
+		int cpuIndex;
+		if (affinityMask != 0 &&
+			(affinityMask & (affinityMask - 1)) == 0 &&
+			System.Numerics.BitOperations.TrailingZeroCount(affinityMask) < 0x7FFF)
+		{
+			cpuIndex = System.Numerics.BitOperations.TrailingZeroCount(affinityMask);
+		}
+		else
+		{
+			var processorCount = Math.Max(1, Math.Min(Environment.ProcessorCount, 0x7FFF));
+			cpuIndex = ((Interlocked.Increment(ref _guestThreadCpuRotation) % processorCount) + processorCount)
+				% processorCount;
+		}
+
+		return GuestThreadCpuSlotValidBit | (ulong)(uint)cpuIndex;
 	}
 
 	private static ThreadPriority MapGuestThreadPriority(int priority)
