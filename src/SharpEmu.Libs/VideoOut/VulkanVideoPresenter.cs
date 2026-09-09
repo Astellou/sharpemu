@@ -1475,6 +1475,30 @@ internal static unsafe class VulkanVideoPresenter
         }
     }
 
+    /// <summary>
+    /// Returns the pooled backing arrays of a set of global-memory buffers.
+    /// Used when a compute dispatch is rejected before it is enqueued, so the
+    /// GuestDataPool leases the AGC layer took for it do not leak.
+    /// </summary>
+    private static void ReturnPooledGuestMemoryBuffers(
+        IReadOnlyList<GuestMemoryBuffer> buffers)
+    {
+        if (buffers.Count == 0)
+        {
+            return;
+        }
+
+        var returned = new HashSet<byte[]>(
+            System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        foreach (var buffer in buffers)
+        {
+            if (buffer.Pooled && buffer.Data.Length != 0 && returned.Add(buffer.Data))
+            {
+                GuestDataPool.Shared.Return(buffer.Data);
+            }
+        }
+    }
+
     public static long SubmitComputeDispatch(
         ulong shaderAddress,
         byte[] computeSpirv,
@@ -1502,6 +1526,7 @@ internal static unsafe class VulkanVideoPresenter
             textures.All(texture => !texture.IsStorage) &&
             !writesGlobalMemory)
         {
+            ReturnPooledGuestMemoryBuffers(globalMemoryBuffers);
             return 0;
         }
 
@@ -1510,6 +1535,7 @@ internal static unsafe class VulkanVideoPresenter
         {
             if (_closed)
             {
+                ReturnPooledGuestMemoryBuffers(globalMemoryBuffers);
                 return 0;
             }
 
@@ -3409,6 +3435,24 @@ internal static unsafe class VulkanVideoPresenter
         private long _hostMovieConvertedFrameSerial = -1;
         private long _hostMovieLumaUploadedFrameSerial = -1;
         private long _hostMovieChromaUploadedFrameSerial = -1;
+        // Substitute the host-decoded frame directly for the guest's converted
+        // RGB surface (default on). SHARPEMU_HOST_MOVIE_RGB_SUBST=0 falls back to
+        // the older path: substitute only the YUV planes and let the guest run
+        // its own YUV->RGB conversion.
+        private static readonly bool _hostMovieRgbSubstitutionEnabled = !string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_HOST_MOVIE_RGB_SUBST"),
+            "0",
+            StringComparison.Ordinal);
+        private Image _hostMovieRgbImage;
+        private DeviceMemory _hostMovieRgbImageMemory;
+        private ImageView _hostMovieRgbImageView;
+        private uint _hostMovieRgbImageWidth;
+        private uint _hostMovieRgbImageHeight;
+        private uint _hostMovieRgbImageDstSelect;
+        private Format _hostMovieRgbImageFormat;
+        private bool _hostMovieRgbImageInitialized;
+        private long _hostMovieRgbUploadedFrameSerial = -1;
+        private readonly HashSet<ulong> _hostMovieRgbTargetAddresses = [];
         private string? _hostMovieFramePath;
         private ulong _hostMovieLumaTextureAddress;
         private ulong _hostMovieChromaTextureAddress;
@@ -3448,6 +3492,7 @@ internal static unsafe class VulkanVideoPresenter
         private int _directPresentationCount;
         private readonly Dictionary<ulong, long> _presentedGuestImageTraceCounts = new();
         private readonly Dictionary<ulong, GuestImageResource> _guestImages = new();
+
         private readonly record struct GuestImageVariantKey(
             ulong Address,
             uint Width,
@@ -7267,10 +7312,13 @@ internal static unsafe class VulkanVideoPresenter
                 for (var index = 0; index < draw.Textures.Count; index++)
                 {
                     var texture = draw.Textures[index];
-                    var resolved = index == hostMovieTextures.Luma
-                        ? CreateHostMovieTextureResource(texture, plane: 0)
+                    var resolved =
+                        index == hostMovieTextures.Luma
+                            ? CreateHostMovieTextureResource(texture, plane: 0)
                         : index == hostMovieTextures.Chroma
                             ? CreateHostMovieTextureResource(texture, plane: 1)
+                        : IsHostMovieRgbSubstitution(texture)
+                            ? CreateHostMovieRgbTextureResource(texture)
                             : ResolveTextureResource(texture);
                     var feedbackTarget = !texture.IsStorage
                         ? feedbackTargets?.FirstOrDefault(target =>
@@ -7388,6 +7436,7 @@ internal static unsafe class VulkanVideoPresenter
                     new GlobalBufferResource[dispatch.GlobalMemoryBuffers.Count],
             };
 
+            var globalBuffersProcessed = 0;
             try
             {
                 for (var index = 0; index < dispatch.Textures.Count; index++)
@@ -7439,6 +7488,7 @@ internal static unsafe class VulkanVideoPresenter
                 {
                     resources.GlobalMemoryBuffers[index] =
                         CreateGlobalBufferResource(dispatch.GlobalMemoryBuffers[index]);
+                    globalBuffersProcessed = index + 1;
                 }
 
                 if (traceResources)
@@ -7472,6 +7522,19 @@ internal static unsafe class VulkanVideoPresenter
             }
             catch
             {
+                // Return the pooled arrays of buffers the loop had not yet
+                // reached (CreateGlobalBufferResource returned the rest itself).
+                for (var index = globalBuffersProcessed;
+                     index < dispatch.GlobalMemoryBuffers.Count;
+                     index++)
+                {
+                    var buffer = dispatch.GlobalMemoryBuffers[index];
+                    if (buffer.Pooled && buffer.Data.Length != 0)
+                    {
+                        GuestDataPool.Shared.Return(buffer.Data);
+                    }
+                }
+
                 DestroyTranslatedDrawResources(resources);
                 throw;
             }
@@ -8172,6 +8235,8 @@ internal static unsafe class VulkanVideoPresenter
                 _hostMovieConvertedFrameSerial = -1;
                 _hostMovieLumaUploadedFrameSerial = -1;
                 _hostMovieChromaUploadedFrameSerial = -1;
+                _hostMovieRgbUploadedFrameSerial = -1;
+                _hostMovieRgbTargetAddresses.Clear();
             }
 
             if (!advanced && _hostMovieFramePixels is not null)
@@ -8388,6 +8453,190 @@ internal static unsafe class VulkanVideoPresenter
                 HostMovieFrameSerial = _hostMovieFrameSerial,
                 SamplerState = texture.Sampler,
             };
+        }
+
+        // True when this sampled texture is the RGB surface the guest's own
+        // YUV->RGB pass writes (learned from the conversion draws' targets),
+        // and a host movie frame is available to stand in for it.
+        private bool IsHostMovieRgbSubstitution(GuestDrawTexture texture)
+        {
+            return _hostMovieRgbSubstitutionEnabled &&
+                   _hostMovieFramePixels is not null &&
+                   _hostMovieFrameWidth != 0 &&
+                   _hostMovieFrameHeight != 0 &&
+                   !texture.IsStorage &&
+                   !texture.IsFallback &&
+                   !texture.ArrayedView &&
+                   texture.ArrayLayers <= 1 &&
+                   texture.Address != 0 &&
+                   _hostMovieRgbTargetAddresses.Contains(texture.Address);
+        }
+
+        private TextureResource CreateHostMovieRgbTextureResource(GuestDrawTexture texture)
+        {
+            var width = _hostMovieFrameWidth;
+            var height = _hostMovieFrameHeight;
+            // Match the guest's converted-surface format. The logo movie's
+            // YUV->RGB target is R16G16B16A16_SFLOAT (guest format 12/7): an
+            // 8-bit unorm stand-in crushed the dynamic range (raised blacks,
+            // banding — the "compressed" look). Fall back to BGRA8 for any
+            // surface that is not a known HDR float format.
+            var guestFormat = GetTextureFormat(texture.Format, texture.NumberType);
+            var isHalfFloatTarget = guestFormat is Format.R16G16B16A16Sfloat;
+            var uploadFormat = isHalfFloatTarget
+                ? Format.R16G16B16A16Sfloat
+                : Format.B8G8R8A8Unorm;
+            EnsureHostMovieRgbImage(width, height, texture.DstSelect, uploadFormat);
+
+            var bgra = _hostMovieFramePixels!;
+            var needsUpload = _hostMovieRgbUploadedFrameSerial != _hostMovieFrameSerial;
+            VkBuffer stagingBuffer = default;
+            DeviceMemory stagingMemory = default;
+            if (needsUpload)
+            {
+                var pixels = isHalfFloatTarget
+                    ? ConvertBgra8ToRgba16f(bgra, (int)width)
+                    : bgra;
+                (stagingBuffer, stagingMemory) = CreateTextureStagingBuffer(
+                    pixels,
+                    $"Bink2 frame {_hostMovieFrameSerial} rgb staging");
+            }
+
+            return new TextureResource
+            {
+                Address = texture.Address,
+                StagingBuffer = stagingBuffer,
+                StagingMemory = stagingMemory,
+                Image = _hostMovieRgbImage,
+                View = _hostMovieRgbImageView,
+                Width = width,
+                Height = height,
+                RowLength = width,
+                DstSelect = texture.DstSelect,
+                NeedsUpload = needsUpload,
+                IsHostMovie = true,
+                HostMoviePlane = 2,
+                HostMovieFrameSerial = _hostMovieFrameSerial,
+                SamplerState = texture.Sampler,
+            };
+        }
+
+        private void EnsureHostMovieRgbImage(
+            uint width,
+            uint height,
+            uint dstSelect,
+            Format format)
+        {
+            if (_hostMovieRgbImage.Handle != 0 &&
+                _hostMovieRgbImageWidth == width &&
+                _hostMovieRgbImageHeight == height &&
+                _hostMovieRgbImageDstSelect == dstSelect &&
+                _hostMovieRgbImageFormat == format)
+            {
+                return;
+            }
+
+            if (_hostMovieRgbImage.Handle != 0)
+            {
+                FlushBatchedGuestCommands();
+                WaitForAllGuestSubmissions();
+                DrainFrameSlots();
+                DestroyHostMovieRgbImage();
+            }
+
+            CreateHostMoviePlaneImage(
+                width,
+                height,
+                format,
+                dstSelect,
+                "rgb",
+                out _hostMovieRgbImage,
+                out _hostMovieRgbImageMemory,
+                out _hostMovieRgbImageView);
+            _hostMovieRgbImageWidth = width;
+            _hostMovieRgbImageHeight = height;
+            _hostMovieRgbImageDstSelect = dstSelect;
+            _hostMovieRgbImageFormat = format;
+            _hostMovieRgbImageInitialized = false;
+            _hostMovieRgbUploadedFrameSerial = -1;
+        }
+
+        // BGRA8 (sRGB-encoded, from the host Bink decoder) -> RGBA16F linear.
+        // The guest's YUV->RGB target is a scene-linear FP16 buffer that the
+        // final blit tone-maps; feeding it gamma-encoded 8-bit values raised
+        // the blacks and banded the gradients. Undo the sRGB transfer so the
+        // tone-mapper sees linear light.
+        private static byte[] ConvertBgra8ToRgba16f(byte[] bgra, int width)
+        {
+            var pixelCount = bgra.Length / 4;
+            var outBytes = new byte[pixelCount * 8];
+            var outSpan = MemoryMarshal.Cast<byte, Half>(outBytes.AsSpan());
+            var stride = width <= 0 ? 1 : width;
+            for (var i = 0; i < pixelCount; i++)
+            {
+                // Ordered dither in the 8-bit domain: the host Bink frame is
+                // quantised to 8 bpc; a +-0.5 LSB Bayer offset breaks the
+                // bands the FP16 promotion would otherwise preserve.
+                var x = i % stride;
+                var y = i / stride;
+                var d = (Bayer8[(y & 7) * 8 + (x & 7)] + 0.5f) / 64f - 0.5f;
+                var b = bgra[i * 4 + 0];
+                var g = bgra[i * 4 + 1];
+                var r = bgra[i * 4 + 2];
+                var a = bgra[i * 4 + 3];
+                outSpan[i * 4 + 0] = (Half)SrgbToLinear(r + d);
+                outSpan[i * 4 + 1] = (Half)SrgbToLinear(g + d);
+                outSpan[i * 4 + 2] = (Half)SrgbToLinear(b + d);
+                outSpan[i * 4 + 3] = (Half)(a / 255f);
+            }
+
+            return outBytes;
+
+            static float SrgbToLinear(float value)
+            {
+                var c = Math.Clamp(value / 255f, 0f, 1f);
+                return c <= 0.04045f
+                    ? c / 12.92f
+                    : MathF.Pow((c + 0.055f) / 1.055f, 2.4f);
+            }
+        }
+
+        // 8x8 Bayer threshold matrix (values 0..63).
+        private static readonly byte[] Bayer8 =
+        [
+             0, 48, 12, 60,  3, 51, 15, 63,
+            32, 16, 44, 28, 35, 19, 47, 31,
+             8, 56,  4, 52, 11, 59,  7, 55,
+            40, 24, 36, 20, 43, 27, 39, 23,
+             2, 50, 14, 62,  1, 49, 13, 61,
+            34, 18, 46, 30, 33, 17, 45, 29,
+            10, 58,  6, 54,  9, 57,  5, 53,
+            42, 26, 38, 22, 41, 25, 37, 21,
+        ];
+
+        private void DestroyHostMovieRgbImage()
+        {
+            if (_hostMovieRgbImageView.Handle != 0)
+            {
+                _vk.DestroyImageView(_device, _hostMovieRgbImageView, null);
+                _hostMovieRgbImageView = default;
+            }
+            if (_hostMovieRgbImage.Handle != 0)
+            {
+                _vk.DestroyImage(_device, _hostMovieRgbImage, null);
+                _hostMovieRgbImage = default;
+            }
+            if (_hostMovieRgbImageMemory.Handle != 0)
+            {
+                _vk.FreeMemory(_device, _hostMovieRgbImageMemory, null);
+                _hostMovieRgbImageMemory = default;
+            }
+            _hostMovieRgbImageWidth = 0;
+            _hostMovieRgbImageHeight = 0;
+            _hostMovieRgbImageDstSelect = 0;
+            _hostMovieRgbImageFormat = default;
+            _hostMovieRgbImageInitialized = false;
+            _hostMovieRgbUploadedFrameSerial = -1;
         }
 
         private void EnsureHostMovieYuvFrame()
@@ -11639,6 +11888,7 @@ internal static unsafe class VulkanVideoPresenter
             FlushBatchedGuestCommands();
             if (_deviceLost)
             {
+                ReturnPooledGuestMemoryBuffers(work.GlobalMemoryBuffers);
                 return;
             }
 
@@ -11652,18 +11902,21 @@ internal static unsafe class VulkanVideoPresenter
                     $"vk.compute_skip cs=0x{work.ShaderAddress:X16} " +
                     $"groups={work.GroupCountX}x{work.GroupCountY}x{work.GroupCountZ} " +
                     $"textures={work.Textures.Count}");
+                ReturnPooledGuestMemoryBuffers(work.GlobalMemoryBuffers);
                 return;
             }
 
             if (!TryValidateComputeDispatch(work, out var validationError))
             {
                 LogRejectedComputeDispatch(work, validationError);
+                ReturnPooledGuestMemoryBuffers(work.GlobalMemoryBuffers);
                 return;
             }
 
             if (!TryValidateStorageImageBindings(work, out validationError))
             {
                 LogRejectedComputeDispatch(work, validationError);
+                ReturnPooledGuestMemoryBuffers(work.GlobalMemoryBuffers);
                 return;
             }
 
@@ -12916,6 +13169,20 @@ internal static unsafe class VulkanVideoPresenter
                     transientFramebuffer = framebuffer;
                 }
 
+                if (_hostMovieRgbSubstitutionEnabled &&
+                    _hostMovieFramePixels is not null &&
+                    FindHostMovieTextureBindings(draw.Textures) is
+                        { Luma: >= 0, Chroma: >= 0 })
+                {
+                    foreach (var movieTarget in work.Targets)
+                    {
+                        if (movieTarget.Address != 0)
+                        {
+                            _hostMovieRgbTargetAddresses.Add(movieTarget.Address);
+                        }
+                    }
+                }
+
                 resources = CreateTranslatedDrawResources(
                     draw,
                     renderPass,
@@ -13888,7 +14155,6 @@ internal static unsafe class VulkanVideoPresenter
                         SetDebugName(ObjectType.RenderPass, promotedInitialRenderPass.Handle, $"{promotedName} initial-renderpass");
                         SetDebugName(ObjectType.Framebuffer, promotedFramebuffer.Handle, $"{promotedName} framebuffer");
                     }
-
                     return existing;
                 }
 
@@ -13928,7 +14194,6 @@ internal static unsafe class VulkanVideoPresenter
                         SetDebugName(ObjectType.RenderPass, promoted.InitialRenderPass.Handle, $"{promotedName} initial-renderpass");
                         SetDebugName(ObjectType.Framebuffer, promoted.Framebuffer.Handle, $"{promotedName} framebuffer");
                     }
-
                     return existing;
                 }
 
@@ -13941,17 +14206,23 @@ internal static unsafe class VulkanVideoPresenter
                         $"initialized={existing.Initialized}");
                 }
 
-                _guestImageVariants.Add(
-                    new GuestImageVariantKey(
-                        existing.Address,
-                        existing.LogicalWidth,
-                        existing.LogicalHeight,
-                        existing.LogicalDepth,
-                        existing.Type,
-                        existing.MipLevels,
-                        existing.GuestFormat,
-                        existing.Format),
-                    existing);
+                var variantKey = new GuestImageVariantKey(
+                    existing.Address,
+                    existing.LogicalWidth,
+                    existing.LogicalHeight,
+                    existing.LogicalDepth,
+                    existing.Type,
+                    existing.MipLevels,
+                    existing.GuestFormat,
+                    existing.Format);
+                if (_guestImageVariants.TryGetValue(variantKey, out var displaced))
+                {
+                    // A stale variant already occupies this key: destroy it
+                    // rather than leaking the handle the Add would overwrite.
+                    DestroyGuestImage(displaced);
+                }
+
+                _guestImageVariants[variantKey] = existing;
                 _guestImages.Remove(target.Address);
                 lock (_gate)
                 {
@@ -14145,12 +14416,12 @@ internal static unsafe class VulkanVideoPresenter
                 SetDebugName(ObjectType.RenderPass, initialRenderPass.Handle, $"{debugName} initial-renderpass");
                 SetDebugName(ObjectType.Framebuffer, framebuffer.Handle, $"{debugName} framebuffer");
             }
-            _guestImages.Add(target.Address, resource);
             var createdByteCount = GetTextureByteCount(
                 target.Format,
                 target.Width,
                 target.Height,
                 depth);
+            _guestImages.Add(target.Address, resource);
             lock (_gate)
             {
                 _guestImageExtents[target.Address] = (
@@ -16498,6 +16769,7 @@ internal static unsafe class VulkanVideoPresenter
                 {
                     0 => _hostMovieImageInitialized,
                     1 => _hostMovieChromaImageInitialized,
+                    2 => _hostMovieRgbImageInitialized,
                     _ => false,
                 };
                 var toTransfer = new ImageMemoryBarrier
@@ -16601,6 +16873,11 @@ internal static unsafe class VulkanVideoPresenter
                     {
                         _hostMovieChromaImageInitialized = true;
                         _hostMovieChromaUploadedFrameSerial = texture.HostMovieFrameSerial;
+                    }
+                    else if (texture.HostMoviePlane == 2)
+                    {
+                        _hostMovieRgbImageInitialized = true;
+                        _hostMovieRgbUploadedFrameSerial = texture.HostMovieFrameSerial;
                     }
                 }
             }
@@ -19132,6 +19409,7 @@ internal static unsafe class VulkanVideoPresenter
         private void DestroySwapchainResources()
         {
             DestroyHostMovieImage();
+            DestroyHostMovieRgbImage();
             DestroyPresentEncodeImage();
             for (var slot = 0; slot < _frameUploadBuffers.Length; slot++)
             {

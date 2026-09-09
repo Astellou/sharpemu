@@ -255,6 +255,45 @@ public static class Gen5ShaderScalarEvaluator
         bool resolveVertexInputs = false,
         uint? requiredVertexRecordCount = null)
     {
+        // TryEvaluateCore rents pooled global-memory buffers as it discovers
+        // bindings, collecting them in one list that it only hands to the caller
+        // inside `evaluation` on success. Every one of its ~15 early
+        // `return false` paths would otherwise strand whatever it had already
+        // rented — a per-dispatch 16 MiB leak that OOMs the wait monitor within
+        // seconds on a shader-heavy title. The list is surfaced here so a failed
+        // evaluation still reclaims its buffers.
+        var discoveredBindings = new List<Gen5GlobalMemoryBinding>();
+        var succeeded = TryEvaluateCore(
+            ctx,
+            state,
+            out evaluation,
+            out error,
+            resolveVertexInputs,
+            requiredVertexRecordCount,
+            discoveredBindings);
+        if (!succeeded)
+        {
+            foreach (var binding in discoveredBindings)
+            {
+                if (binding.DataPooled && binding.Data.Length != 0)
+                {
+                    GlobalMemoryPool.Return(binding.Data);
+                }
+            }
+        }
+
+        return succeeded;
+    }
+
+    private static bool TryEvaluateCore(
+        CpuContext ctx,
+        Gen5ShaderState state,
+        out Gen5ShaderEvaluation evaluation,
+        out string error,
+        bool resolveVertexInputs,
+        uint? requiredVertexRecordCount,
+        List<Gen5GlobalMemoryBinding> globalMemoryBindings)
+    {
         evaluation = default!;
         error = string.Empty;
         var scalarRegisters = new uint[ScalarRegisterCount];
@@ -278,7 +317,9 @@ public static class Gen5ShaderScalarEvaluator
         var initialScalarRegisters = (uint[])scalarRegisters.Clone();
 
         var resolved = new List<Gen5ImageBinding>();
-        var globalMemoryBindings = new List<Gen5GlobalMemoryBinding>();
+        // globalMemoryBindings is supplied by the caller so a failed evaluation
+        // can still reclaim the pooled buffers discovered so far.
+        globalMemoryBindings.Clear();
         var globalMemoryByAddress = new Dictionary<(uint ScalarAddress, ulong BaseAddress), Gen5GlobalMemoryBinding>();
         var vertexInputBindings = new List<Gen5VertexInputBinding>();
         // Absolute element address plus record layout identifies the guest
@@ -1209,6 +1250,7 @@ public static class Gen5ShaderScalarEvaluator
     public static void EndGlobalMemoryReadScope()
     {
     }
+
     private static bool TryReadGlobalMemory(
         CpuContext ctx,
         ulong baseAddress,
@@ -1216,6 +1258,7 @@ public static class Gen5ShaderScalarEvaluator
         out int dataLength)
     {
         var rented = GlobalMemoryPool.Rent(MaxGlobalMemoryBindingBytes);
+
         for (var size = MaxGlobalMemoryBindingBytes; size >= 4096; size >>= 1)
         {
             if (ctx.Memory.TryRead(baseAddress, rented.AsSpan(0, size)))
@@ -1976,6 +2019,22 @@ public static class Gen5ShaderScalarEvaluator
             var bit = (int)(right & 63u);
             var isSet = ((wide >> bit) & 1UL) != 0;
             scalarConditionCode = instruction.Opcode == "SBitcmp1B64" ? isSet : !isSet;
+            return true;
+        }
+
+        if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+        {
+            if (instruction.Sources.Count < 2 ||
+                !TryEvaluateScalarOperand64(instruction.Sources[0], registers, ulong.MaxValue, out var lhs64) ||
+                !TryEvaluateScalarOperand64(instruction.Sources[1], registers, ulong.MaxValue, out var rhs64))
+            {
+                error = $"scalar-compare-source64 pc=0x{instruction.Pc:X} op={instruction.Opcode}";
+                return false;
+            }
+
+            scalarConditionCode = instruction.Opcode == "SCmpEqU64"
+                ? lhs64 == rhs64
+                : lhs64 != rhs64;
             return true;
         }
 

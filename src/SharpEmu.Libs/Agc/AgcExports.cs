@@ -6934,7 +6934,10 @@ public static partial class AgcExports
         };
 
         GpuWaitRegistry.Register(dimsAddress, waiter);
-        var gpuState = _submittedGpuStates.GetValue(ctx.Memory, static _ => new SubmittedGpuState());
+        // Must resolve the same shared root every other AGC state accessor uses
+        // (CanonicalMemory), or the wait monitor is armed on an orphan state.
+        var gpuState = _submittedGpuStates.GetValue(
+            CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         EnsureGpuWaitMonitor(ctx, gpuState);
         if (tracePacket)
         {
@@ -12739,7 +12742,26 @@ private static long _indirectDrawProbeCount;
         }
 
         var bindings = evaluation.ImageBindings;
-        var descriptions = new List<string>(bindings.Count);
+        // The per-binding description strings (and their ProbeTexture guest
+        // reads) are only ever logged: once per distinct shader address on
+        // first sighting, or for the single hand-picked deep-trace target.
+        // Building them on every dispatch was ~192k throwaway guest reads per
+        // frame in a compute-driven title (Demon's Souls). Build them only
+        // when they will actually be emitted.
+        var describeBindings = _traceComputeShaderAddress == shaderAddress;
+        if (!describeBindings && _traceAgcShader)
+        {
+            // The only other consumer is the once-per-shader first-sighting
+            // trace below, guarded by _tracedComputeShaders.Add.
+            lock (_submitTraceGate)
+            {
+                describeBindings = !_tracedComputeShaders.Contains(shaderAddress);
+            }
+        }
+
+        var descriptions = describeBindings
+            ? new List<string>(bindings.Count)
+            : null;
         var translatedBindings = new List<TranslatedImageBinding>(bindings.Count);
         var hasStorageBinding = false;
         foreach (var binding in bindings)
@@ -12761,12 +12783,16 @@ private static long _indirectDrawProbeCount;
                     Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
             hasStorageBinding |= isStorage;
 
-            var descriptorState = descriptorValid ? string.Empty : "/invalid-desc";
-            descriptions.Add(
-                $"{binding.Opcode}@0x{binding.Pc:X}:" +
-                $"0x{texture.Address:X16}:{texture.Width}x{texture.Height}:" +
-                $"fmt{texture.Format}/num{texture.NumberType}/tile{texture.TileMode}" +
-                $"{descriptorState}/{ProbeTexture(ctx, texture)}");
+            if (descriptions is not null)
+            {
+                var descriptorState = descriptorValid ? string.Empty : "/invalid-desc";
+                descriptions.Add(
+                    $"{binding.Opcode}@0x{binding.Pc:X}:" +
+                    $"0x{texture.Address:X16}:{texture.Width}x{texture.Height}:" +
+                    $"fmt{texture.Format}/num{texture.NumberType}/tile{texture.TileMode}" +
+                    $"{descriptorState}/{ProbeTexture(ctx, texture)}");
+            }
+
             if (writesStorage && descriptorValid && texture.Address != 0)
             {
                 gpuState.ComputeImageWriters[texture.Address] = new ComputeImageWriter(
@@ -12806,7 +12832,7 @@ private static long _indirectDrawProbeCount;
                 $"base={dispatch.BaseGroupX}x{dispatch.BaseGroupY}x{dispatch.BaseGroupZ} " +
                 $"local={localSizeX}x{localSizeY}x{localSizeZ}" +
                 globalHeads +
-                $" bindings=[{string.Join(',', descriptions)}]");
+                $" bindings=[{string.Join(',', descriptions ?? [])}]");
         }
 
         var writesGlobalMemory = evaluation.GlobalMemoryBindings.Any(static binding =>
@@ -12957,7 +12983,7 @@ private static long _indirectDrawProbeCount;
                     out _);
                 var globalMemoryBuffers =
                     CreateTranslatedComputeGlobalBuffers(evaluation);
-                GuestGpu.Current.SubmitComputeDispatch(
+                var submittedSequence = GuestGpu.Current.SubmitComputeDispatch(
                     shaderAddress,
                     computeShader,
                     textures,
@@ -12978,7 +13004,11 @@ private static long _indirectDrawProbeCount;
                     dispatch.ThreadCountZ);
                 // Vulkan queue order keeps dependent dispatches coherent. CPU visibility is
                 // published by explicit PM4 release/write actions instead of per dispatch.
-                gpuDispatch = true;
+                // A zero sequence means the backend rejected the dispatch (and
+                // has already returned its pooled buffers): treat it as not
+                // handled so the evaluation's own pooled arrays are reclaimed
+                // below instead of leaking.
+                gpuDispatch = submittedSequence != 0;
             }
         }
 
@@ -13035,7 +13065,7 @@ private static long _indirectDrawProbeCount;
                     globalProbes +
                     globalDescriptors +
                     $" opcodes=[{opcodes}]" +
-                    $" bindings=[{string.Join(',', descriptions)}]");
+                    $" bindings=[{string.Join(',', descriptions ?? [])}]");
             }
         }
 
@@ -16361,7 +16391,13 @@ GuestImageWriteTracker.Track(
     public static int DriverUnregisterOwnerAndResources(CpuContext ctx)
     {
         var owner = (uint)ctx[CpuRegister.Rdi];
-        var state = _submittedGpuStates.GetValue(ctx.Memory, static _ => new SubmittedGpuState());
+        // sceAgcDriverRegisterOwner registers into CanonicalMemory(ctx.Memory);
+        // reading a bare per-thread ctx.Memory here resolves a DIFFERENT empty
+        // SubmittedGpuState so the owner is never found -> ERROR_INVALID_ARGUMENT
+        // -> the guest's cleanup retries forever (~38M calls/run, ~1 GB/s of
+        // rejected-dispatch churn -> OOM). Match the register side.
+        var state = _submittedGpuStates.GetValue(
+            CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         int resources;
         lock (state.Gate)
         {
@@ -16386,7 +16422,8 @@ GuestImageWriteTracker.Track(
     public static int DriverUnregisterAllResourcesForOwner(CpuContext ctx)
     {
         var owner = (uint)ctx[CpuRegister.Rdi];
-        var state = _submittedGpuStates.GetValue(ctx.Memory, static _ => new SubmittedGpuState());
+        var state = _submittedGpuStates.GetValue(
+            CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         int resources;
         lock (state.Gate)
         {

@@ -299,6 +299,11 @@ internal sealed unsafe class FfmpegVideoDecoder : IMediaFrameDecoder
                 return false;
             }
 
+            // The Demon's Souls logo movie is 4K yuv420p and gets scaled down
+            // to the swapchain size. FAST_BILINEAR ringed hard on the flare's
+            // bright radial gradients; LANCZOS + full-chroma interpolation +
+            // accurate rounding gives a clean 2:1 downscale and chroma
+            // upsample. The movie is a few hundred frames so cost is moot.
             _swsContext = ffmpeg.sws_getCachedContext(
                 _swsContext,
                 _frame->width,
@@ -307,7 +312,10 @@ internal sealed unsafe class FfmpegVideoDecoder : IMediaFrameDecoder
                 (int)Width,
                 (int)Height,
                 AVPixelFormat.AV_PIX_FMT_BGRA,
-                ffmpeg.SWS_FAST_BILINEAR,
+                ffmpeg.SWS_LANCZOS |
+                    ffmpeg.SWS_FULL_CHR_H_INT |
+                    ffmpeg.SWS_FULL_CHR_H_INP |
+                    ffmpeg.SWS_ACCURATE_RND,
                 null,
                 null,
                 null);
@@ -315,6 +323,35 @@ internal sealed unsafe class FfmpegVideoDecoder : IMediaFrameDecoder
             {
                 ffmpeg.av_frame_unref(_frame);
                 return false;
+            }
+
+            // Honour the stream's tagged colorimetry (this .bk2 is SMPTE170M /
+            // BT.601, full-range). sws otherwise assumes BT.601 limited, which
+            // is close here but wrong for the range. Only guess when untagged.
+            var srcColorspace = _frame->colorspace != AVColorSpace.AVCOL_SPC_UNSPECIFIED
+                ? _frame->colorspace
+                : (_frame->height > 576
+                    ? AVColorSpace.AVCOL_SPC_BT709
+                    : AVColorSpace.AVCOL_SPC_BT470BG);
+            var srcFullRange = _frame->color_range == AVColorRange.AVCOL_RANGE_JPEG ? 1 : 0;
+            var coefficients = ffmpeg.sws_getCoefficients((int)srcColorspace);
+            if (coefficients is not null)
+            {
+                var table = new int_array4();
+                for (uint index = 0; index < 4; index++)
+                {
+                    table[index] = coefficients[index];
+                }
+
+                ffmpeg.sws_setColorspaceDetails(
+                    _swsContext,
+                    in table,
+                    srcFullRange,
+                    in table,
+                    1, // dstRange: full-range RGB
+                    0, // brightness
+                    1 << 16, // contrast (1.0 in 16.16)
+                    1 << 16); // saturation
             }
 
             fixed (byte* destinationPointer = destination)

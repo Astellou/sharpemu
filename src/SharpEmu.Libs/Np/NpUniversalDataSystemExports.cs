@@ -71,6 +71,19 @@ public static class NpUniversalDataSystemExports
     }
 
     [SysAbiExport(
+        Nid = "su7jW3VDDb4",
+        ExportName = "sceNpUniversalDataSystemGetMemoryStat",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceNpUniversalDataSystem")]
+    public static int NpUniversalDataSystemGetMemoryStat(CpuContext ctx)
+    {
+        // Undocumented internal helper the trophy/activity-feed subsystem polls
+        // during boot; an unresolved import here (returning the NOT_FOUND
+        // sentinel) drives Demon's Souls into a multi-million-call retry loop.
+        return ctx.SetReturn(0, typeof(long));
+    }
+
+    [SysAbiExport(
         Nid = "p+GcLqwpL9M",
         ExportName = "sceNpUniversalDataSystemCreateEvent",
         Target = Generation.Gen4 | Generation.Gen5,

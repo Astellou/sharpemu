@@ -227,6 +227,10 @@ public static partial class Gen5MslTranslator
                     $"pack_float_to_snorm2x16(float2({F(instruction, 0)}, {F(instruction, 1)}))",
                 "VCvtPknormU16F32" =>
                     $"pack_float_to_unorm2x16(float2({F(instruction, 0)}, {F(instruction, 1)}))",
+                "VCvtPkI16I32" =>
+                    AsUInt($"((clamp(as_type<int>({RawSource(instruction, 0)}), -32768, 32767) & 0xFFFF) | (clamp(as_type<int>({RawSource(instruction, 1)}), -32768, 32767) << 16))"),
+                "VCvtPkU16U32" =>
+                    $"((min({RawSource(instruction, 0)}, 0xFFFFu)) | (min({RawSource(instruction, 1)}, 0xFFFFu) << 16))",
 
                 // ---- integer arithmetic ----
                 "VAddU32" or "VAddI32" =>
@@ -239,6 +243,10 @@ public static partial class Gen5MslTranslator
                 // multiply (only the Hi/Mad forms mask); mirror it exactly.
                 "VMulLoU32" or "VMulLoI32" or "VMulU32U24" =>
                     $"(({RawSource(instruction, 0)}) * ({RawSource(instruction, 1)}))",
+                "VMulI32I24" =>
+                    AsUInt($"((as_type<int>({RawSource(instruction, 0)}) << 8 >> 8) * (as_type<int>({RawSource(instruction, 1)}) << 8 >> 8))"),
+                "VMulHiI32I24" =>
+                    AsUInt($"mulhi(as_type<int>({RawSource(instruction, 0)}) << 8 >> 8, as_type<int>({RawSource(instruction, 1)}) << 8 >> 8)"),
                 "VMulHiU32" =>
                     $"mulhi({RawSource(instruction, 0)}, {RawSource(instruction, 1)})",
                 "VMulHiU32U24" =>
@@ -284,6 +292,8 @@ public static partial class Gen5MslTranslator
                     $"((({RawSource(instruction, 0)}) & ({RawSource(instruction, 1)})) | ({RawSource(instruction, 2)}))",
                 "VOr3U32" =>
                     $"(({RawSource(instruction, 0)}) | ({RawSource(instruction, 1)}) | ({RawSource(instruction, 2)}))",
+                "VXor3B32" =>
+                    $"(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}) ^ ({RawSource(instruction, 2)}))",
                 "VLshlOrU32" =>
                     $"((({RawSource(instruction, 0)}) << (({RawSource(instruction, 1)}) & 31u)) | ({RawSource(instruction, 2)}))",
                 "VLshlB32" => $"(({RawSource(instruction, 0)}) << (({RawSource(instruction, 1)}) & 31u))",
