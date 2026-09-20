@@ -61,15 +61,32 @@ public static partial class ImageRequestBuilders
     private static bool HtileStencilCompatible(bool hasStencil, bool hasHtile, bool htileStencilDisabled) => !hasStencil || !hasHtile || htileStencilDisabled;
 
     // Builds the request for the bound depth target. Null when no depth or stencil state is active.
-    public static DepthTargetResolution? DepthTarget(in DepthTargetWords depthWords, IImageFormatSupport device)
+    public static DepthTargetResolution? DepthTarget(in DepthTargetWords depthWords, IImageFormatSupport device) =>
+        DepthTargetCore(in depthWords, device, copyMode: false, writeBuffer: false);
+
+    // Builds the source or destination image used by DB_RENDER_OVERRIDE depth/stencil copies.
+    public static DepthTargetResolution? DepthTargetCopy(in DepthTargetWords depthWords, IImageFormatSupport device, bool writeBuffer) =>
+        DepthTargetCore(in depthWords, device, copyMode: true, writeBuffer);
+
+    private static DepthTargetResolution? DepthTargetCore(in DepthTargetWords depthWords, IImageFormatSupport device, bool copyMode, bool writeBuffer)
     {
         var hasStencil = depthWords.StencilFormat != GuestStencilFormat.Invalid;
-        var depthActive = depthWords.DepthTestEnabled || depthWords.DepthWriteEnabled || depthWords.DepthBoundsEnabled || depthWords.DepthClearEnabled || depthWords.CopyDepthToColor;
-        var stencilActive = hasStencil && (depthWords.StencilTestEnabled || depthWords.StencilClearEnabled || depthWords.CopyStencilToColor);
-        if (!depthActive && !stencilActive)
+        if (!copyMode)
         {
-            return null;
+            var depthActive = depthWords.DepthTestEnabled || depthWords.DepthWriteEnabled || depthWords.DepthBoundsEnabled || depthWords.DepthClearEnabled || depthWords.CopyDepthToColor;
+            var stencilActive = hasStencil && (depthWords.StencilTestEnabled || depthWords.StencilClearEnabled || depthWords.CopyStencilToColor);
+            if (!depthActive && !stencilActive)
+            {
+                if (Rendering.RenderTrace.Enabled)
+                {
+                    Rendering.RenderTrace.Write("DepthAttachmentRejected reason=depth-and-stencil-inactive");
+                }
+                return null;
+            }
         }
+
+        var depthAddress = copyMode && writeBuffer ? depthWords.ZWriteBase : depthWords.ZReadBase;
+        var stencilAddress = copyMode && writeBuffer ? depthWords.StencilWriteBase : depthWords.StencilReadBase;
 
         // The size register is independent state; a zero encoding alone must not produce an attachment.
         var attachmentUnbound =
@@ -79,6 +96,10 @@ public static partial class ImageRequestBuilders
             depthWords.StencilWriteBase == 0 && depthWords.HtileBase == 0 && !depthWords.HtileAcceleration && depthWords.ShadingRateEncoding == 0 && depthWords.XMax == 0 && depthWords.YMax == 0;
         if (attachmentUnbound)
         {
+            if (Rendering.RenderTrace.Enabled)
+            {
+                Rendering.RenderTrace.Write("DepthAttachmentRejected reason=unbound-register-state");
+            }
             return null;
         }
 
@@ -97,7 +118,7 @@ public static partial class ImageRequestBuilders
 
         if (depthWords.CopyDepthToColor || depthWords.CopyStencilToColor || depthWords.CopyCentroid || depthWords.CopySample != 0 || depthWords.ZExpClear || depthWords.StencilExpClear ||
             depthWords.ZPartiallyResident || depthWords.StencilPartiallyResident || depthWords.MaxMip != 0 || depthWords.ViewMipLevel != 0 || unsupportedShadingRate ||
-            depthWords.ZReadBase == 0 || (!depthWords.DepthWriteDisabled && depthWords.ZWriteBase != depthWords.ZReadBase) || (depthWords.ZReadBase & 0xFFFF) != 0 || depthWords.DepthCompare > 7)
+            depthAddress == 0 || (!copyMode && !depthWords.DepthWriteDisabled && depthWords.ZWriteBase != depthWords.ZReadBase) || (depthAddress & 0xFFFF) != 0 || depthWords.DepthCompare > 7)
         {
             throw SubmissionScheduler.Fatal(
                 $"The depth register state is not supported: zInfo=0x{depthWords.ZInfo:X8} stencilInfo=0x{depthWords.StencilInfo:X8} view=0x{depthWords.DepthView:X8} " +
@@ -107,13 +128,13 @@ public static partial class ImageRequestBuilders
         if (hasStencil)
         {
             if (depthWords.StencilFormat != GuestStencilFormat.Stencil8UInt || !HtileStencilCompatible(hasStencil, hasHtile, depthWords.HtileStencilDisabled) ||
-                depthWords.StencilReadBase == 0 || (!depthWords.StencilWriteDisabled && depthWords.StencilWriteBase != depthWords.StencilReadBase) || (depthWords.StencilReadBase & 0xFFFF) != 0)
+                stencilAddress == 0 || (!copyMode && !depthWords.StencilWriteDisabled && depthWords.StencilWriteBase != depthWords.StencilReadBase) || (stencilAddress & 0xFFFF) != 0)
             {
                 throw SubmissionScheduler.Fatal(
                     $"The stencil attachment state is not supported: stencilInfo=0x{depthWords.StencilInfo:X8} htile={hasHtile} read=0x{depthWords.StencilReadBase:X16} write=0x{depthWords.StencilWriteBase:X16}.");
             }
         }
-        else if (depthWords.StencilReadBase != 0 || depthWords.StencilWriteBase != 0)
+        else if (!copyMode && (depthWords.StencilReadBase != 0 || depthWords.StencilWriteBase != 0))
         {
             throw SubmissionScheduler.Fatal($"Stencil state is set without an active stencil attachment: read=0x{depthWords.StencilReadBase:X16} write=0x{depthWords.StencilWriteBase:X16}.");
         }
@@ -169,20 +190,20 @@ public static partial class ImageRequestBuilders
         var depthBackingSize = (ulong)depthSize.Size * view.ImageLayers;
         var stencilBackingSize = (ulong)stencilSize.Size * view.ImageLayers;
         var htileBackingSize = (ulong)htileSize.Size * view.ImageLayers;
-        if (!new GuestSpan(depthWords.ZReadBase, depthBackingSize).IsValid ||
-            (hasStencil && !new GuestSpan(depthWords.StencilReadBase, stencilBackingSize).IsValid) ||
+        if (!new GuestSpan(depthAddress, depthBackingSize).IsValid ||
+            (hasStencil && !new GuestSpan(stencilAddress, stencilBackingSize).IsValid) ||
             (hasHtile && !new GuestSpan(depthWords.HtileBase, htileBackingSize).IsValid))
         {
             throw SubmissionScheduler.Fatal(
-                $"The layered depth backing range is invalid: depth=0x{depthWords.ZReadBase:X16}+0x{depthBackingSize:X} stencil=0x{depthWords.StencilReadBase:X16}+0x{stencilBackingSize:X} htile=0x{depthWords.HtileBase:X16}+0x{htileBackingSize:X}.");
+                $"The layered depth backing range is invalid: depth=0x{depthAddress:X16}+0x{depthBackingSize:X} stencil=0x{stencilAddress:X16}+0x{stencilBackingSize:X} htile=0x{depthWords.HtileBase:X16}+0x{htileBackingSize:X}.");
         }
 
-        var stencilAddress = hasStencil ? depthWords.StencilReadBase : 0;
+        stencilAddress = hasStencil ? stencilAddress : 0;
         stencilBackingSize = hasStencil ? stencilBackingSize : 0;
         var htileAddress = hasHtile ? depthWords.HtileBase : 0;
         htileBackingSize = hasHtile ? htileBackingSize : 0;
         var description = ImageDescription.Create();
-        description.Data = new GuestSpan(depthWords.ZReadBase, depthBackingSize);
+        description.Data = new GuestSpan(depthAddress, depthBackingSize);
         description.Stencil = new GuestSpan(stencilAddress, stencilBackingSize);
         description.PixelFormat = format;
         description.GuestFormat = rule.GuestFormat;
@@ -203,7 +224,7 @@ public static partial class ImageRequestBuilders
         var request = new ImageRequest(description, viewDescription, ImageRole.DepthTarget);
         return new DepthTargetResolution(
             request, format, width, height, samples, hasStencil, hasHtile,
-            depthWords.ZReadBase, depthBackingSize, stencilAddress, stencilBackingSize, htileAddress, htileBackingSize,
+            depthAddress, depthBackingSize, stencilAddress, stencilBackingSize, htileAddress, htileBackingSize,
             depthWords.DepthClearEnabled, hasStencil && depthWords.StencilClearEnabled && !depthWords.StencilWriteDisabled, depthWords.DepthWriteDisabled, depthWords.StencilWriteDisabled);
     }
 

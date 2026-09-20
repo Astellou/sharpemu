@@ -16,7 +16,6 @@ public sealed class VertexTableMetadata
     public int VertexAttributeRegister { get; init; } = NoRegister;
     public uint[] InputSemantics { get; init; } = [];
 }
-
 // One packed input semantic word of a shader header.
 public readonly record struct ShaderInputSemantic(uint Word)
 {
@@ -77,7 +76,11 @@ public static class VertexInputResolver
     private const uint DirectResourceCount = DirectResourceVertexAttributeTable + 1;
     private const ulong DirectResourceOffsetField = 0x00;
     private const ulong DirectResourceCountField = 0x2C;
-    private const uint IdentityDestinationSelect = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+    private static uint DestinationSelectForChannels(uint channels) =>
+        4u |
+        ((channels > 1 ? 5u : 0u) << 3) |
+        ((channels > 2 ? 6u : 0u) << 6) |
+        ((channels > 3 ? 7u : 1u) << 9);
 
     private sealed class ResolvedBuffer
     {
@@ -259,10 +262,13 @@ public static class VertexInputResolver
             var descriptor = BufferDescriptorWords.From(descriptorWords);
             if (format != 0)
             {
-                var bufferFormat = VertexAttributeFormat.ToBufferFormat(format);
+                var bufferFormat = format >> 2;
+                var channels = (format & 0x3u) + 1u;
                 descriptor = descriptor with
                 {
-                    Word3 = (descriptor.Word3 & ~((0x7Fu << 12) | 0xFFFu)) | ((bufferFormat & 0x7Fu) << 12) | IdentityDestinationSelect,
+                    Word3 = (descriptor.Word3 & ~((0x7Fu << 12) | 0xFFFu)) |
+                            ((bufferFormat & 0x7Fu) << 12) |
+                            DestinationSelectForChannels(channels),
                 };
             }
 
@@ -364,31 +370,4 @@ public static class VertexInputResolver
 
         return result;
     }
-}
-
-// The vertex attribute formats of the guest tables and the buffer formats they select.
-public static class VertexAttributeFormat
-{
-    private static readonly Dictionary<uint, uint> _bufferFormats = new()
-    {
-        [0] = 0,
-        [4] = 1, [8] = 2, [12] = 3, [16] = 4, [20] = 5, [24] = 6,
-        [28] = 7, [32] = 8, [36] = 9, [40] = 10, [44] = 11, [48] = 12, [52] = 13,
-        [57] = 14, [61] = 15, [65] = 16, [69] = 17, [73] = 18, [77] = 19,
-        [80] = 20, [84] = 21, [88] = 22,
-        [93] = 23, [97] = 24, [101] = 25, [105] = 26, [109] = 27, [113] = 28, [117] = 29,
-        [122] = 30, [126] = 31, [130] = 32, [134] = 33, [138] = 34, [142] = 35, [146] = 36,
-        [150] = 37, [154] = 38, [158] = 39, [162] = 40, [166] = 41, [170] = 42, [174] = 43,
-        [179] = 44, [183] = 45, [187] = 46, [191] = 47, [195] = 48, [199] = 49,
-        [203] = 50, [207] = 51, [211] = 52, [215] = 53, [219] = 54, [223] = 55,
-        [227] = 56, [231] = 57, [235] = 58, [239] = 59, [243] = 60, [247] = 61,
-        [249] = 62, [253] = 63, [257] = 64,
-        [263] = 65, [267] = 66, [271] = 67, [275] = 68, [279] = 69, [283] = 70, [287] = 71,
-        [290] = 72, [294] = 73, [298] = 74,
-        [303] = 75, [307] = 76, [311] = 77,
-    };
-
-    // An unknown attribute format is kept as the buffer format value it names.
-    public static uint ToBufferFormat(uint attributeFormat) =>
-        _bufferFormats.TryGetValue(attributeFormat, out var bufferFormat) ? bufferFormat : attributeFormat;
 }

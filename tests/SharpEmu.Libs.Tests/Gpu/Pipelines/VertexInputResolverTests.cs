@@ -29,6 +29,9 @@ public sealed class VertexInputResolverTests : IDisposable
     private const uint BufferFormat32x2Float = 64;
     private const uint BufferFormat32x4Float = 77;
     private const uint IdentitySelect = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+    private const uint X001Select = 4 | (0 << 3) | (0 << 6) | (1 << 9);
+    private const uint XY01Select = 4 | (5 << 3) | (0 << 6) | (1 << 9);
+    private const uint XYZ1Select = 4 | (5 << 3) | (6 << 6) | (1 << 9);
 
     private readonly FatalScope _fatal = new();
     private readonly FakeCpuMemory _memory = new(MemoryBase, 0x1_0000);
@@ -202,7 +205,7 @@ public sealed class VertexInputResolverTests : IDisposable
         Assert.Equal(16u, resource.Descriptor.Stride);
         Assert.Equal(3u, resource.Descriptor.RecordCount);
         Assert.Equal(BufferFormat32x2Float, resource.Descriptor.Format);
-        Assert.Equal(IdentitySelect, resource.Descriptor.DestinationSelectXYZW);
+        Assert.Equal(XY01Select, resource.Descriptor.DestinationSelectXYZW);
         Assert.Equal(-1, resource.BufferIndex);
     }
 
@@ -241,15 +244,20 @@ public sealed class VertexInputResolverTests : IDisposable
         Assert.Equal(BufferFormat32x2Float, resources[1].Descriptor.Format);
     }
 
-    [Fact]
-    public void ApplySemantics_UnknownAttributeFormat_IsKeptAsTheBufferFormatValue()
+    [Theory]
+    [InlineData(88u, 22u, X001Select)]
+    [InlineData(257u, 64u, XY01Select)]
+    [InlineData(298u, 74u, XYZ1Select)]
+    [InlineData(311u, 77u, IdentitySelect)]
+    public void ApplySemantics_DecodesPackedFormatsWithChannelSwizzle(uint attributeFormat, uint bufferFormat, uint destinationSelect)
     {
-        WriteWord(AttributeTable, AttributeWord(0, 64, 0));
+        WriteWord(AttributeTable, AttributeWord(0, attributeFormat, 0));
         WriteBuffer(0, StreamBase, 8, 1, BufferFormat32x4Float);
 
         var resource = Assert.Single(VertexInputResolver.ApplySemantics(_context, [SemanticWord(0, 0, 2)], AttributeTable, BufferTable, ShaderAddress));
 
-        Assert.Equal(64u, resource.Descriptor.Format);
+        Assert.Equal(bufferFormat, resource.Descriptor.Format);
+        Assert.Equal(destinationSelect, resource.Descriptor.DestinationSelectXYZW);
     }
 
     [Theory]
@@ -346,13 +354,4 @@ public sealed class VertexInputResolverTests : IDisposable
         Assert.Contains("records=4/5", fatal.Message);
     }
 
-    [Fact]
-    public void AttributeFormats_MapToTheBufferFormatsOfTheTable()
-    {
-        Assert.Equal(0u, VertexAttributeFormat.ToBufferFormat(0));
-        Assert.Equal(1u, VertexAttributeFormat.ToBufferFormat(4));
-        Assert.Equal(BufferFormat32x2Float, VertexAttributeFormat.ToBufferFormat(AttributeFormat32x2Float));
-        Assert.Equal(BufferFormat32x4Float, VertexAttributeFormat.ToBufferFormat(311));
-        Assert.Equal(999u, VertexAttributeFormat.ToBufferFormat(999));
-    }
 }

@@ -267,7 +267,7 @@ public static partial class AgcExports
     public static int DriverUnregisterOwnerAndResources(CpuContext ctx)
     {
         var owner = (uint)ctx[CpuRegister.Rdi];
-        var state = _submittedGpuStates.GetValue(ctx.Memory, static _ => new SubmittedGpuState());
+        var state = _submittedGpuStates.GetValue(CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         int resources;
         lock (state.Gate)
         {
@@ -292,7 +292,7 @@ public static partial class AgcExports
     public static int DriverUnregisterAllResourcesForOwner(CpuContext ctx)
     {
         var owner = (uint)ctx[CpuRegister.Rdi];
-        var state = _submittedGpuStates.GetValue(ctx.Memory, static _ => new SubmittedGpuState());
+        var state = _submittedGpuStates.GetValue(CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         int resources;
         lock (state.Gate)
         {

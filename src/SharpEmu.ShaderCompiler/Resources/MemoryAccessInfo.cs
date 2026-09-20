@@ -260,9 +260,16 @@ public sealed class MemoryAccessTable
         var atomic = opcode.StartsWith("ImageAtomic", StringComparison.Ordinal);
         var store = opcode.StartsWith("ImageStore", StringComparison.Ordinal);
         var sampled = opcode.StartsWith("ImageSample", StringComparison.Ordinal) ||
-            opcode.StartsWith("ImageGather", StringComparison.Ordinal);
+            opcode.StartsWith("ImageGather", StringComparison.Ordinal) ||
+            opcode == "ImageGetLod";
         var compare = (opcode.StartsWith("ImageSampleC", StringComparison.Ordinal) && !opcode.StartsWith("ImageSampleCd", StringComparison.Ordinal)) ||
             opcode.StartsWith("ImageGather4C", StringComparison.Ordinal);
+        var mimgOpcode = instruction.Words.Count != 0
+            ? ((instruction.Words[0] >> 18) & 0x7F) | ((instruction.Words[0] & 1) << 7)
+            : 0u;
+        var adjust = mimgOpcode is
+            0xA0 or 0xA1 or 0xA5 or 0xA6 or 0xA8 or 0xA9 or 0xAD or 0xAE or
+            0xB0 or 0xB1 or 0xB5 or 0xB6 or 0xB8 or 0xB9 or 0xBD or 0xBE;
         return new MemoryAccessInfo
         {
             Pc = instruction.Pc,
@@ -273,7 +280,9 @@ public sealed class MemoryAccessTable
             NeedsSampler = sampled,
             Dmask = control.Dmask,
             ImageDimension = DecodeImageDimension(control.Dimension),
-            ImageSampleFlags = compare ? ImageSampleFlags.Compare : ImageSampleFlags.None,
+            ImageSampleFlags =
+                (compare ? ImageSampleFlags.Compare : ImageSampleFlags.None) |
+                (adjust ? ImageSampleFlags.Adjust : ImageSampleFlags.None),
             ImageHasMip = opcode is "ImageLoadMip" or "ImageStoreMip",
             ImageR128 = instruction.Words.Count != 0 && ((instruction.Words[0] >> 15) & 1) != 0,
             Glc = control.Glc,

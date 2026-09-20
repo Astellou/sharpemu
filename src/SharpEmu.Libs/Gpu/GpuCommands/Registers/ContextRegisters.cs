@@ -192,6 +192,22 @@ public struct ColorControlRegisters
     };
 }
 
+public struct DepthRenderOverrideRegisters
+{
+    public bool ForceZValid;
+    public bool ForceZDirty;
+    public bool ForceStencilValid;
+    public bool ForceStencilDirty;
+
+    public static DepthRenderOverrideRegisters Decode(uint value) => new()
+    {
+        ForceZValid = (value & 0x2000_0000u) != 0,
+        ForceZDirty = (value & 0x0800_0000u) != 0,
+        ForceStencilValid = (value & 0x4000_0000u) != 0,
+        ForceStencilDirty = (value & 0x1000_0000u) != 0,
+    };
+}
+
 public struct ScanModeRegisters
 {
     public bool MultisampleEnable;
@@ -348,6 +364,7 @@ public sealed class ContextRegisters
     public ScreenViewportRegisters ScreenViewport = new();
     public ClipControlRegisters Clip;
     public ColorControlRegisters ColorControl = new();
+    public DepthRenderOverrideRegisters DepthRenderOverride;
     public ScanModeRegisters ScanMode = new();
     public SampleLocationRegisters SampleLocations = new();
     public AntialiasingConfigRegisters AntialiasingConfig;

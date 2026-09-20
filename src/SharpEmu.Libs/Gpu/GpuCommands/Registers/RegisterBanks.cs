@@ -57,6 +57,7 @@ public sealed class RegisterBanks
 
     public void ApplyContextState(ContextStateOperation operation)
     {
+        var previousViewport = Context.ScreenViewport.Viewports[0];
         switch (operation)
         {
             case ContextStateOperation.Clear:
@@ -84,6 +85,13 @@ public sealed class RegisterBanks
                 break;
             default:
                 throw Fatal($"The context state operation is unknown: operation={(uint)operation}.");
+        }
+        if (Rendering.RenderTrace.Enabled)
+        {
+            var currentViewport = Context.ScreenViewport.Viewports[0];
+            Rendering.RenderTrace.Write(
+                $"ContextState operation={operation} previousZScale={previousViewport.ZScale} previousZOffset={previousViewport.ZOffset} " +
+                $"zScale={currentViewport.ZScale} zOffset={currentViewport.ZOffset}");
         }
     }
 

@@ -208,6 +208,38 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
     private const uint BoundDescriptor = (Format32x4Float << 12) | IdentitySwizzle;
     private const float Half = 0.5f;
 
+    public static IEnumerable<object[]> DescriptorStoreCases()
+    {
+        foreach (var testCase in TypedStoreCases())
+        {
+            var format = (uint)testCase[0];
+            testCase[1] = (uint)testCase[1] == 0 ? 0u : (format << 12) | IdentitySwizzle;
+            yield return testCase;
+        }
+
+        yield return [50u, (50u << 12) | IdentitySwizzle, 7u, (uint)MemoryOffset,
+            Floats(1f, Half, 0f, 1f), Bytes(0x03, 0x08, 0xC0, 0xFF)];
+    }
+
+    [Theory]
+    [MemberData(nameof(DescriptorStoreCases))]
+    public void FormattedBufferStores_UseDescriptorConversionWithoutChangingNeighborBytes(
+        uint format, uint descriptorWord3, uint opcode, uint offset, uint[] sources, byte[]? expectedBytes)
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan, shaderInt64: true)) return;
+
+        var initial = CreateInput();
+        for (var index = 0; index < sources.Length; index++)
+            WriteWord(initial, index * 4, sources[index]);
+        var expected = (byte[])initial.Clone();
+        initial.AsSpan(0, 64).CopyTo(expected.AsSpan(RegisterOutputOffset, 64));
+        expectedBytes?.CopyTo(expected.AsSpan((int)offset));
+
+        var shader = CompileTypedShader(format, descriptorWord3, offset, opcode, SourceRegister, typed: false);
+        Assert.Equal(expected, RunOnce(vulkan, shader, initial));
+    }
+
     public static IEnumerable<object[]> TypedStoreCases()
     {
         // instruction format, descriptor word 3, opcode (4 = X .. 7 = XYZW), byte offset,
@@ -424,7 +456,7 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
     private static ShaderFixture CompileTypedShader(uint instructionFormat, uint descriptorWord3, uint offset) =>
         CompileTypedShader(instructionFormat, descriptorWord3, offset, opcode: 3, DestinationRegister);
 
-    private static ShaderFixture CompileTypedShader(uint instructionFormat, uint descriptorWord3, uint offset, uint opcode, uint dataRegister)
+    private static ShaderFixture CompileTypedShader(uint instructionFormat, uint descriptorWord3, uint offset, uint opcode, uint dataRegister, bool typed = true)
     {
         const uint descriptorRegister = 16;
         var words = new List<uint>();
@@ -434,9 +466,12 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
             words.Add(0x8000_0000 | ((SourceRegister + group * 4) << 8));
         }
         var accessPc = checked((uint)words.Count * 4);
-        // tbuffer_load/store_format_* v[data..], off, s[16:19], 0 format:instructionFormat offset:offset
-        words.Add(0xE800_0000u | (instructionFormat << 19) | (opcode << 16) | offset);
-        words.Add((0x80u << 24) | ((descriptorRegister / 4) << 16) | (dataRegister << 8));
+        // Keep the extended opcode bit clear; use the scalar operand for an odd byte offset.
+        words.Add(typed
+            ? 0xE800_0000u | (instructionFormat << 19) | (opcode << 16) | offset
+            : 0xE000_0000u | (opcode << 18) | (offset & ~1u));
+        var scalarOffsetOperand = typed ? 0x80u : 0x80u + (offset & 1u);
+        words.Add((scalarOffsetOperand << 24) | ((descriptorRegister / 4) << 16) | (dataRegister << 8));
         for (uint group = 0; group < 4; group++)
         {
             words.Add(0xE078_0000 | (RegisterOutputOffset + group * 16));
@@ -447,8 +482,8 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
         var program = DecodeProgram(words);
         var access = Assert.Single(program.Instructions, instruction => instruction.Pc == accessPc);
         var control = Assert.IsType<Gen5BufferMemoryControl>(access.Control);
-        Assert.True(control.Typed);
-        Assert.Equal(instructionFormat, control.TypedFormat);
+        Assert.Equal(typed, control.Typed);
+        Assert.Equal(typed ? instructionFormat : 0u, control.TypedFormat);
         Assert.Equal(descriptorRegister, control.ScalarResource);
 
         var scalars = BaseScalars();

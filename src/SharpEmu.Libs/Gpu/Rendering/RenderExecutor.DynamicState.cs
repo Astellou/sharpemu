@@ -117,7 +117,7 @@ public sealed partial class RenderExecutor
             viewportY,
             viewportWidth,
             viewportHeight,
-            viewport.ZOffset,
+            viewport.ZOffset - (context.Clip.DirectXClipSpace ? 0f : viewport.ZScale),
             viewport.ZScale + viewport.ZOffset,
             scissor,
             lineWidth,

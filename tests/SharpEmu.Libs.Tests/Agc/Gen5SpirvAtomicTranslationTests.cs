@@ -35,6 +35,30 @@ public sealed class Gen5SpirvAtomicTranslationTests
         Assert.Contains((ushort)SpirvOp.AtomicIIncrement, opcodes);
     }
 
+    [Theory]
+    [InlineData(0xE0FC4000u, SpirvOp.FOrdLessThan)]
+    [InlineData(0xE1004000u, SpirvOp.FOrdGreaterThan)]
+    public void BufferFloatAtomics_EmitCompareExchangeLoop(uint word, SpirvOp compareOp)
+    {
+        var opcodes = CompileComputeOpcodes(
+            [word, 0x80000100],
+            BufferDescriptorRegisters());
+
+        Assert.Contains((ushort)SpirvOp.AtomicLoad, opcodes);
+        Assert.Contains((ushort)SpirvOp.AtomicCompareExchange, opcodes);
+        Assert.Contains((ushort)compareOp, opcodes);
+    }
+
+    [Fact]
+    public void BufferAtomicOrX2_EmitsAtomicOr()
+    {
+        var opcodes = CompileComputeOpcodes(
+            [0xE1684000, 0x80000100],
+            BufferDescriptorRegisters());
+
+        Assert.Contains((ushort)SpirvOp.AtomicOr, opcodes);
+    }
+
     [Fact]
     public void DataShareAtomics_EmitAtomicOpcodes()
     {

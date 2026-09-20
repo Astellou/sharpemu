@@ -333,22 +333,38 @@ internal sealed class ShaderProgramCache
     private static ShaderVertexInput[] BuildVertexInputs(EmbeddedVertexFetchPlan fetch, VertexInputInfo info, ShaderSource source)
     {
         var inputs = new List<ShaderVertexInput>();
-        var aliases = new Dictionary<int, List<uint>>();
+        var inputByLocation = new Dictionary<int, int>();
         foreach (var load in fetch.Loads)
         {
-            if (aliases.TryGetValue(load.AttributeId, out var aliasPcs))
+            var location = -1;
+            if ((uint)load.AttributeId < (uint)info.Attributes.Length &&
+                info.Attributes[load.AttributeId].AttributeId == load.AttributeId)
             {
-                aliasPcs.Add(load.Pc);
-                continue;
+                location = load.AttributeId;
             }
 
-            var location = -1;
-            for (var index = 0; index < info.Attributes.Length; index++)
+            if (location < 0)
             {
-                if (info.Attributes[index].AttributeId == load.AttributeId)
+                for (var index = 0; index < info.Attributes.Length; index++)
                 {
-                    location = index;
-                    break;
+                    if (info.Attributes[index].AttributeId == load.AttributeId &&
+                        info.Attributes[index].RegisterCount >= load.Components)
+                    {
+                        location = index;
+                        break;
+                    }
+                }
+            }
+
+            if (location < 0)
+            {
+                for (var index = 0; index < info.Attributes.Length; index++)
+                {
+                    if (info.Attributes[index].AttributeId == load.AttributeId)
+                    {
+                        location = index;
+                        break;
+                    }
                 }
             }
 
@@ -365,9 +381,55 @@ internal sealed class ShaderProgramCache
                 numberFormat = decodedNumberFormat;
             }
 
-            aliasPcs = [];
-            aliases.Add(load.AttributeId, aliasPcs);
-            inputs.Add(new ShaderVertexInput(load.Pc, (uint)location, load.Components, numberFormat, attribute.FetchIndex != 0, aliasPcs));
+            var requiredComponents = 0u;
+            var destinationSelect = attribute.Descriptor.DestinationSelectXYZW;
+            for (uint component = 0; component < load.Components; component++)
+            {
+                var selector = (destinationSelect >> (int)(component * 3)) & 0x7u;
+                if (selector is >= 4u and <= 7u)
+                {
+                    requiredComponents = Math.Max(requiredComponents, selector - 3u);
+                    continue;
+                }
+
+                if (selector is 0u or 1u)
+                {
+                    continue;
+                }
+
+                throw SubmissionScheduler.Fatal(
+                    $"The vertex program uses an unsupported attribute destination selector: hash=0x{source.Hash:X16} shader=0x{source.Address:X16} attribute={load.AttributeId} pc=0x{load.Pc:X} component={component} selector={selector}.");
+            }
+
+            if (requiredComponents == 0)
+            {
+                throw SubmissionScheduler.Fatal(
+                    $"The vertex program fetches an attribute without a memory component: hash=0x{source.Hash:X16} shader=0x{source.Address:X16} attribute={load.AttributeId} pc=0x{load.Pc:X}.");
+            }
+
+            if (inputByLocation.TryGetValue(location, out var existingIndex))
+            {
+                var existing = inputs[existingIndex];
+                ((List<uint>)existing.AliasPcs).Add(load.Pc);
+                inputs[existingIndex] = existing with
+                {
+                    FetchComponentCount = Math.Max(existing.FetchComponentCount, load.Components),
+                    ComponentCount = Math.Max(existing.ComponentCount, requiredComponents),
+                };
+                continue;
+            }
+
+            var aliasPcs = new List<uint>();
+            inputByLocation.Add(location, inputs.Count);
+            inputs.Add(new ShaderVertexInput(
+                load.Pc,
+                (uint)location,
+                load.Components,
+                requiredComponents,
+                numberFormat,
+                destinationSelect,
+                attribute.FetchIndex != 0,
+                aliasPcs));
         }
 
         return inputs.ToArray();
@@ -470,6 +532,15 @@ internal sealed class ShaderProgramCache
                     EnableGraphicsSubgroupOperations = enableGraphicsSubgroups,
                     RequiredVertexOutputCount = options.RequiredVertexOutputCount,
                     VertexInputs = entry.VertexInputs,
+                    PositionExportControl = info.PositionExportControl,
+                    ClipSpace = new ShaderClipSpaceTransform(
+                        info.ClipSpace.Enabled,
+                        info.ClipSpace.ScaleX,
+                        info.ClipSpace.ScaleY,
+                        info.ClipSpace.OffsetX,
+                        info.ClipSpace.OffsetY,
+                        info.ClipSpace.HalfExtentX,
+                        info.ClipSpace.HalfExtentY),
                 };
             }
 
@@ -486,6 +557,7 @@ internal sealed class ShaderProgramCache
                     EnableGraphicsSubgroupOperations = enableGraphicsSubgroups,
                     PixelOutputs = options.PixelOutputs,
                     PixelInputEnable = options.PixelInputEnable,
+                    PixelCustomInterpolationMask = info.CustomInterpolationMask,
                     PixelInputAddress = options.PixelInputAddress,
                     PixelInputCntl = interpolators,
                 };

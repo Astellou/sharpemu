@@ -3,6 +3,8 @@
 
 namespace SharpEmu.HLE.Host;
 
+public readonly record struct HostAddressRange(ulong Address, ulong Size);
+
 // The caller must own each range. The host does not check this on all platforms.
 public interface IHostViewMemory
 {
@@ -13,6 +15,8 @@ public interface IHostViewMemory
     bool TryCreateBacking(ulong size, out HostBackingObject? backing, out HostViewFailure failure);
 
     ulong ReserveHole(ulong address, ulong size);
+
+    IReadOnlyList<HostAddressRange> ReserveFreeAddressRanges(ulong start, ulong end, ulong minimumSize) => [];
 
     bool SplitHole(ulong address, ulong size);
 

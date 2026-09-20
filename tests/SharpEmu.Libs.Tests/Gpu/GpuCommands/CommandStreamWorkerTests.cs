@@ -67,7 +67,11 @@ public sealed class CommandStreamWorkerTests
         var (host, queue, worker) = NewWorker(cancelBlockedAtStop: true);
         host.WriteDword(Label, 0);
         Enqueue(host, queue, 1, WaitEqual(Label, 1), CreateInstanceCountPacket(6));
-        var waiter = Task.Run(queue.WaitForIdle);
+        var waiter = Task.Factory.StartNew(
+            queue.WaitForIdle,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
 
         Assert.Equal(IdleOutcome.Cancelled, worker.Stop());
         Assert.Equal(IdleOutcome.Cancelled, await waiter.WaitAsync(TimeSpan.FromSeconds(2)));

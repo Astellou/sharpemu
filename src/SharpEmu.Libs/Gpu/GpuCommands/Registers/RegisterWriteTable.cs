@@ -26,8 +26,19 @@ public static class RegisterWriteTable
         RegisterWriters.FillUserConfig(UserConfig, UserConfigIndirect);
     }
 
-    public static uint WriteContextPacket(RegisterBanks banks, in PacketContext packet, uint offset, ReadOnlySpan<uint> values) =>
-        WritePacket(banks, in packet, offset, values, Context, ContextIndirect, "context", emptyIsHandled: true);
+    public static uint WriteContextPacket(RegisterBanks banks, in PacketContext packet, uint offset, ReadOnlySpan<uint> values)
+    {
+        var consumed = WritePacket(banks, in packet, offset, values, Context, ContextIndirect, "context", emptyIsHandled: true);
+        if (Rendering.RenderTrace.Enabled)
+        {
+            for (var index = 0; index < values.Length && index < consumed; index++)
+            {
+                TraceDepthStateWrite(offset + (uint)index, values[index], packet.PacketAddress, "packet");
+            }
+        }
+
+        return consumed;
+    }
 
     // A shader packet without values has no writer; the other banks accept it.
     public static uint WriteShaderPacket(RegisterBanks banks, in PacketContext packet, uint offset, ReadOnlySpan<uint> values)
@@ -44,8 +55,27 @@ public static class RegisterWriteTable
     public static uint WriteUserConfigPacket(RegisterBanks banks, in PacketContext packet, uint offset, ReadOnlySpan<uint> values) =>
         WritePacket(banks, in packet, offset, values, UserConfig, UserConfigIndirect, "user-config", emptyIsHandled: true);
 
-    public static void WriteContextEntry(RegisterBanks banks, uint offset, uint value, ulong tableAddress) =>
+    public static void WriteContextEntry(RegisterBanks banks, uint offset, uint value, ulong tableAddress)
+    {
         WriteEntry(banks, offset, value, ContextIndirect, "context", tableAddress);
+        if (Rendering.RenderTrace.Enabled)
+        {
+            TraceDepthStateWrite(offset, value, tableAddress, "table");
+        }
+    }
+
+    private static void TraceDepthStateWrite(uint offset, uint value, ulong address, string source)
+    {
+        if (offset != ContextRegisterOffset.PaClClipCntl &&
+            offset != ContextRegisterOffset.PaClVteCntl &&
+            offset != ContextRegisterOffset.PaClViewportXScale + 4 &&
+            offset != ContextRegisterOffset.PaClViewportXScale + 5)
+        {
+            return;
+        }
+
+        Rendering.RenderTrace.Write($"DepthStateWrite source={source} address=0x{address:X16} register=0x{offset:X4} value=0x{value:X8}");
+    }
 
     public static void WriteShaderEntry(RegisterBanks banks, uint offset, uint value, ulong tableAddress)
     {

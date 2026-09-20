@@ -11,10 +11,48 @@ namespace SharpEmu.ShaderCompiler;
 public sealed record ShaderVertexInput(
     uint Pc,
     uint Location,
+    uint FetchComponentCount,
     uint ComponentCount,
     uint NumberFormat,
+    uint DestinationSelect,
     bool PerInstance,
-    IReadOnlyList<uint> AliasPcs);
+    IReadOnlyList<uint> AliasPcs)
+{
+    public ShaderVertexInput(
+        uint pc,
+        uint location,
+        uint componentCount,
+        uint numberFormat,
+        bool perInstance,
+        IReadOnlyList<uint> aliasPcs)
+        : this(
+            pc,
+            location,
+            componentCount,
+            componentCount,
+            numberFormat,
+            componentCount switch
+            {
+                1u => 4u,
+                2u => 4u | (5u << 3),
+                3u => 4u | (5u << 3) | (6u << 6),
+                4u => 4u | (5u << 3) | (6u << 6) | (7u << 9),
+                _ => 0u,
+            },
+            perInstance,
+            aliasPcs)
+    {
+    }
+}
+
+public readonly record struct ShaderClipSpaceTransform(
+    bool Enabled,
+    float ScaleX,
+    float ScaleY,
+    float OffsetX,
+    float OffsetY,
+    float HalfExtentX,
+    float HalfExtentY);
 
 // Everything an emitter needs to compile one permutation of a program: the decoded
 // program, its resource plan applied to one specialization, and the binding layout.
@@ -99,11 +137,14 @@ public sealed class ShaderCompileRequest
 
     public IReadOnlyList<Gen5PixelOutputBinding> PixelOutputs { get; init; } = [];
     public uint PixelInputEnable { get; init; }
+    public uint PixelCustomInterpolationMask { get; init; }
     public uint PixelInputAddress { get; init; }
     public IReadOnlyList<uint>? PixelInputCntl { get; init; }
 
     public int RequiredVertexOutputCount { get; init; }
     public IReadOnlyList<ShaderVertexInput> VertexInputs { get; init; } = [];
+    public uint PositionExportControl { get; init; }
+    public ShaderClipSpaceTransform ClipSpace { get; init; }
 
     public uint LocalSizeX { get; init; } = 1;
     public uint LocalSizeY { get; init; } = 1;

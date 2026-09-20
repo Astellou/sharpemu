@@ -903,6 +903,17 @@ public static class KernelEventQueueCompatExports
         return true;
     }
 
+    internal static bool TriggerAmprEvent(ulong handle, ulong ident, ulong data)
+    {
+        return TriggerRegisteredEvent(
+            handle,
+            ident,
+            KernelEventFilterAmpr,
+            0,
+            data,
+            preserveRegisteredUserData: true);
+    }
+
     public static bool RegisterEvent(
         ulong handle,
         ulong ident,
@@ -1279,7 +1290,9 @@ public static class KernelEventQueueCompatExports
         ulong handle,
         ulong ident,
         short filter,
-        ulong userData)
+        ulong userData,
+        ulong data = 0,
+        bool preserveRegisteredUserData = false)
     {
         EventQueueState state;
         lock (_eventQueueGate)
@@ -1305,8 +1318,8 @@ public static class KernelEventQueueCompatExports
                     registration.Filter,
                     registration.Flags,
                     0,
-                    0,
-                    userData));
+                    data,
+                    preserveRegisteredUserData ? registration.UserData : userData));
         }
 
         WakeEventQueue(

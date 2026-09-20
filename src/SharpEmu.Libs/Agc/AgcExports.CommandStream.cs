@@ -233,6 +233,10 @@ public static partial class AgcExports
         internal void RetainTargetlessDraw(RegisterBanks banks, in TargetlessDrawArguments arguments)
         {
             var state = RequireCurrent();
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write($"TargetlessRetention submit={arguments.SubmitId} replaced={state.RetainedTargetlessDraw is not null} previousSubmit={state.RetainedTargetlessDraw?.Arguments.SubmitId} export=0x{banks.Shader.Vertex.ExportAddress:X16} pixel=0x{banks.Shader.Pixel.Address:X16}");
+            }
             state.RetainedTargetlessDraw = new RetainedTargetlessDraw(banks.Clone(), arguments);
         }
 
@@ -352,7 +356,7 @@ public static partial class AgcExports
         }
 
 
-        public void Dispatch(ulong submitId, uint endX, uint endY, uint endZ, uint dispatchInitiator)
+        public void Dispatch(ulong submitId, uint endX, uint endY, uint endZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0)
         {
             var state = RequireCurrent();
             if (_executor is { } executor)
@@ -362,7 +366,7 @@ public static partial class AgcExports
                 var executorStarted = DcbParseProfile.Begin();
                 try
                 {
-                    executor.Dispatch(submitId, banks, endX, endY, endZ, dispatchInitiator);
+                    executor.Dispatch(submitId, banks, endX, endY, endZ, dispatchInitiator, indirectArgumentsAddress);
                 }
                 finally
                 {
@@ -387,6 +391,10 @@ public static partial class AgcExports
             if (!VideoOutExports.TryGetDisplayBufferInfo(handle, displayBufferIndex, out var displayBuffer) ||
                 !state.KnownColorTargets.TryGetValue(displayBuffer.Address, out var words))
             {
+                if (RenderTrace.Enabled)
+                {
+                    RenderTrace.Write($"TargetlessReplay submit={retained.Arguments.SubmitId} outcome=discarded reason=display-buffer-or-target-unavailable handle={handle} index={displayBufferIndex}");
+                }
                 return;
             }
 
@@ -394,6 +402,10 @@ public static partial class AgcExports
             banks.Context.ColorTargets[0] = words;
             banks.Context.RenderTargetMask = 0xF;
             var arguments = retained.Arguments;
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write($"TargetlessReplay submit={arguments.SubmitId} outcome=begin destination=0x{displayBuffer.Address:X16}");
+            }
             if (arguments.Indexed)
             {
                 executor.DrawIndexed(arguments.SubmitId, banks, arguments.Indexed_);
@@ -403,6 +415,10 @@ public static partial class AgcExports
                 executor.DrawAuto(arguments.SubmitId, banks, arguments.Auto);
             }
 
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write($"TargetlessReplay submit={arguments.SubmitId} outcome=executor-returned destination=0x{displayBuffer.Address:X16}");
+            }
             TraceAgcShader(
                 $"agc.deferred_composite dst=0x{displayBuffer.Address:X16} export=0x{banks.Shader.Vertex.ExportAddress:X16} " +
                 $"pixel=0x{banks.Shader.Pixel.Address:X16} size={displayBuffer.Width}x{displayBuffer.Height}");
@@ -491,8 +507,8 @@ public static partial class AgcExports
         public override void DrawAuto(ulong submitId, in DrawAutoArguments arguments) =>
             Translation.DrawAuto(submitId, in arguments);
 
-        public override void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator) =>
-            Translation.Dispatch(submitId, groupsX, groupsY, groupsZ, dispatchInitiator);
+        public override void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0) =>
+            Translation.Dispatch(submitId, groupsX, groupsY, groupsZ, dispatchInitiator, indirectArgumentsAddress);
 
         public override void OnQueueReset(int queueId) => Translation.QueueReset(queueId);
 
@@ -515,7 +531,7 @@ public static partial class AgcExports
             public override void DrawAuto(ulong submitId, in DrawAutoArguments arguments) =>
                 Translation.RecordAutoDrawState(in arguments);
 
-            public override void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator)
+            public override void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0)
             {
                 Dispatches.Add((submitId, groupsX, groupsY, groupsZ, dispatchInitiator));
             }

@@ -455,13 +455,13 @@ internal static unsafe partial class VulkanVideoPresenter
             }
         }
 
-        public void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator)
+        public void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0)
         {
             using var translationScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.CommandDispatchTranslation);
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
-                _translation.Dispatch(submitId, groupsX, groupsY, groupsZ, dispatchInitiator);
+                _translation.Dispatch(submitId, groupsX, groupsY, groupsZ, dispatchInitiator, indirectArgumentsAddress);
             }
             finally
             {

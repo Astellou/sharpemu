@@ -27,6 +27,52 @@ public sealed class KernelMemoryCompatExportsTests
     private const ulong SpanStartOutAddress = GuestMemoryBase + 0x108;
     private const ulong SpanSizeOutAddress = GuestMemoryBase + 0x110;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UppercaseStringConversion_ConsumesWideArgumentBetweenNarrowStrings(bool useVaList)
+    {
+        var memory = new FakeCpuMemory(GuestMemoryBase, 0x2000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        memory.WriteCString(GuestMemoryBase + 0x100, "assets");
+        Assert.True(memory.TryWrite(GuestMemoryBase + 0x200, Encoding.Unicode.GetBytes("armor\0")));
+        memory.WriteCString(GuestMemoryBase + 0x300, "body");
+        const string format = "%s/%S_%s.bin";
+        string rendered;
+        if (useVaList)
+        {
+            var arguments = GuestMemoryBase + 0x400;
+            var savedRegisters = GuestMemoryBase + 0x500;
+            Assert.True(context.TryWriteUInt64(arguments, 48UL << 32));
+            Assert.True(context.TryWriteUInt64(arguments + 8, GuestMemoryBase + 0x600));
+            Assert.True(context.TryWriteUInt64(arguments + 16, savedRegisters));
+            Assert.True(context.TryWriteUInt64(savedRegisters, GuestMemoryBase + 0x100));
+            Assert.True(context.TryWriteUInt64(savedRegisters + 8, GuestMemoryBase + 0x200));
+            Assert.True(context.TryWriteUInt64(savedRegisters + 16, GuestMemoryBase + 0x300));
+            Assert.True(KernelMemoryCompatExports.TryFormatStringFromVaList(context, format, arguments, out rendered));
+        }
+        else
+        {
+            context[CpuRegister.Rcx] = GuestMemoryBase + 0x100;
+            context[CpuRegister.R8] = GuestMemoryBase + 0x200;
+            context[CpuRegister.R9] = GuestMemoryBase + 0x300;
+            rendered = KernelMemoryCompatExports.FormatStringFromVarArgs(context, format, 3);
+        }
+        Assert.Equal("assets/armor_body.bin", rendered);
+    }
+
+    [Theory]
+    [InlineData("%8.3S", "     arm")]
+    [InlineData("%-8.3S", "arm     ")]
+    public void UppercaseStringConversion_UsesExistingWideStringFormatting(string format, string expected)
+    {
+        var memory = new FakeCpuMemory(GuestMemoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        Assert.True(memory.TryWrite(GuestMemoryBase + 0x100, Encoding.Unicode.GetBytes("armor\0")));
+        context[CpuRegister.Rcx] = GuestMemoryBase + 0x100;
+        Assert.Equal(expected, KernelMemoryCompatExports.FormatStringFromVarArgs(context, format, 3));
+    }
+
     [Fact]
     public void PosixStat_MissingFileReturnsMinusOne()
     {

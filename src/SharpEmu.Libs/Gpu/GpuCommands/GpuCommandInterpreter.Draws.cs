@@ -125,8 +125,8 @@ public sealed partial class GpuCommandInterpreter
         DrawIndexed(packetAddress, opcode, indexCount, indexAddress, indexedInstanceCount, unchecked((int)baseVertex), indexedStartInstance, DrawOffsetSource.IndirectArguments);
     }
 
-    internal void DispatchDirect(uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator) =>
-        _host.DispatchDirect(SubmitId, groupsX, groupsY, groupsZ, dispatchInitiator);
+    internal void DispatchDirect(uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0) =>
+        _host.DispatchDirect(SubmitId, groupsX, groupsY, groupsZ, dispatchInitiator, indirectArgumentsAddress);
 
     internal void DispatchIndirect(uint dataOffset, uint dispatchInitiator)
     {
@@ -136,7 +136,7 @@ public sealed partial class GpuCommandInterpreter
         }
 
         var argumentsAddress = DispatchIndirectArgumentsBase + dataOffset;
-        DispatchDirect(ReadDword(argumentsAddress), ReadDword(argumentsAddress + 4), ReadDword(argumentsAddress + 8), dispatchInitiator);
+        DispatchDirect(ReadDword(argumentsAddress), ReadDword(argumentsAddress + 4), ReadDword(argumentsAddress + 8), dispatchInitiator, argumentsAddress);
     }
 
     internal uint DrawIndexPacket(in PacketContext packet, ReadOnlySpan<uint> payload)
@@ -271,7 +271,7 @@ public sealed partial class GpuCommandInterpreter
                 throw _host.Fatal($"The indirect dispatch arguments address is zero: address=0x{packet.PacketAddress:X16}.");
             }
 
-            DispatchDirect(ReadDword(argumentsAddress), ReadDword(argumentsAddress + 4), ReadDword(argumentsAddress + 8), payload[2]);
+            DispatchDirect(ReadDword(argumentsAddress), ReadDword(argumentsAddress + 4), ReadDword(argumentsAddress + 8), payload[2], argumentsAddress);
             return 3;
         }
 

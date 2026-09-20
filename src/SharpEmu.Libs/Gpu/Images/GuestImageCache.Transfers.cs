@@ -108,6 +108,15 @@ public sealed unsafe partial class GuestImageCache
 
         plan.Layout = TextureTransferLayout.Compute(format, info.Extent.Width, info.Extent.Height, info.Resources.Levels, layers, info.TileMode, info.Data.Size, allowDepthTile, volume, owner);
         plan.Regions = plan.Layout.BuildCopies();
+        if (info.IsDepth)
+        {
+            for (var index = 0; index < plan.Regions.Count; index++)
+            {
+                var region = plan.Regions[index];
+                region.ImageSubresource.AspectMask = ImageAspectFlags.DepthBit;
+                plan.Regions[index] = region;
+            }
+        }
         plan.Tiled = plan.Layout.Surface.Description.TileMode != GuestTileMode.Linear;
         if (plan.Tiled)
         {

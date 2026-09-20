@@ -66,13 +66,8 @@ public sealed class Gen5ImageTests
             coordinateOperand: 1,
             expectedComponents: expectedCoordinateComponents);
 
-        var sizeQuery = Assert.Single(
-            instructions,
-            item => item.Opcode == SpirvOp.ImageQuerySize);
-        AssertVectorTypeWidth(
-            instructions,
-            sizeQuery.Operands[0],
-            expectedCoordinateComponents);
+        // Image stores outside the image bounds are discarded by the host API.
+        Assert.DoesNotContain(instructions, item => item.Opcode == SpirvOp.ImageQuerySize);
     }
 
     [Fact]

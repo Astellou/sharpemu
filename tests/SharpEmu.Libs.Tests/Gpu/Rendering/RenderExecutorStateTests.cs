@@ -42,7 +42,7 @@ public sealed class RenderExecutorStateTests : IDisposable
         var state = DrawAndTakeState(banks);
 
         Assert.Equal((0f, 64f, 64f, -64f), (state.ViewportX, state.ViewportY, state.ViewportWidth, state.ViewportHeight));
-        Assert.Equal((0.5f, 1f), (state.ViewportMinDepth, state.ViewportMaxDepth));
+        Assert.Equal((0f, 1f), (state.ViewportMinDepth, state.ViewportMaxDepth));
         Assert.Equal(new ScissorRectangle(0, 0, 48, 40), state.Scissor);
         Assert.Equal(1f, state.LineWidth);
         Assert.Equal((0.1f, 0.2f, 0.3f, 0.4f), (state.BlendRed, state.BlendGreen, state.BlendBlue, state.BlendAlpha));
@@ -52,6 +52,37 @@ public sealed class RenderExecutorStateTests : IDisposable
         Assert.False(state.DepthBiasEnabled);
         Assert.False(state.StencilTestEnabled);
         Assert.Equal((1u, (byte)1), (state.ColorWriteCount, state.ColorWriteEnableMask));
+    }
+
+    [Theory]
+    [InlineData(false, 0.5f, 0.5f, 0f, 1f)]
+    [InlineData(true, 0.5f, 0.5f, 0.5f, 1f)]
+    [InlineData(false, -0.5f, 0.5f, 1f, 0f)]
+    [InlineData(true, -1f, 1f, 1f, 0f)]
+    [InlineData(false, 0.25f, 0.5f, 0.25f, 0.75f)]
+    [InlineData(true, 0.25f, 0.5f, 0.5f, 0.75f)]
+    [InlineData(false, 0f, 0.5f, 0.5f, 0.5f)]
+    [InlineData(true, 1f, 0f, 0f, 1f)]
+    public void DynamicState_DepthRangePreservesTheGuestTransform(
+        bool directXClipSpace, float depthScale, float depthOffset, float expectedMinimum, float expectedMaximum)
+    {
+        var banks = Banks();
+        banks.Context.Clip = ClipControlRegisters.Decode(directXClipSpace ? 1u << 19 : 0u);
+        banks.Context.ScreenViewport.Viewports[0].ZScale = depthScale;
+        banks.Context.ScreenViewport.Viewports[0].ZOffset = depthOffset;
+
+        var state = DrawAndTakeState(banks);
+
+        Assert.Equal(expectedMinimum, state.ViewportMinDepth);
+        Assert.Equal(expectedMaximum, state.ViewportMaxDepth);
+        var hostScale = directXClipSpace
+            ? state.ViewportMaxDepth - state.ViewportMinDepth
+            : (state.ViewportMaxDepth - state.ViewportMinDepth) / 2f;
+        var hostOffset = directXClipSpace
+            ? state.ViewportMinDepth
+            : (state.ViewportMaxDepth + state.ViewportMinDepth) / 2f;
+        Assert.Equal(depthScale, hostScale);
+        Assert.Equal(depthOffset, hostOffset);
     }
 
     [Fact]

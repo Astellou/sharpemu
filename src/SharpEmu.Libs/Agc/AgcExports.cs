@@ -38,6 +38,7 @@ public static partial class AgcExports
     private const uint ItDispatchIndirect = 0x16;
     private const uint ItSetPredication = 0x20;
     private const uint ItCondExec = 0x22;
+    private const uint ItCopyData = 0x40;
     private const uint ItWaitRegMem = 0x3C;
     private const uint ItIndirectBuffer = 0x3F;
     private const uint ItCondWrite = 0x45;
@@ -487,6 +488,9 @@ public static partial class AgcExports
     }
 
     private static bool TryAllocateCommandDwords(CpuContext ctx, ulong commandBufferAddress, uint sizeDwords, out ulong commandAddress)
+        => TryPrepareCommandDwords(ctx, commandBufferAddress, sizeDwords, true, out commandAddress);
+
+    private static bool TryPrepareCommandDwords(CpuContext ctx, ulong commandBufferAddress, uint sizeDwords, bool advanceCursor, out ulong commandAddress)
     {
         commandAddress = 0;
         if (sizeDwords == 0 ||
@@ -542,7 +546,7 @@ public static partial class AgcExports
         }
 
         var nextCursor = cursorUp + ((ulong)sizeDwords * sizeof(uint));
-        if (!ctx.TryWriteUInt64(commandBufferAddress + CommandBufferCursorUpOffset, nextCursor))
+        if (advanceCursor && !ctx.TryWriteUInt64(commandBufferAddress + CommandBufferCursorUpOffset, nextCursor))
         {
             return false;
         }

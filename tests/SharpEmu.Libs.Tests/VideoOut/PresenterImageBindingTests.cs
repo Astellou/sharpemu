@@ -46,6 +46,53 @@ public sealed class PresenterImageBindingTests : IClassFixture<HeadlessVulkanFix
     public PresenterImageBindingTests(HeadlessVulkanFixture fixture) => _vulkan = fixture.Vulkan;
 
     [Theory]
+    [InlineData(GuestPixelFormat.Bits16UNorm, Format.D16Unorm)]
+    [InlineData(GuestPixelFormat.Bits32Float, Format.D32Sfloat)]
+    public void ComparisonBinding_CreatesDepthImageWithoutAnAttachment(GuestPixelFormat guestFormat, Format hostFormat)
+    {
+        if (!GatePrerequisites.Ready(_vulkan)) return;
+        using var fatal = new FatalScope();
+        using var presenter = new PresenterUnderTest(_vulkan);
+        var harness = presenter.Harness;
+        var address = harness.MapBacked(0x10000, ReadWrite);
+        var sample = guestFormat == GuestPixelFormat.Bits16UNorm
+            ? BitConverter.GetBytes((ushort)0x4000)
+            : BitConverter.GetBytes(0.25f);
+        var guestBytes = new byte[0x10000];
+        for (var offset = 0; offset < guestBytes.Length; offset += sample.Length)
+            sample.CopyTo(guestBytes, offset);
+        harness.Write(address, guestBytes);
+        CachedImage sampledImage = null!;
+        presenter.Run(() =>
+        {
+            var resource = new ImageResource
+            {
+                ResourceClass = PlanImageResourceClass.Sampled,
+                NumericClass = ImageNumericClass.Float,
+                Dimension = ImageDimension.Dim2D,
+                Read = true,
+                DepthCompare = true,
+            };
+            var words = RegisterWords.Texture(address, guestFormat, 48, 24);
+            words[3] = (words[3] & ~0xFFFu) | ViewFormatRules.PackDestinationSelect(4, 0, 0, 1);
+            var binding = presenter.InvokeMethod("ResolveImageBinding", resource, words, new ShaderProgramInfo(), 0)!;
+            var identifier = (ResourceSlotIdentifier)GetFieldValue(binding, "ImageIdentifier");
+            var request = (ImageRequest)GetFieldValue(binding, "Request");
+            var image = harness.Images.GetImage(identifier);
+            sampledImage = image;
+            var view = harness.Images.AcquireTextureView(identifier, request);
+            Assert.Equal(hostFormat, image.Backing.Format);
+            Assert.True(image.Description.IsDepth);
+            Assert.NotEqual(0UL, view.Handle);
+            Assert.Contains(image.Views, candidate => candidate.Description.Aspect == ImageAspectFlags.DepthBit);
+            presenter.RenderHost.ResetBindings();
+        });
+        var uploaded = harness.ReadImageBytes(sampledImage, ImageAspectFlags.DepthBit);
+        Assert.Equal(sample, uploaded.AsSpan(0, sample.Length).ToArray());
+        harness.Shutdown();
+    }
+
+    [Theory]
     [InlineData(true, 1u, false)]
     [InlineData(true, 2u, true)]
     [InlineData(false, 1u, false)]
@@ -67,7 +114,7 @@ public sealed class PresenterImageBindingTests : IClassFixture<HeadlessVulkanFix
         var workingImages = new List<CachedImage>();
         presenter.Run(() =>
         {
-            var shape = new ShaderImageShape(Volume: false, Arrayed: true, Storage: true, DynamicMip: false, TextureNumericClass.Uint);
+            var shape = new ShaderImageShape(false, true, true, false, TextureNumericClass.Uint);
             var texture = new GuestDrawTexture(stencilAddress, 64, 64, 0, 0, [], false, true,
                 Descriptor: RegisterWords.Texture(stencilAddress, GuestPixelFormat.Bits8UInt, 64, 64,
                     type: GuestImageType.Color2DArray, tile: GuestTileMode.Depth, layers: layers, baseArray: layers - 1), Shape: shape);

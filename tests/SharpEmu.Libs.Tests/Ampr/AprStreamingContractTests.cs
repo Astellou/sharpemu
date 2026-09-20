@@ -12,6 +12,8 @@ namespace SharpEmu.Libs.Tests.Ampr;
 [Collection("AmprFileRegistry")]
 public sealed class AprStreamingContractTests
 {
+    public AprStreamingContractTests() => AmprFileRegistry.ClearForTests();
+
     [Fact]
     public void ResolveStatAndReadFile_UsesSharedAprFileId()
     {
@@ -71,6 +73,7 @@ public sealed class AprStreamingContractTests
             context[CpuRegister.Rdx] = 0x100;
 
             Assert.Equal(0, AmprExports.CommandBufferConstructor(context));
+            Assert.Equal(0, AmprExports.CommandBufferSetBuffer(context));
 
             const ulong readOffset = 2;
             const ulong readSize = 4;
@@ -85,16 +88,10 @@ public sealed class AprStreamingContractTests
 
             Span<byte> destination = stackalloc byte[(int)readSize];
             Assert.True(memory.TryRead(destinationAddress, destination));
+            Assert.Equal(new byte[(int)readSize], destination.ToArray());
+            Assert.Equal(0, AmprExports.CompleteCommandBuffer(context, commandBufferAddress));
+            Assert.True(memory.TryRead(destinationAddress, destination));
             Assert.Equal(fileContents.AsSpan((int)readOffset, (int)readSize), destination);
-
-            Span<byte> record = stackalloc byte[0x30];
-            Assert.True(memory.TryRead(recordBufferAddress, record));
-            Assert.Equal(1U, BinaryPrimitives.ReadUInt32LittleEndian(record));
-            Assert.Equal(fileId, BinaryPrimitives.ReadUInt32LittleEndian(record[0x04..]));
-            Assert.Equal(destinationAddress, BinaryPrimitives.ReadUInt64LittleEndian(record[0x08..]));
-            Assert.Equal(readSize, BinaryPrimitives.ReadUInt64LittleEndian(record[0x10..]));
-            Assert.Equal(readOffset, BinaryPrimitives.ReadUInt64LittleEndian(record[0x18..]));
-            Assert.Equal(readSize, BinaryPrimitives.ReadUInt64LittleEndian(record[0x20..]));
         }
         finally
         {
@@ -104,6 +101,65 @@ public sealed class AprStreamingContractTests
                 Directory.Delete(mountRoot, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    public void ReadFile_UsesCapturedNativeImportStackArgument()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong commandBufferAddress = memoryBase + 0x100;
+        const ulong recordBufferAddress = memoryBase + 0x200;
+        const ulong destinationAddress = memoryBase + 0x400;
+        const ulong fileOffset = 0x1234;
+        var memory = new FakeCpuMemory(memoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        Assert.Equal(0, AmprExports.CommandBufferConstructor(context));
+
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        context[CpuRegister.Rsi] = recordBufferAddress;
+        context[CpuRegister.Rdx] = 0x100;
+        Assert.Equal(0, AmprExports.CommandBufferSetBuffer(context));
+
+        context[CpuRegister.Rsp] = 0x7FFF_FFFF_F000;
+        context.SetImportStackArguments(fileOffset, 0, 0, 0, 0, 0);
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        context[CpuRegister.Rcx] = 0x8000_0001;
+        context[CpuRegister.R8] = destinationAddress;
+        context[CpuRegister.R9] = 0x20;
+
+        Assert.Equal(0, AmprExports.AprCommandBufferReadFile(context));
+        Assert.Equal(0x14u, ReadUInt32(memory, commandBufferAddress + 4));
+    }
+
+    [Fact]
+    public void ReadFile_SequentialOffsetSentinel_DoesNotFaultDuringAppend()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong commandBufferAddress = memoryBase + 0x100;
+        const ulong recordBufferAddress = memoryBase + 0x200;
+        const ulong destinationAddress = memoryBase + 0x400;
+        var memory = new FakeCpuMemory(memoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        Assert.Equal(0, AmprExports.CommandBufferConstructor(context));
+
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        context[CpuRegister.Rsi] = recordBufferAddress;
+        context[CpuRegister.Rdx] = 0x100;
+        Assert.Equal(0, AmprExports.CommandBufferSetBuffer(context));
+
+        context[CpuRegister.Rsp] = 0x7FFF_FFFF_F000;
+        context.SetImportStackArguments(ulong.MaxValue, 0, 0, 0, 0, 0);
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        context[CpuRegister.Rcx] = 0x8000_0001;
+        context[CpuRegister.R8] = destinationAddress;
+        context[CpuRegister.R9] = 0x20;
+
+        Assert.Equal(0, AmprExports.AprCommandBufferReadFile(context));
+        Assert.Equal(0x18u, ReadUInt32(memory, commandBufferAddress + 4));
     }
 
     [Fact]

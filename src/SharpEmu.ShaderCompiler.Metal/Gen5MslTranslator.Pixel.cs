@@ -650,18 +650,36 @@ public static partial class Gen5MslTranslator
 
             for (uint component = 0; component < control.DwordCount; component++)
             {
-                if (component >= input.ComponentCount)
+                var selector = (input.DestinationSelect >> (int)(component * 3)) & 0x7u;
+                if (selector == 0)
                 {
-                    // Formatted buffer loads return zero for components that
-                    // are not present in the resource format.
                     StoreVector(control.VectorData + component, "0u");
+                }
+                else if (selector == 1)
+                {
+                    StoreVector(
+                        control.VectorData + component,
+                        input.NumberFormat is 4u or 5u ? "1u" : "0x3f800000u");
+                }
+                else if (selector is >= 4u and <= 7u)
+                {
+                    var sourceComponent = selector - 4u;
+                    if (sourceComponent >= input.ComponentCount)
+                    {
+                        error =
+                            $"vertex input destination selector exceeds source components: selector={selector} components={input.ComponentCount}";
+                        return false;
+                    }
+
+                    var value = input.ComponentCount == 1
+                        ? $"sharpemu_vin.in{input.Location}"
+                        : $"sharpemu_vin.in{input.Location}[{sourceComponent}]";
+                    StoreVector(control.VectorData + component, AsUInt(value));
                 }
                 else
                 {
-                    var value = input.ComponentCount == 1
-                        ? $"sharpemu_vin.in{input.Location}"
-                        : $"sharpemu_vin.in{input.Location}[{component}]";
-                    StoreVector(control.VectorData + component, AsUInt(value));
+                    error = $"unsupported vertex input destination selector={selector}";
+                    return false;
                 }
             }
 

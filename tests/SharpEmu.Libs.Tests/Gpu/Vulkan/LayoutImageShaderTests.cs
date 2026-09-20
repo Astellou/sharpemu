@@ -207,10 +207,10 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         return registers;
     }
 
-    private static DescriptorImageInfo SampledView(CachedImage image, uint levelCount = 1) =>
+    private static DescriptorImageInfo SampledView(CachedImage image, uint levelCount = 1, bool arrayed = false) =>
         new()
         {
-            ImageView = image.GetOrCreateView(ImageViewDescription.Default with { Format = image.Backing.Format, Usage = ImageUsageFlags.SampledBit, LevelCount = levelCount }),
+            ImageView = image.GetOrCreateView(ImageViewDescription.Default with { Format = image.Backing.Format, Usage = ImageUsageFlags.SampledBit, LevelCount = levelCount, Type = arrayed ? ImageViewType.Type2DArray : ImageViewType.Type2D }),
             ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
         };
 
@@ -301,7 +301,12 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
     [InlineData(true, false, 2.5f)]
     [InlineData(false, true, 2.0f)]
     [InlineData(true, true, 2.5f)]
-    public void IndirectImage_SelectsTheMappedCandidateOnTheDevice(bool loadMip, bool gpuDependentSelector, float expected)
+    [InlineData(false, false, 1.0f, 9u, 13u, 0u)]
+    [InlineData(false, false, 2.0f, 9u, 13u, 1u)]
+    [InlineData(false, false, 1.0f, 13u, 9u, 0u)]
+    [InlineData(false, false, 2.0f, 13u, 9u, 1u)]
+    public void IndirectImage_SelectsTheMappedCandidateOnTheDevice(bool loadMip, bool gpuDependentSelector, float expected,
+        uint firstImageType = 9, uint secondImageType = 9, uint selectedRecord = 1)
     {
         var vulkan = fixture.Vulkan;
         if (!GatePrerequisites.Ready(vulkan))
@@ -309,8 +314,10 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
             return;
         }
 
-        var (request, snapshot) = SpirvBindingDeclarationTests.IndirectImageAfterPlainImageRequest(ResultBytes, loadMip, gpuDependentSelector);
-        var (registers, memory) = SpirvBindingDeclarationTests.IndirectImageAfterPlainImageInputs(ResultBytes, loadMip);
+        var (request, snapshot) = SpirvBindingDeclarationTests.IndirectImageAfterPlainImageRequest(ResultBytes, loadMip, gpuDependentSelector,
+            firstImageType, secondImageType, firstImageType == 13 || secondImageType == 13 ? 5u : 1u);
+        var (registers, memory) = SpirvBindingDeclarationTests.IndirectImageAfterPlainImageInputs(ResultBytes, loadMip, firstImageType, secondImageType);
+        registers[8] = selectedRecord;
         Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
         using var harness = new ImageTestHarness(vulkan);
         using var runner = new LayoutComputeRunner(harness, request, shader.Spirv);
@@ -329,7 +336,7 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
             images[index] = harness.CreateImage(description);
             var data = Enumerable.Repeat(texels[index], (int)(levels * levels)).Concat(levels > 1 ? [texels[index] + 0.5f] : Array.Empty<float>()).ToArray();
             harness.UploadImage(images[index], MemoryMarshal.AsBytes<float>(data), ImageTestHarness.WholeImageCopies(description, 0));
-            infos[index] = [SampledView(images[index], levels)];
+            infos[index] = [SampledView(images[index], levels, request.Resources.Info.Images[index].Dimension == ImageDimension.Dim2DArray)];
         }
 
         Assert.Equal(0x20u, snapshot.Images[1][0]);

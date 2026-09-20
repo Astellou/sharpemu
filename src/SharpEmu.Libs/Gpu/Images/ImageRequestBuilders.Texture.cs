@@ -14,8 +14,10 @@ public readonly record struct TextureRequestResolution(ImageRequest Request, boo
 public static partial class ImageRequestBuilders
 {
     // A null descriptor binds a one-texel image of the numeric class the shader expects.
-    public static ImageRequest NullTexture(TextureNumericClass numericClass, bool storage)
+    public static ImageRequest NullTexture(in ShaderImageShape shape)
     {
+        var numericClass = shape.NumericClass;
+        var storage = shape.Storage;
         var (format, guestFormat) = numericClass switch
         {
             TextureNumericClass.Float => (Format.R32Sfloat, GuestPixelFormat.Bits32Float),
@@ -26,16 +28,22 @@ public static partial class ImageRequestBuilders
         var description = ImageDescription.Create();
         description.PixelFormat = format;
         description.GuestFormat = guestFormat;
-        description.Type = GuestImageType.Color2D;
+        description.Type = shape.Volume
+            ? GuestImageType.Color3D
+            : shape.OneDimensional ? GuestImageType.Color1D : GuestImageType.Color2D;
         description.Extent = new Extent3D(1, 1, 1);
         description.Resources = SubresourceCount.Single;
         description.BytesPerBlock = 4;
-        description.Samples = 1;
+        description.Samples = shape.Multisampled ? 4u : 1u;
         description.MipLayout[0] = new MipLevelLayout { Offset = 0, Size = 0, Pitch = 1, Height = 1 };
         var view = ImageViewDescription.Default with
         {
             Format = format,
-            Type = ImageViewType.Type2D,
+            Type = shape.Volume
+                ? ImageViewType.Type3D
+                : shape.OneDimensional
+                    ? shape.Arrayed ? ImageViewType.Type1DArray : ImageViewType.Type1D
+                    : shape.Arrayed ? ImageViewType.Type2DArray : ImageViewType.Type2D,
             Aspect = ImageAspectFlags.ColorBit,
             Usage = storage ? ImageUsageFlags.StorageBit : ImageUsageFlags.SampledBit,
         };
@@ -104,8 +112,10 @@ public static partial class ImageRequestBuilders
             throw SubmissionScheduler.Fatal($"The texture base layer is outside the image: baseLayer={baseLayer} layers={imageLayers} address=0x{descriptor.BaseAddress:X16}.");
         }
 
-        var type = shape.Arrayed ? ImageViewType.Type2DArray : ImageViewType.Type2D;
         var layerCount = shape.Arrayed ? imageLayers - baseLayer : 1;
+        var type = shape.OneDimensional
+            ? shape.Arrayed ? ImageViewType.Type1DArray : ImageViewType.Type1D
+            : shape.Arrayed ? ImageViewType.Type2DArray : ImageViewType.Type2D;
         return new ImageViewDescription(format, type, ImageAspectFlags.ColorBit, descriptor.BaseLevel, viewLevels, baseLayer, layerCount, mapping, usage);
     }
 
@@ -115,8 +125,12 @@ public static partial class ImageRequestBuilders
     // Cube maps become two-dimensional arrays; the multisample kinds keep their own type.
     private static GuestImageType TextureType(GuestImageType type) => type == GuestImageType.Cube ? GuestImageType.Color2DArray : type;
 
-    // Every non-volume texture is a two-dimensional image; the translator compiles 1D textures as 2D.
-    private static GuestImageType TextureBaseType(GuestImageType type) => type == GuestImageType.Color3D ? GuestImageType.Color3D : GuestImageType.Color2D;
+    private static GuestImageType TextureBaseType(GuestImageType type) => type switch
+    {
+        GuestImageType.Color1DArray => GuestImageType.Color1D,
+        GuestImageType.Color2DArray or GuestImageType.Color2DMsaa or GuestImageType.Color2DMsaaArray => GuestImageType.Color2D,
+        _ => type,
+    };
 
     private static bool IsMultisampledTexture(GuestImageType type) => type is GuestImageType.Color2DMsaa or GuestImageType.Color2DMsaaArray;
 
@@ -126,11 +140,10 @@ public static partial class ImageRequestBuilders
         Span<uint> padded = stackalloc uint[8];
         words[..Math.Min(words.Length, 8)].CopyTo(padded);
         var descriptor = new TextureDescriptorWords(padded);
-        var compactDescriptor = words.Length < 8;
         var storage = shape.Storage;
         if (descriptor.BaseAddress == 0)
         {
-            var nullRequest = NullTexture(shape.NumericClass, storage);
+            var nullRequest = NullTexture(shape);
             return new TextureRequestResolution(nullRequest, false, nullRequest.View.Format, 0);
         }
 
@@ -141,7 +154,7 @@ public static partial class ImageRequestBuilders
         var lastLevel = descriptor.LastLevel;
         var type = TextureType(descriptor.Type);
         var multisampled = IsMultisampledTexture(type);
-        var maxMip = compactDescriptor ? lastLevel : descriptor.MaxMip;
+        var maxMip = shape.R128 ? lastLevel : descriptor.MaxMip;
         var levels = multisampled ? 1 : maxMip + 1;
         var dynamicStorage = storage && shape.DynamicMip;
         var viewLastLevel = !multisampled && !dynamicStorage ? Math.Min(lastLevel, maxMip) : lastLevel;
@@ -168,6 +181,13 @@ public static partial class ImageRequestBuilders
         var volume = type == GuestImageType.Color3D;
         var layered = type is GuestImageType.Color1DArray or GuestImageType.Color2DArray or GuestImageType.Color2DMsaaArray;
         var imageLayers = layered ? depth : 1;
+        if (shape.Cube &&
+            (volume || multisampled || width != height || descriptor.BaseArray > descriptor.Depth ||
+             (descriptor.Depth - descriptor.BaseArray + 1) % 6 != 0))
+        {
+            throw SubmissionScheduler.Fatal(
+                $"The cubemap view is invalid: address=0x{address:X16} extent={width}x{height} layers={imageLayers} baseArray={descriptor.BaseArray} samples={samples}.");
+        }
         uint pitch;
         TileSizeAndAlignment size;
         if (multisampled)
@@ -195,6 +215,11 @@ public static partial class ImageRequestBuilders
         }
 
         var pixelFormat = surfaceFormat.HostFormat;
+        // Comparison sampling needs a depth image, even when no depth target created it.
+        if (shape.DepthCompare && DepthFormatRule.FindByGuestFormat(format) is { } depthFormat)
+        {
+            pixelFormat = depthFormat.DepthAttachmentFormat;
+        }
         var storageViewFormat = storage && format == GuestPixelFormat.Bits32SInt ? Format.R32Uint : ViewFormatRules.SrgbStorageFormat(pixelFormat);
         var viewFormat = storage && storageViewFormat != Format.Undefined ? storageViewFormat : pixelFormat;
         var blockBytes = GuestPixelFormats.BlockCompressedBytes(format);

@@ -210,6 +210,13 @@ public sealed partial class DirectExecutionBackend
 		cpuContext[CpuRegister.R14] = *(ulong*)(argPackPtr + 80);
 		cpuContext[CpuRegister.R15] = *(ulong*)(argPackPtr + 88);
 		cpuContext[CpuRegister.Rsp] = (ulong)argPackPtr + 96uL;
+		cpuContext.SetImportStackArguments(
+			ReadImportStackArgument(argPackPtr, 0),
+			ReadImportStackArgument(argPackPtr, 1),
+			ReadImportStackArgument(argPackPtr, 2),
+			ReadImportStackArgument(argPackPtr, 3),
+			ReadImportStackArgument(argPackPtr, 4),
+			ReadImportStackArgument(argPackPtr, 5));
 		ulong value = cpuContext[CpuRegister.Rdi];
 		ulong value2 = cpuContext[CpuRegister.Rsi];
 		ulong num3 = cpuContext[CpuRegister.Rdx];
@@ -1324,6 +1331,13 @@ public sealed partial class DirectExecutionBackend
 		cpuContext[CpuRegister.R14] = *(ulong*)(argPackPtr + 80);
 		cpuContext[CpuRegister.R15] = *(ulong*)(argPackPtr + 88);
 		cpuContext[CpuRegister.Rsp] = (ulong)argPackPtr + 96uL;
+		cpuContext.SetImportStackArguments(
+			ReadImportStackArgument(argPackPtr, 0),
+			ReadImportStackArgument(argPackPtr, 1),
+			ReadImportStackArgument(argPackPtr, 2),
+			ReadImportStackArgument(argPackPtr, 3),
+			ReadImportStackArgument(argPackPtr, 4),
+			ReadImportStackArgument(argPackPtr, 5));
 
 		if (_activeGuestThreadState is { } activeGuestThreadState)
 		{
@@ -1584,7 +1598,7 @@ public sealed partial class DirectExecutionBackend
 			"8aI7R7WaOlc" or // sceAmprCommandBufferConstructor
 			"zgXifHT9ErY" or // sceVideoOutIsFlipPending
 			"V++UgBtQhn0" or // sceAgcGetDataPacketPayloadAddress
-			"qj7QZpgr9Uw" or // Gen5 graphics type-2 packet
+			"qj7QZpgr9Uw" or // Graphics context-state operation
 			"LtTouSCZjHM" or // sceAgcCbNop
 			"k3GhuSNmBLU" or // sceAgcCbDispatch
 			"UZbQjYAwwXM" or // sceAgcCbSetShRegistersDirect

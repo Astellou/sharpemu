@@ -72,6 +72,7 @@ public static partial class VideoOutExports
     // sceVideoOutGetEventId (mapped below), so the exact value is internal; only
     // its distinctness from the flip ident matters for GetEventId/GetEventData.
     private const ulong SceVideoOutInternalEventVblank = 0x40;
+    private const ulong SceVideoOutInternalEventOutputMode = 0x8;
     private const short OrbisKernelEventFilterVideoOut = -13;
 
     private static readonly object _stateGate = new();
@@ -239,6 +240,7 @@ public static partial class VideoOutExports
         public uint OutputWidth { get; set; } = 1920;
         public uint OutputHeight { get; set; } = 1080;
         public uint RefreshRate { get; set; } = 60;
+        public ulong OutputMode { get; set; } = SceVideoOutOutputModeDefault;
         public float Gamma { get; set; } = 1.0f;
         public Dictionary<long, long> LatencyStartPoints { get; } = new();
         public Queue<(long FlipArg, long Timestamp)> LatencyStartPointOrder { get; } = new();
@@ -249,6 +251,7 @@ public static partial class VideoOutExports
         public VideoOutBufferSlot[] BufferSlots { get; } = CreateBufferSlots();
         public List<FlipEventRegistration> FlipEvents { get; } = new();
         public List<FlipEventRegistration> VblankEvents { get; } = new();
+        public List<FlipEventRegistration> OutputModeEvents { get; } = new();
         public long OpenTimestamp;
         public long LastCpuFlipTimestamp = -1;
         public int WindowTop;
@@ -435,10 +438,31 @@ public static partial class VideoOutExports
         if (supported < 0) return supported;
         if (supported == 0) return OrbisVideoOutErrorUnavailableOutputMode;
         var handle = unchecked((int)ctx[CpuRegister.Rdi]);
-        // The only advertised configuration is the current default output.
-        return TryGetPort(handle, out _)
-            ? (int)OrbisGen2Result.ORBIS_GEN2_OK
-            : OrbisVideoOutErrorInvalidHandle;
+        var mode = ctx[CpuRegister.Rsi];
+        if (!TryGetPort(handle, out var port))
+        {
+            return OrbisVideoOutErrorInvalidHandle;
+        }
+
+        FlipEventRegistration[] registrations;
+        lock (_stateGate)
+        {
+            port.OutputMode = mode;
+            registrations = port.OutputModeEvents.ToArray();
+        }
+
+        var eventHint = (mode & 0x0000_FFFF_FFFF_FFFFUL) << 16;
+        foreach (var registration in registrations)
+        {
+            _ = KernelEventQueueCompatExports.TriggerDisplayEvent(
+                registration.Equeue,
+                SceVideoOutInternalEventOutputMode,
+                OrbisKernelEventFilterVideoOut,
+                eventHint,
+                registration.UserData);
+        }
+
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
     [SysAbiExport(
@@ -885,6 +909,52 @@ public static partial class VideoOutExports
     }
 
     [SysAbiExport(
+        Nid = "kmSe30JTs+E",
+        ExportName = "sceVideoOutAddOutputModeEvent",
+        Target = Generation.Gen5,
+        LibraryName = "libSceVideoOut")]
+    public static int VideoOutAddOutputModeEvent(CpuContext ctx)
+    {
+        var equeue = ctx[CpuRegister.Rdi];
+        var handle = unchecked((int)ctx[CpuRegister.Rsi]);
+        var userData = ctx[CpuRegister.Rdx];
+        if (!TryGetPort(handle, out var port))
+        {
+            return OrbisVideoOutErrorInvalidHandle;
+        }
+
+        if (!KernelEventQueueCompatExports.IsValidEqueue(equeue))
+        {
+            return OrbisVideoOutErrorInvalidEventQueue;
+        }
+
+        ulong outputMode;
+        lock (_stateGate)
+        {
+            var existingIndex = port.OutputModeEvents.FindIndex(registration => registration.Equeue == equeue);
+            if (existingIndex >= 0)
+            {
+                port.OutputModeEvents[existingIndex] = new FlipEventRegistration(equeue, userData);
+            }
+            else
+            {
+                port.OutputModeEvents.Add(new FlipEventRegistration(equeue, userData));
+            }
+            outputMode = port.OutputMode;
+        }
+
+        var eventHint = (outputMode & 0x0000_FFFF_FFFF_FFFFUL) << 16;
+        return KernelEventQueueCompatExports.TriggerDisplayEvent(
+            equeue,
+            SceVideoOutInternalEventOutputMode,
+            OrbisKernelEventFilterVideoOut,
+            eventHint,
+            userData)
+            ? (int)OrbisGen2Result.ORBIS_GEN2_OK
+            : OrbisVideoOutErrorInvalidEventQueue;
+    }
+
+    [SysAbiExport(
         Nid = "oNOQn3knW6s",
         ExportName = "sceVideoOutDeleteVblankEvent",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -1025,6 +1095,11 @@ public static partial class VideoOutExports
             return 1;
         }
 
+        if (ident == SceVideoOutInternalEventOutputMode)
+        {
+            return 8;
+        }
+
         return OrbisVideoOutErrorInvalidEvent;
     }
 
@@ -1050,7 +1125,9 @@ public static partial class VideoOutExports
         }
 
         if (filter != OrbisKernelEventFilterVideoOut ||
-            (ident != SceVideoOutInternalEventFlip && ident != SceVideoOutInternalEventVblank))
+            (ident != SceVideoOutInternalEventFlip &&
+             ident != SceVideoOutInternalEventVblank &&
+             ident != SceVideoOutInternalEventOutputMode))
         {
             return OrbisVideoOutErrorInvalidEvent;
         }

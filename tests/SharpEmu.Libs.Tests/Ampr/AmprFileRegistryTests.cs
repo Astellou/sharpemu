@@ -11,6 +11,34 @@ namespace SharpEmu.Libs.Tests.Ampr;
 [Collection("AmprFileRegistry")]
 public class AmprFileRegistryTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResolveCollidingPaths_PreservesBothHandles(bool reverseOrder)
+    {
+        AmprFileRegistry.ClearForTests();
+        const string firstPath = "$/assets/bce5a816.bin";
+        const string secondPath = "$/assets/1b9e7058.bin";
+        Assert.Equal(AmprFileRegistry.ComputeFileId(firstPath), AmprFileRegistry.ComputeFileId(secondPath));
+        var firstHost = Path.Combine(Path.GetTempPath(), "apr-first.bin");
+        var secondHost = Path.Combine(Path.GetTempPath(), "apr-second.bin");
+        if (reverseOrder)
+            AmprFileRegistry.Register(secondPath, secondHost);
+        var firstId = AmprFileRegistry.Register(firstPath, firstHost);
+        var secondId = AmprFileRegistry.Register(secondPath, secondHost);
+        Assert.NotEqual(firstId, secondId);
+        Assert.NotEqual(uint.MaxValue, firstId);
+        Assert.True(AmprFileRegistry.TryGetHostPath(firstId, out var firstResult));
+        Assert.True(AmprFileRegistry.TryGetHostPath(secondId, out var secondResult));
+        Assert.Equal(firstHost, firstResult);
+        Assert.Equal(secondHost, secondResult);
+        Assert.Equal(firstId, AmprFileRegistry.Register(firstPath, firstHost));
+        Assert.False(AmprFileRegistry.TryGetHostPath(AmprFileRegistry.ComputeFileId(firstPath), out _));
+        AmprFileRegistry.RegisterApp0RelativeForTests("assets/1b9e7058.bin", secondHost);
+        Assert.True(AmprFileRegistry.TryGetHostPath(firstId, out firstResult));
+        Assert.Equal(firstHost, firstResult);
+    }
+
     [Fact]
     public void ComputeFileId_matches_utf8_fnv1a()
     {
@@ -149,6 +177,6 @@ public class AmprFileRegistryTests
             hash *= prime;
         }
 
-        return hash;
+        return hash & 0x7fffffff;
     }
 }

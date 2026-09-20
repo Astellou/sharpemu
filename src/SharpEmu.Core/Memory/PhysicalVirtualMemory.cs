@@ -140,12 +140,12 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
     private GuestSpaceOwner? _backedSpace;
 
     public PhysicalVirtualMemory(IHostMemory? hostMemory = null, IHostViewMemory? viewHost = null,
-        ulong backingBytes = GuestMemoryLayout.BackingBytes)
+        ulong backingBytes = GuestMemoryLayout.BackingBytes, bool preReserveGuestAddressSpace = false)
     {
         _hostMemory = hostMemory ?? CrossPlatformHostMemory.Instance;
         if (viewHost != null)
         {
-            _backedSpace = new GuestSpaceOwner(viewHost, backingBytes);
+            _backedSpace = new GuestSpaceOwner(viewHost, backingBytes, preReserveGuestAddressSpace);
             RunBackingSelfTest();
         }
     }

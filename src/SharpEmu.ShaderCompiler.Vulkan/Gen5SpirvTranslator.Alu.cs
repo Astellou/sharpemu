@@ -115,26 +115,19 @@ public static partial class Gen5SpirvTranslator
                     break;
                 case "VWritelaneB32":
                 {
-                    // vdst[lane(src1)] = src0
-                    // Per-lane: if current lane == src1, write src0, else keep old value.
                     var oldValue = LoadV(destination);
-                    var src0 = GetRawSource(instruction, 0);
-                    var laneSelect = GetRawSource(instruction, 1);
-                    var currentLane = _subgroupInvocationIdInput != 0
-                        ? BitwiseAnd(
-                            Load(_uintType, _subgroupInvocationIdInput),
-                            UInt(RdnaWaveLaneCount - 1))
-                        : UInt(0);
+                    var sourceValue = GetRawSource(instruction, 0);
+                    var selectedLane = BitwiseAnd(GetRawSource(instruction, 1), UInt(_waveLaneCount - 1));
                     var isTargetLane = _module.AddInstruction(
                         SpirvOp.IEqual,
                         _boolType,
-                        currentLane,
-                        laneSelect);
+                        GuestWaveLane(),
+                        selectedLane);
                     result = _module.AddInstruction(
                         SpirvOp.Select,
                         _uintType,
                         isTargetLane,
-                        src0,
+                        sourceValue,
                         oldValue);
                     // Writelane writes to a specific lane regardless of exec mask.
                     StoreV(destination, result, guardWithExec: false);
@@ -283,6 +276,12 @@ public static partial class Gen5SpirvTranslator
                         instruction,
                         Ext(32, _floatType, GetFloatSource(instruction, 0)));
                     break;
+                case "VRsqF16":
+                    result = EmitFloat16Result(
+                        instruction,
+                        destination,
+                        Ext(32, _floatType, GetFloat16Source(instruction, 0)));
+                    break;
                 case "VFractF32":
                     result = EmitFloatResult(
                         instruction,
@@ -392,6 +391,17 @@ public static partial class Gen5SpirvTranslator
                             GetFloatSource(instruction, 1),
                             GetFloatSource(instruction, 2)));
                     break;
+                case "VFmaF16":
+                    result = EmitFloat16Result(
+                        instruction,
+                        destination,
+                        Ext(
+                            50,
+                            _floatType,
+                            GetFloat16Source(instruction, 0),
+                            GetFloat16Source(instruction, 1),
+                            GetFloat16Source(instruction, 2)));
+                    break;
                 case "VMacF32":
                 case "VFmacF32":
                 {
@@ -454,6 +464,12 @@ public static partial class Gen5SpirvTranslator
                 case "VAddI32":
                 case "VAddU32":
                     result = EmitIntegerBinary(instruction, SpirvOp.IAdd);
+                    break;
+                case "VAddNcU16":
+                    result = EmitInteger16Binary(
+                        instruction,
+                        destination,
+                        SpirvOp.IAdd);
                     break;
                 case "VAddcU32":
                 case "VAddCoCiU32":
@@ -1189,18 +1205,6 @@ public static partial class Gen5SpirvTranslator
                 return false;
             }
 
-            var sourceCount = instruction.Opcode == "VPkFmaF16" ? 3 : 2;
-            for (var index = 0; index < sourceCount; index++)
-            {
-                var source = instruction.Sources[index];
-                if (source.Kind is not (Gen5OperandKind.VectorRegister or Gen5OperandKind.ScalarRegister))
-                {
-                    error =
-                        $"unsupported vop3p operand {source} for {instruction.Opcode} (first slice: registers only)";
-                    return false;
-                }
-            }
-
             var low = EmitPackedF16Lane(instruction, control, highLane: false);
             var high = EmitPackedF16Lane(instruction, control, highLane: true);
             result = BitwiseOr(low, ShiftLeftLogical(high, UInt(16)));
@@ -1779,8 +1783,14 @@ public static partial class Gen5SpirvTranslator
             }
             else if (opcode is not ("VCmpClassF32" or "VCmpxClassF32"))
             {
-                var left = GetRawSource(instruction, 0);
-                var right = GetRawSource(instruction, 1);
+                var compare64 = opcode.EndsWith("U64", StringComparison.Ordinal) ||
+                    opcode.EndsWith("I64", StringComparison.Ordinal);
+                var left = compare64
+                    ? GetRawSource64(instruction, 0)
+                    : GetRawSource(instruction, 0);
+                var right = compare64
+                    ? GetRawSource64(instruction, 1)
+                    : GetRawSource(instruction, 1);
                 var signed = opcode.EndsWith("I32", StringComparison.Ordinal);
                 if (signed)
                 {
@@ -1794,6 +1804,7 @@ public static partial class Gen5SpirvTranslator
                     "VCmpEqU32" or "VCmpxEqU32" => SpirvOp.IEqual,
                     "VCmpNeI32" or "VCmpxNeI32" or
                     "VCmpNeU32" or "VCmpxNeU32" => SpirvOp.INotEqual,
+                    "VCmpxNeU64" => SpirvOp.INotEqual,
                     "VCmpLtI32" or "VCmpxLtI32" => SpirvOp.SLessThan,
                     "VCmpLeI32" or "VCmpxLeI32" => SpirvOp.SLessThanEqual,
                     "VCmpGtI32" or "VCmpxGtI32" => SpirvOp.SGreaterThan,
@@ -3595,6 +3606,41 @@ public static partial class Gen5SpirvTranslator
             return _module.AddInstruction(operation, _uintType, left, right);
         }
 
+        private uint EmitInteger16Binary(
+            Gen5ShaderInstruction instruction,
+            uint destination,
+            SpirvOp operation)
+        {
+            var control = instruction.Control as Gen5Vop3Control;
+            var left = GetRawSource(instruction, 0, applySdwaIntegerModifiers: false);
+            var right = GetRawSource(instruction, 1, applySdwaIntegerModifiers: false);
+
+            if ((control?.OperandSelect & 0x1) != 0)
+            {
+                left = ShiftRightLogical(left, UInt(16));
+            }
+
+            if ((control?.OperandSelect & 0x2) != 0)
+            {
+                right = ShiftRightLogical(right, UInt(16));
+            }
+
+            left = BitwiseAnd(left, UInt(0xFFFF));
+            right = BitwiseAnd(right, UInt(0xFFFF));
+            var low16 = BitwiseAnd(
+                _module.AddInstruction(operation, _uintType, left, right),
+                UInt(0xFFFF));
+            var current = LoadV(destination);
+
+            return (control?.OperandSelect & 0x8) != 0
+                ? BitwiseOr(
+                    BitwiseAnd(current, UInt(0x0000_FFFF)),
+                    ShiftLeftLogical(low16, UInt(16)))
+                : BitwiseOr(
+                    BitwiseAnd(current, UInt(0xFFFF_0000)),
+                    low16);
+        }
+
         private enum CubeCoordinate
         {
             Id,
@@ -3946,24 +3992,35 @@ public static partial class Gen5SpirvTranslator
             }
 
             var destination = instruction.Destinations[0].Value;
-            var src0 = GetRawSource(instruction, 0);
+            var sourceValue = GetRawSource(instruction, 0);
+            var selectedLane = BitwiseAnd(GetRawSource(instruction, 1), UInt(_waveLaneCount - 1));
 
-            if (_subgroupInvocationIdInput != 0)
+            if (_emulateWave64)
             {
-                // sdst = vsrc0[lane(src1)] — broadcast from the specified lane.
-                var laneSelect = GetRawSource(instruction, 1);
+                // The selected guest lane can belong to another host subgroup.
+                // Read it even when the guest execution mask disables that lane.
+                var isSelectedLane = _module.AddInstruction(
+                    SpirvOp.IEqual, _boolType, GuestWaveLane(), selectedLane);
+                EmitConditional(isSelectedLane, () => Store(WaveBroadcastScratchPointer(), sourceValue));
+                EmitWave64Barrier();
+                var broadcast = Load(_uintType, WaveBroadcastScratchPointer());
+                EmitWave64Barrier();
+                StoreS(destination, broadcast);
+            }
+            else if (_subgroupInvocationIdInput != 0)
+            {
                 var broadcast = _module.AddInstruction(
                     SpirvOp.GroupNonUniformBroadcast,
                     _uintType,
-                    UInt(3),  // Subgroup scope
-                    src0,
-                    laneSelect);
+                    UInt(3),
+                    sourceValue,
+                    selectedLane);
                 StoreS(destination, broadcast);
             }
             else
             {
                 // Fallback: no subgroup ops, read current lane's value.
-                StoreS(destination, src0);
+                StoreS(destination, sourceValue);
             }
 
             return true;

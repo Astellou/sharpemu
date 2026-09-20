@@ -126,6 +126,10 @@ public sealed class ShaderResourcePlan
                 foreach (var candidate in directCandidates)
                     plan.MarkCleanFlatSlots(plan.DescriptorSources[(int)candidate.Source], cleanSlots);
             }
+            else if (indirect.Dense)
+            {
+                plan.MarkCleanFlatSlots(plan.DescriptorSources[(int)indirect.HeapSource], cleanSlots);
+            }
             else
             {
                 plan.MarkCleanFlatSlots(plan.DescriptorSources[(int)indirect.MaterialSource], cleanSlots);

@@ -367,8 +367,9 @@ internal static class RenderPhaseProfile
     }
 
     // Cache calls on other threads must not enter the render-thread counters.
+    // Check the switch first to avoid thread-local storage allocation when profiling is disabled.
     internal static Scope MeasureDetail(Phase phase) =>
-        _scopeDepth > 0 ? Measure(phase) : default;
+        Enabled && _scopeDepth > 0 ? Measure(phase) : default;
 
     internal static bool DetailMeasurementsEnabled => Enabled && _scopeDepth > 0;
 

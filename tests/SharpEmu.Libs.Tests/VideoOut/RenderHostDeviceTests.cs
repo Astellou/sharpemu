@@ -28,7 +28,7 @@ namespace SharpEmu.Libs.Tests.VideoOut;
 
 // The executor over the presenter's render host on a real device: each draw renders the guest bytes it was recorded with.
 [Collection(SchedulingStateCollection.Name)]
-public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanFixture>
+public sealed unsafe partial class RenderHostDeviceTests : IClassFixture<HeadlessVulkanFixture>
 {
     private const uint Size = 64;
     private const uint VertexStride = 8;
@@ -116,7 +116,8 @@ public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanF
     public RenderHostDeviceTests(HeadlessVulkanFixture fixture) => _vulkan = fixture.Vulkan;
 
     // One float2 position program and one solid red pixel program over empty resource plans.
-    private sealed class FixedProgramProvider(IShaderPipelineHost host, ulong vertexAddress, bool pushData = false) : IShaderPipelineProvider
+    private sealed class FixedProgramProvider(IShaderPipelineHost host, ulong vertexAddress, bool pushData = false,
+        byte[]? interpolationShader = null) : IShaderPipelineProvider
     {
         private const uint Float2Format = 64;
         private static readonly uint[] UserRegisters = [0, 1];
@@ -151,8 +152,10 @@ public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanF
                 return;
             }
 
-            _vertexProgram = new ShaderProgram(1, host.CreateShaderModule(new VulkanCompiledGuestShader(CreatePositionVertexShader()), ShaderStage.Vertex, 1, 1));
-            _pixelProgram = new ShaderProgram(2, host.CreateShaderModule(new VulkanCompiledGuestShader(SpirvFixedShaders.CreateSolidFragment(1f, 0f, 0f, 1f)), ShaderStage.Pixel, 2, 2));
+            _vertexProgram = new ShaderProgram(1, host.CreateShaderModule(new VulkanCompiledGuestShader(
+                CreatePositionVertexShader(interpolationShader is not null)), ShaderStage.Vertex, 1, 1));
+            _pixelProgram = new ShaderProgram(2, host.CreateShaderModule(new VulkanCompiledGuestShader(
+                interpolationShader ?? SpirvFixedShaders.CreateSolidFragment(1f, 0f, 0f, 1f)), ShaderStage.Pixel, 2, 2));
         }
 
         public GraphicsPrograms GetGraphicsPrograms(
@@ -202,7 +205,7 @@ public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanF
     }
 
     // position = (input.xy, 0, 1)
-    private static byte[] CreatePositionVertexShader()
+    private static byte[] CreatePositionVertexShader(bool interpolationOutput = false)
     {
         var module = new SpirvModuleBuilder();
         module.AddCapability(SpirvCapability.Shader);
@@ -216,6 +219,12 @@ public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanF
         module.AddDecoration(input, SpirvDecoration.Location, 0);
         var position = module.AddGlobalVariable(outputPointer, SpirvStorageClass.Output);
         module.AddDecoration(position, SpirvDecoration.BuiltIn, (uint)SpirvBuiltIn.Position);
+        uint parameter = 0;
+        if (interpolationOutput)
+        {
+            parameter = module.AddGlobalVariable(outputPointer, SpirvStorageClass.Output);
+            module.AddDecoration(parameter, SpirvDecoration.Location, 0);
+        }
         var functionType = module.TypeFunction(voidType);
         var main = module.BeginFunction(voidType, functionType);
         module.AddLabel();
@@ -225,9 +234,19 @@ public sealed unsafe class RenderHostDeviceTests : IClassFixture<HeadlessVulkanF
         var composed = module.AddInstruction(
             SpirvOp.CompositeConstruct, vec4Type, x, y, module.ConstantFloat(floatType, 0f), module.ConstantFloat(floatType, 1f));
         module.AddStatement(SpirvOp.Store, position, composed);
+        if (interpolationOutput)
+        {
+            var component = module.AddInstruction(SpirvOp.FAdd, floatType,
+                module.AddInstruction(SpirvOp.FMul, floatType, x, module.ConstantFloat(floatType, 0.125f)),
+                module.ConstantFloat(floatType, 0.375f));
+            var output = module.AddInstruction(SpirvOp.CompositeConstruct, vec4Type,
+                component, component, component, component);
+            module.AddStatement(SpirvOp.Store, parameter, output);
+        }
         module.AddStatement(SpirvOp.Return);
         module.EndFunction();
-        module.AddEntryPoint(SpirvExecutionModel.Vertex, main, "main", [input, position]);
+        module.AddEntryPoint(SpirvExecutionModel.Vertex, main, "main",
+            interpolationOutput ? [input, position, parameter] : [input, position]);
         return module.Build();
     }
 

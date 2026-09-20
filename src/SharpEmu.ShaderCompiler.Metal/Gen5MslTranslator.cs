@@ -332,9 +332,15 @@ public static partial class Gen5MslTranslator
                             continue;
                         }
 
+                        var componentType = input.NumberFormat switch
+                        {
+                            4u => "uint",
+                            5u => "int",
+                            _ => "float",
+                        };
                         var fieldType = input.ComponentCount == 1
-                            ? "float"
-                            : $"float{input.ComponentCount}";
+                            ? componentType
+                            : $"{componentType}{input.ComponentCount}";
                         source.AppendLine(
                             $"    {fieldType} in{input.Location} [[attribute({input.Location})]];");
                     }
@@ -1010,6 +1016,7 @@ public static partial class Gen5MslTranslator
             int bindingIndex;
             string stride;
             string descriptorWord3;
+            uint descriptorFormat;
             {
                 // The dense buffer, its stride and its format come from the specialization.
                 if (!TryResolveLayoutBuffer(instruction.Pc, out bindingIndex, out var specialized))
@@ -1019,6 +1026,7 @@ public static partial class Gen5MslTranslator
                 }
 
                 stride = FormatUInt(specialized.PackedStride & 0x3FFF);
+                descriptorFormat = specialized.DescriptorFormat;
                 descriptorWord3 = FormatUInt((specialized.DescriptorFormat << 12) | (specialized.DescriptorSwizzle & 0xFFF));
             }
 
@@ -1036,9 +1044,26 @@ public static partial class Gen5MslTranslator
                 ApplyByteBias(
                     bindingIndex,
                     $"(0x{unchecked((uint)control.OffsetBytes):X}u + {scalarOffset} + {vectorOffset} + ({vectorIndex} * {stride}))"));
+            if (instruction.Opcode is "BufferStoreFormatX" or "BufferStoreFormatXy" or
+                "BufferStoreFormatXyz" or "BufferStoreFormatXyzw")
+            {
+                if (descriptorFormat == 0)
+                {
+                    return true;
+                }
+
+                if (!TryEmitBufferFormatStore(bindingIndex, address, control, descriptorWord3, descriptorFormat))
+                {
+                    error = $"unsupported buffer store format {descriptorFormat}";
+                    return false;
+                }
+
+                return true;
+            }
+
             if (control.Typed &&
                 instruction.Opcode.StartsWith("TBufferStore", StringComparison.Ordinal) &&
-                TryEmitTypedBufferFormatStore(bindingIndex, address, control, descriptorWord3))
+                TryEmitBufferFormatStore(bindingIndex, address, control, descriptorWord3, control.TypedFormat))
             {
                 return true;
             }
@@ -1181,15 +1206,16 @@ public static partial class Gen5MslTranslator
             return true;
         }
 
-        // A typed store converts each register with the format's number format and places
+        // A formatted store converts each register with the selected number format and places
         // the bits at the component's offset; all transferred components are stored or dropped.
-        private bool TryEmitTypedBufferFormatStore(
+        private bool TryEmitBufferFormatStore(
             int bindingIndex,
             string byteAddress,
             Gen5BufferMemoryControl control,
-            string descriptorWord3)
+            string descriptorWord3,
+            uint unifiedFormat)
         {
-            if (!Gfx10UnifiedFormat.TryDecode(control.TypedFormat, out var dataFormat, out var numberFormat))
+            if (!Gfx10UnifiedFormat.TryDecode(unifiedFormat, out var dataFormat, out var numberFormat))
             {
                 return false;
             }

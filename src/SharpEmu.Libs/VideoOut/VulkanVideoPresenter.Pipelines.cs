@@ -11,6 +11,7 @@ using SharpEmu.Libs.Gpu.Rendering;
 using SharpEmu.Libs.Gpu.Scheduling;
 using SharpEmu.ShaderCompiler;
 using SharpEmu.ShaderCompiler.Resources;
+using SharpEmu.ShaderCompiler.Vulkan;
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
@@ -228,6 +229,12 @@ internal static unsafe partial class VulkanVideoPresenter
 
         private ShaderModule CreateShaderModule(byte[] code)
         {
+            if (!_supportsFragmentShaderBarycentric && RequiresFragmentShaderBarycentric(code))
+            {
+                throw new NotSupportedException(
+                    "The shader requires the fragmentShaderBarycentric device feature.");
+            }
+
             string? dumpPath = null;
             var dumpDirectory = Environment.GetEnvironmentVariable("SHARPEMU_SHADER_SPIRV_DUMP_DIR");
             if (!string.IsNullOrWhiteSpace(dumpDirectory))
@@ -261,6 +268,28 @@ internal static unsafe partial class VulkanVideoPresenter
             {
                 _pendingShaderModuleDumpPath = null;
             }
+        }
+
+        private static bool RequiresFragmentShaderBarycentric(ReadOnlySpan<byte> code)
+        {
+            for (var offset = 20; offset + 4 <= code.Length;)
+            {
+                var header = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(code[offset..]);
+                var wordCount = (int)(header >> 16);
+                if (wordCount == 0 || wordCount > (code.Length - offset) / 4)
+                {
+                    throw new InvalidOperationException("The shader contains an invalid SPIR-V instruction.");
+                }
+
+                if ((header & 0xFFFF) == (uint)SpirvOp.Capability && wordCount == 2 &&
+                    System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(code[(offset + 4)..]) ==
+                        (uint)SpirvCapability.FragmentBarycentricKhr)
+                {
+                    return true;
+                }
+                offset += wordCount * 4;
+            }
+            return false;
         }
 
         // One layout binding per descriptor binding of the stage, at the stage's native binding numbers.
@@ -413,7 +442,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     throw SubmissionScheduler.Fatal($"A vertex attribute buffer is swizzled: attribute={index} hash=0x{description.VertexStage.Hash:X16}.");
                 }
 
-                CheckVertexSwizzle(in descriptor, resource.RegisterCount, attributeSize, index);
+                CheckVertexSwizzle(in descriptor, (int)usedComponents, attributeSize, index);
                 attributes[index] = new VertexInputAttributeDescription
                 {
                     Location = (uint)index,
@@ -427,12 +456,12 @@ internal static unsafe partial class VulkanVideoPresenter
         private static uint DestinationSelect(uint x, uint y = 0, uint z = 0, uint w = 0) => x | (y << 3) | (z << 6) | (w << 9);
 
         // A destination select the fixed-function fetch cannot apply is logged once and accepted.
-        private static void CheckVertexSwizzle(in BufferDescriptorWords descriptor, int registerCount, uint attributeSize, int index)
+        private static void CheckVertexSwizzle(in BufferDescriptorWords descriptor, int fetchedComponents, uint attributeSize, int index)
         {
             uint swizzle;
             uint expected;
             var supported = true;
-            switch (registerCount)
+            switch (fetchedComponents)
             {
                 case 1:
                     swizzle = descriptor.DestinationSelectX;
@@ -478,14 +507,14 @@ internal static unsafe partial class VulkanVideoPresenter
 
                     break;
                 default:
-                    throw SubmissionScheduler.Fatal($"A vertex attribute fills an invalid register count: attribute={index} registers={registerCount}.");
+                    throw SubmissionScheduler.Fatal($"A vertex attribute fetch uses an invalid component count: attribute={index} components={fetchedComponents}.");
             }
 
             if (!supported && Interlocked.Exchange(ref _vertexSwizzleLines, 1) == 0)
             {
                 Console.Error.WriteLine(
                     $"[LOADER][INFO] vertex_input accepted an unsupported destination select attribute={index} size={attributeSize} " +
-                    $"registers={registerCount} swizzle=0x{swizzle:X3} expected=0x{expected:X3}");
+                    $"components={fetchedComponents} swizzle=0x{swizzle:X3} expected=0x{expected:X3}");
             }
         }
 

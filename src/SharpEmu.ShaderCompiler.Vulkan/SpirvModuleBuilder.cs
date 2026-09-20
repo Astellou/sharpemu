@@ -185,6 +185,10 @@ public enum SpirvOp : ushort
 public enum SpirvCapability : uint
 {
     Shader = 1,
+    InterpolationFunction = 52,
+    FragmentBarycentricKhr = 5284,
+    ClipDistance = 32,
+    CullDistance = 33,
     SampledImageArrayDynamicIndexing = 29,
     StorageImageArrayDynamicIndexing = 31,
     SampleRateShading = 35,
@@ -203,6 +207,8 @@ public enum SpirvCapability : uint
     GroupNonUniformVote = 62,
     GroupNonUniformBallot = 64,
     GroupNonUniformShuffle = 65,
+    ShaderLayer = 5253,
+    ShaderViewportIndex = 5254,
     RuntimeDescriptorArray = 5302,
     PhysicalStorageBufferAddresses = 5347,
 }
@@ -243,6 +249,7 @@ public enum SpirvDecoration : uint
     BuiltIn = 11,
     NoPerspective = 13,
     Flat = 14,
+    PerVertexKhr = 5285,
     Location = 30,
     Binding = 33,
     DescriptorSet = 34,
@@ -254,9 +261,16 @@ public enum SpirvDecoration : uint
 public enum SpirvBuiltIn : uint
 {
     Position = 0,
+    PointSize = 1,
+    ClipDistance = 3,
+    CullDistance = 4,
+    Layer = 9,
+    ViewportIndex = 10,
     VertexIndex = 42,
     InstanceIndex = 43,
     FragCoord = 15,
+    BaryCoordKhr = 5286,
+    BaryCoordNoPerspKhr = 5287,
     FrontFacing = 17,
     WorkgroupId = 26,
     LocalInvocationId = 27,

@@ -106,7 +106,7 @@ public sealed partial class RenderExecutor
             return;
         }
 
-        if (ConsumesColorMetadataOperation(banks.Context))
+        if (ConsumesColorMetadataOperation(banks.Context) || TryDepthStencilCopy(banks.Context))
         {
             _host.ResetBindings();
             return;
@@ -226,7 +226,7 @@ public sealed partial class RenderExecutor
             return;
         }
 
-        if (ConsumesColorMetadataOperation(banks.Context))
+        if (ConsumesColorMetadataOperation(banks.Context) || TryDepthStencilCopy(banks.Context))
         {
             _host.ResetBindings();
             return;
@@ -255,6 +255,7 @@ public sealed partial class RenderExecutor
 
         if (!ResolveTopology(userConfig, autoDraw: true, out var topology))
         {
+            TraceDrawDisposition(banks, in draw, "no-primitive-topology");
             _host.ResetBindings();
             return;
         }
@@ -588,11 +589,17 @@ public sealed partial class RenderExecutor
         var colorWidth = state.ColorCount != 0 ? state.Colors[0].Resolution.Extent.Width : 0;
         var colorHeight = state.ColorCount != 0 ? state.Colors[0].Resolution.Extent.Height : 0;
         var depth = state.Depth.HasTarget ? state.Depth.Target : default;
+        ref readonly var viewport = ref banks.Context.ScreenViewport.Viewports[0];
+        var clip = banks.Context.Clip;
         RenderTrace.Write(
             $"DrawState seq={RenderTrace.NextSequence()} submit={submitId} name={draw.Name} export=0x{shader.Vertex.ExportAddress:X16} " +
             $"pixel=0x{shader.Pixel.Address:X16} pixelActive={state.PixelActive} count={draw.Count} instances={draw.InstanceCount} " +
             $"colors={state.ColorCount} color=0x{colorAddress:X10}:{colorWidth}x{colorHeight} targetMask=0x{banks.Context.RenderTargetMask:X8} " +
             $"depth=0x{depth.Target.DepthAddress:X10}:{depth.Target.Width}x{depth.Target.Height}:{(int)depth.Target.Format} " +
-            $"depthState={(depth.State.DepthTestEnabled ? 1 : 0)}/{(depth.State.DepthWriteEnabled ? 1 : 0)}/{(int)depth.State.DepthCompare}");
+            $"depthState={(depth.State.DepthTestEnabled ? 1 : 0)}/{(depth.State.DepthWriteEnabled ? 1 : 0)}/{(int)depth.State.DepthCompare} " +
+            $"viewportTransform=0x{banks.Context.ScreenViewport.TransformControl:X8} directXClip={clip.DirectXClipSpace} " +
+            $"clipDisabled={clip.ClipDisable} nearClipDisabled={clip.NearZClipDisable} farClipDisabled={clip.FarZClipDisable} " +
+            $"zScale={viewport.ZScale:R} zOffset={viewport.ZOffset:R} zBounds={viewport.MinDepth:R}/{viewport.MaxDepth:R} " +
+            $"hostDepthRange={viewport.ZOffset - (clip.DirectXClipSpace ? 0f : viewport.ZScale):R}/{viewport.ZScale + viewport.ZOffset:R}");
     }
 }

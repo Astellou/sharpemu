@@ -14,6 +14,7 @@ public sealed class MemcpyHleRoutingTests
 {
     private const string MemcpyNid = "Q3VBxCXhUHs";
     private const string MemsetNid = "QrZZdJ8XsX0";
+    private const string StrcasecmpNid = "AV6ipCNa4Rw";
     private const string RdtscNid = "-2IRUCO--PM";
 
     [Fact]
@@ -35,6 +36,14 @@ public sealed class MemcpyHleRoutingTests
     }
 
     [Fact]
+    public void IsHlePreferredNid_PrefersHleForStrcasecmp()
+    {
+        Assert.True(
+            InvokeIsHlePreferredNid(StrcasecmpNid),
+            $"strcasecmp ({StrcasecmpNid}) must route through HLE so null-argument recovery remains active.");
+    }
+
+    [Fact]
     public void TryCreateNativeImportIntrinsic_DoesNotClaimMemcpy()
     {
         if (RuntimeInformation.ProcessArchitecture != Architecture.X64)
@@ -49,6 +58,22 @@ public sealed class MemcpyHleRoutingTests
             $"memcpy ({MemcpyNid}) must fall through to the HLE trampoline. SetupImportStubs tries " +
             "the intrinsic stub before the trampoline, so without an IsHlePreferredNid guard here " +
             "the intrinsic claims memcpy and the HLE routing never takes effect.");
+        Assert.Equal(0, address);
+    }
+
+    [Fact]
+    public void TryCreateNativeImportIntrinsic_DoesNotClaimStrcasecmp()
+    {
+        if (RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            return;
+        }
+
+        var claimed = InvokeTryCreateNativeImportIntrinsic(StrcasecmpNid, out var address);
+
+        Assert.False(
+            claimed,
+            $"strcasecmp ({StrcasecmpNid}) must fall through to the HLE trampoline so a null guest pointer does not fault in the intrinsic stub.");
         Assert.Equal(0, address);
     }
 

@@ -19,6 +19,9 @@ public sealed class GuestSpaceOwner : IDisposable
     internal static Action<string> OnFatal = message => Environment.FailFast(message);
 
     public const ulong GuestPage = 0x4000;
+    private const ulong UserAddressStart = 0x10_0000_0000;
+    private const ulong UserAddressEnd = 0xFC_0000_0000;
+    private const ulong MinimumPreReservedRange = 0x0100_0000;
 
     private readonly IHostViewMemory _host;
     private readonly SharedBackingViews _views;
@@ -29,13 +32,21 @@ public sealed class GuestSpaceOwner : IDisposable
     private readonly List<(ulong Address, ulong Size)> _owned = new();
     private bool _disposed;
 
-    public GuestSpaceOwner(IHostViewMemory host, ulong backingSize)
+    public GuestSpaceOwner(IHostViewMemory host, ulong backingSize, bool preReserveGuestAddressSpace = false)
     {
         _host = host;
         Granularity = host.Granularity;
         // Create lookup views before concurrent fault handlers can read the range table.
         _ = _mapped.Keys;
         _ = _mapped.Values;
+        if (preReserveGuestAddressSpace)
+        {
+            foreach (var range in _host.ReserveFreeAddressRanges(UserAddressStart, UserAddressEnd, MinimumPreReservedRange))
+            {
+                _owned.Add((range.Address, range.Size));
+                AddFreeRange(range.Address, range.Size);
+            }
+        }
         _views = new SharedBackingViews(host, backingSize);
         if (!_views.IsAvailable)
         {

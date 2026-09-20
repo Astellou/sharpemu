@@ -145,6 +145,10 @@ public interface IRenderHost
 
     void Dispatch(uint groupsX, uint groupsY, uint groupsZ);
 
+    // Executes a dispatch from three uint32 group counts in guest memory when the backend can
+    // consume the guest buffer directly. Backends without native indirect dispatch return false.
+    bool TryDispatchIndirect(ulong argumentsAddress);
+
     // Orders the buffer writes of the given shader stages before every later access.
     void ShaderWriteBarrier(PipelineStageFlags sourceStages);
 
@@ -161,6 +165,8 @@ public interface IRenderHost
     void MarkGpuWritten(ResourceSlotIdentifier image);
 
     void ResolveImage(ResourceSlotIdentifier source, uint sourceMip, uint sourceLayer, ResourceSlotIdentifier destination, uint destinationMip, uint destinationLayer);
+
+    void CopyDepthStencilImage(ResourceSlotIdentifier source, ResourceSlotIdentifier destination, in SubresourceRange range, in Extent3D extent, ImageAspectFlags aspects);
 
     bool IsMetadata(ulong address);
 

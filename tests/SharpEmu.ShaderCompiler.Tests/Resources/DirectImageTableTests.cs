@@ -216,9 +216,11 @@ public sealed class DirectImageTableTests
                 }).ToArray(),
             };
         var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, Hash, 0, 2);
-        var candidates = plan.DescriptorSources[(int)plan.Info.Images[0].Source].IndirectImage!.DirectCandidates!;
-        Assert.Equal(32, candidates.Count);
-        Assert.DoesNotContain(candidates, candidate => candidate.Offset == 312);
+        var selector = plan.DescriptorSources[(int)plan.Info.Images[0].Source].IndirectImage!;
+        Assert.True(selector.Dense);
+        Assert.Equal(32u, selector.KeyBound);
+        Assert.Equal(344u, selector.TableOffset);
+        Assert.True(Assert.Single(plan.IndirectImages).KeyIsAddressOffset);
         bool Read(ulong address, out uint word)
         {
             Assert.True(address >= 0x1000 + 344);
@@ -249,9 +251,18 @@ public sealed class DirectImageTableTests
                 ]).ToArray(),
         };
         var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, Hash, 0, 2);
-        var candidates = plan.DescriptorSources[(int)plan.Info.Images[0].Source].IndirectImage!.DirectCandidates!;
-        Assert.Equal(bypassGuard ? 33 : 32, candidates.Count);
-        Assert.Equal(bypassGuard, candidates.Any(candidate => candidate.Offset == 312));
+        var selector = plan.DescriptorSources[(int)plan.Info.Images[0].Source].IndirectImage!;
+        if (bypassGuard)
+        {
+            Assert.Equal(33, selector.DirectCandidates!.Count);
+            Assert.Contains(selector.DirectCandidates, candidate => candidate.Offset == 312);
+        }
+        else
+        {
+            Assert.True(selector.Dense);
+            Assert.Equal(32u, selector.KeyBound);
+            Assert.Equal(344u, selector.TableOffset);
+        }
     }
 
     [Theory]
@@ -304,7 +315,11 @@ public sealed class DirectImageTableTests
             Instructions = program.Instructions.Select(instruction => instruction.Pc == 40
                 ? Vop1(40, "VMovB32", 15, Gen5Operand.Scalar(4)) : instruction).ToArray(),
         };
-        Assert.Throws<ResourcePlanException>(() => ShaderResourcePlan.Extract(program, ShaderStage.Compute, Hash, 0, 2));
+        var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, Hash, 0, 2);
+        Assert.Single(plan.IndirectImages);
+        Assert.True(plan.Info.UsesDeviceAddresses);
+        Assert.True(plan.Memory.TryGetIndex(24, 0, out var memoryIndex));
+        Assert.False(plan.Memory[memoryIndex].PlanningOnly);
     }
 
     [Theory]

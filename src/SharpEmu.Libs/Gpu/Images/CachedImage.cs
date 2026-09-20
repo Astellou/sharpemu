@@ -228,6 +228,15 @@ public sealed unsafe partial class CachedImage : IDisposable
         {
             flags |= ImageCreateFlags.Create2DArrayCompatibleBit;
         }
+        else if (description.Type == GuestImageType.Color2D &&
+                 description.Samples == 1 &&
+                 description.Extent.Depth == 1 &&
+                 description.Extent.Width == description.Extent.Height &&
+                 description.Resources.Layers >= 6 &&
+                 description.Resources.Layers % 6 == 0)
+        {
+            flags |= ImageCreateFlags.CreateCubeCompatibleBit;
+        }
 
         return flags;
     }

@@ -203,6 +203,10 @@ public static partial class Gen5MslTranslator
                 // form is fma(src0, src1, src2) exactly like the SPIR-V translator.
                 "VFmaF32" or "VMadF32" or "VMadAkF32" or "VMadMkF32" or "VFmaAkF32" or "VFmaMkF32" =>
                     FloatResult(instruction, $"fma({F(instruction, 0)}, {F(instruction, 1)}, {F(instruction, 2)})"),
+                "VFmaF16" => Float16Result(
+                    instruction,
+                    destination,
+                    $"fma({F16(instruction, 0)}, {F16(instruction, 1)}, {F16(instruction, 2)})"),
                 "VFmacF32" or "VMacF32" =>
                     FloatResult(instruction, $"fma({F(instruction, 0)}, {F(instruction, 1)}, as_type<float>(v[{destination}]))"),
                 "VFloorF32" => FloatResult(instruction, $"floor({F(instruction, 0)})"),
@@ -212,6 +216,10 @@ public static partial class Gen5MslTranslator
                 "VFractF32" => FloatResult(instruction, $"fract({F(instruction, 0)})"),
                 "VSqrtF32" => FloatResult(instruction, $"sqrt({F(instruction, 0)})"),
                 "VRsqF32" => FloatResult(instruction, $"rsqrt({F(instruction, 0)})"),
+                "VRsqF16" => Float16Result(
+                    instruction,
+                    destination,
+                    $"rsqrt({F16(instruction, 0)})"),
                 "VRcpF32" or "VRcpIflagF32" => FloatResult(instruction, $"(1.0f / {F(instruction, 0)})"),
                 "VLogF32" => FloatResult(instruction, $"log2({F(instruction, 0)})"),
                 "VExpF32" => FloatResult(instruction, $"exp2({F(instruction, 0)})"),

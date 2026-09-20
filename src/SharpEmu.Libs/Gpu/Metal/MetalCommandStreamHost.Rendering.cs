@@ -1147,6 +1147,14 @@ internal sealed partial class MetalCommandStreamHost : IRenderHost, IShaderPipel
         _ = _snapshots.TrySubmitGuestImageBlit(from, to);
     }
 
+    bool IRenderHost.TryDispatchIndirect(ulong argumentsAddress) => false;
+
+    void IRenderHost.CopyDepthStencilImage(ResourceSlotIdentifier source, ResourceSlotIdentifier destination, in SubresourceRange range, in Extent3D extent, ImageAspectFlags aspects)
+    {
+        _ = (source, destination, range, extent, aspects);
+        throw Fatal("Depth/stencil image copies are not implemented by the Metal command stream host.");
+    }
+
     bool IRenderHost.IsMetadata(ulong address)
     {
         _ = address;

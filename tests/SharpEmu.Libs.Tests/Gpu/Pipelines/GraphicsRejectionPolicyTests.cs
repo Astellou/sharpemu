@@ -65,7 +65,7 @@ public sealed class GraphicsRejectionPolicyTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public void RejectedPixelCandidatesSkipOnlyWhenStrictModeIsOff(bool strict, bool exceedCapacity)
+    public void PixelCandidateValidationHonorsCapacityAndStrictMode(bool strict, bool distinctCandidates)
     {
         using var fatal = new FatalScope();
         var guest = new PipelineTestGuest();
@@ -74,11 +74,19 @@ public sealed class GraphicsRejectionPolicyTests
              0xF0000108, 0x00010400, 0xBF810000]);
         for (var index = 0; index < 33; index++)
             guest.WriteWords(TableAddress + 312 + (ulong)index * 32,
-                exceedCapacity ? 0x1000u + (uint)index : 0x1000u, 20u << 20, 0,
-                0xFACu | ((!exceedCapacity && index == 1 ? 10u : 9u) << 28), 0, 0, 0, 0);
+                distinctCandidates ? 0x1000u + (uint)index : 0x1000u, 20u << 20, 0,
+                0xFACu | ((!distinctCandidates && index == 1 ? 10u : 9u) << 28), 0, 0, 0, 0);
         var source = guest.Source(PixelAddress, ShaderStage.Pixel, [(uint)(TableAddress & uint.MaxValue), (uint)(TableAddress >> 32)]);
         var options = new StageCompileOptions { PixelInfo = new PixelInputInfo() };
         var cursor = 7u;
+        if (distinctCandidates)
+        {
+            Assert.True(guest.Programs.TryGetProgram(source, options, strict, ref cursor, out var program, out _, out var rejection), rejection);
+            Assert.True(program.IsValid);
+            Assert.Single(guest.Compiler.Requests);
+            Assert.Single(guest.Host.Modules);
+            return;
+        }
         if (strict)
         {
             var failure = Assert.Throws<SchedulerFatalException>(() => guest.Programs.TryGetProgram(

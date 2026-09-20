@@ -142,7 +142,7 @@ public sealed record StageOutput(StageOutputKind Kind, uint Index, uint Location
 public sealed class ShaderResourceInfo
 {
     public const int MaxBuffers = 32;
-    public const int MaxImages = 32;
+    public const int MaxImages = 64;
     public const int MaxSamplers = 32;
     public const int MaxSampledPairs = 64;
     public const int NoScalarRegister = -1;
@@ -185,6 +185,10 @@ public sealed record IndirectImageSelector(
 {
     public IndirectSelectorValues? SelectorValues { get; init; }
     public IReadOnlyList<DirectImageCandidate>? DirectCandidates { get; init; }
+    public bool Dense { get; init; }
+    public uint TableOffset { get; init; }
+    public uint DynamicOffsetBase { get; init; }
+    public uint KeyBound { get; init; }
 }
 
 public sealed record DirectImageCandidate(uint Offset, uint Source);

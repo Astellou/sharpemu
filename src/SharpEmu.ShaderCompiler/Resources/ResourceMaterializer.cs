@@ -146,7 +146,8 @@ public static class ResourceMaterializer
                     for (var candidateIndex = 0; candidateIndex < descriptors.Count; candidateIndex++)
                     {
                         var descriptor = descriptors[candidateIndex];
-                        if (NullImageDescriptor(descriptor.Dwords) || !ValidImageDescriptor(descriptor.Dwords, image.R128))
+                        if (NullImageDescriptor(descriptor.Dwords) || !ValidImageDescriptor(descriptor.Dwords, image.R128) ||
+                            !ReservedImageBitsClear(descriptor.Dwords))
                             descriptor = DescriptorWords.Empty(8);
                         var existing = directTable.Descriptors.FindIndex(candidate => candidate.SameAs(descriptor));
                         if (existing < 0)
@@ -161,12 +162,27 @@ public static class ResourceMaterializer
                     if (directTable.Descriptors.Count > 1) snapshot.IndirectImages.Add(directTable);
                     continue;
                 }
+                if (indirect.Dense)
+                {
+                    if (!RuntimeValueEvaluator.EvaluateSources(plan, [indirect.HeapSource], cleanInputs, [], evaluateTable: false,
+                        out var denseSources, out _))
+                        return false;
+                    if (!MaterializeDenseIndirectImage(indirect, denseSources[0], image, image.R128, inputs, out var denseTable, out failure))
+                        return false;
+                    snapshot.Images[imageIndex] = denseTable.Descriptors[(int)denseTable.Candidates[0]].Dwords;
+                    if (denseTable.Descriptors.Count > 1)
+                    {
+                        denseTable.Resource = (uint)imageIndex;
+                        snapshot.IndirectImages.Add(denseTable);
+                    }
+                    continue;
+                }
                 if (!RuntimeValueEvaluator.EvaluateSources(plan, [indirect.MaterialSource, indirect.HeapSource], cleanInputs, [], evaluateTable: false, out var tables, out _))
                 {
                     return false;
                 }
 
-                if (!MaterializeIndirectImage(plan, indirect, tables[0], tables[1], image.R128, inputs,
+                if (!MaterializeIndirectImage(plan, indirect, tables[0], tables[1], image, inputs,
                     captureSelectorDiagnostic, out var indirectTable, out failure))
                 {
                     return false;
@@ -201,6 +217,21 @@ public static class ResourceMaterializer
     private static bool NullImageDescriptor(ReadOnlySpan<uint> descriptor) =>
         descriptor[0] == 0 && (descriptor[1] & 0xFF) == 0;
 
+    private static bool ReservedImageBitsClear(ReadOnlySpan<uint> descriptor)
+    {
+        ReadOnlySpan<uint> reserved =
+        [
+            0x00000000u, 0x20000000u, 0xf0003000u, 0x00000000u,
+            0xe000e000u, 0xf9000000u, 0x00007b00u, 0x00000000u,
+        ];
+        for (var dword = 0; dword < reserved.Length; dword++)
+        {
+            if ((descriptor[dword] & reserved[dword]) != 0)
+                return false;
+        }
+        return true;
+    }
+
     private static bool ValidImageDescriptor(ReadOnlySpan<uint> descriptor, bool r128)
     {
         var type = GuestImageFormat.ImageTypeOf(descriptor);
@@ -213,6 +244,20 @@ public static class ResourceMaterializer
         if (r128 && type is not (GuestImageFormat.ImageType1D or GuestImageFormat.ImageType2D or GuestImageFormat.ImageType2DMsaa))
         {
             return false;
+        }
+
+        if (type is GuestImageFormat.ImageTypeCube or
+            GuestImageFormat.ImageType1DArray or
+            GuestImageFormat.ImageType2DArray or
+            GuestImageFormat.ImageType2DMsaaArray)
+        {
+            var lastSlice = descriptor[4] & 0x1FFF;
+            var baseSlice = (descriptor[4] >> 16) & 0x1FFF;
+            if (baseSlice > lastSlice)
+            {
+                return false;
+            }
+
         }
 
         if (type is GuestImageFormat.ImageType2DMsaa or GuestImageFormat.ImageType2DMsaaArray)
@@ -259,7 +304,7 @@ public static class ResourceMaterializer
         IndirectImageSelector indirect,
         DescriptorWords material,
         DescriptorWords heap,
-        bool r128,
+        ImageResource image,
         ResourceRuntimeInputs inputs,
         bool captureSelectorDiagnostic,
         out IndirectImageTable result,
@@ -322,15 +367,7 @@ public static class ResourceMaterializer
 
         }
 
-        var table = new IndirectImageTable
-        {
-            Keys = keys,
-            MaterialDescriptor = material.Dwords,
-            HeapDescriptor = heap.Dwords,
-            SelectorStride = indirect.SelectorStride,
-            SelectorOffset = indirect.SelectorOffset,
-            SelectorDiagnostic = diagnostic,
-        };
+        var probed = new List<uint[]>(keys.Count);
         foreach (var key in keys)
         {
             var candidate = new uint[8];
@@ -343,31 +380,99 @@ public static class ResourceMaterializer
                 }
             }
 
-            if (NullImageDescriptor(candidate) || !ValidImageDescriptor(candidate, r128))
+            if (NullImageDescriptor(candidate) || !ValidImageDescriptor(candidate, image.R128) ||
+                !ReservedImageBitsClear(candidate))
             {
                 Array.Clear(candidate);
             }
-
-            var words = new DescriptorWords(candidate);
-            var found = table.Descriptors.FindIndex(existing => existing.SameAs(words));
-            if (found < 0)
-            {
-                if (table.Descriptors.Count >= ShaderResourceInfo.MaxImages)
-                {
-                    failure = ResourceMaterializationFailure.ImageCapacityExceeded;
-                    return Fail("indirect image candidates exceed the dense image resource limit");
-                }
-
-                table.Descriptors.Add(words);
-                table.Candidates.Add((uint)(table.Descriptors.Count - 1));
-            }
-            else
-            {
-                table.Candidates.Add((uint)found);
-            }
+            probed.Add(candidate);
         }
 
+        if (!FinishIndirectImage(
+                probed,
+                keys,
+                out var table,
+                out failure))
+        {
+            return false;
+        }
+
+        table.MaterialDescriptor = material.Dwords;
+        table.HeapDescriptor = heap.Dwords;
+        table.SelectorStride = indirect.SelectorStride;
+        table.SelectorOffset = indirect.SelectorOffset;
+        table.SelectorDiagnostic = diagnostic;
         result = table;
+        return true;
+    }
+
+    private static bool MaterializeDenseIndirectImage(
+        IndirectImageSelector indirect,
+        DescriptorWords heap,
+        ImageResource image,
+        bool r128,
+        ResourceRuntimeInputs inputs,
+        out IndirectImageTable result,
+        out ResourceMaterializationFailure failure)
+    {
+        failure = ResourceMaterializationFailure.Other;
+        result = new IndirectImageTable();
+        if (heap.DwordCount != 2 || indirect.KeyBound == 0 || indirect.KeyBound > MaxIndirectImageProbes || inputs.ReadCleanMemory is null)
+            return false;
+
+        var baseAddress = (((ulong)heap.Dwords[1] << 32) | heap.Dwords[0]) & AddressMask;
+        var probed = new List<uint[]>((int)indirect.KeyBound);
+        for (uint key = 0; key < indirect.KeyBound; key++)
+        {
+            var candidate = new uint[8];
+            var entry = (ulong)indirect.TableOffset + ((ulong)key << 5);
+            for (uint dword = 0; dword < 8; dword++)
+            {
+                var relative = entry + dword * sizeof(uint);
+                if (relative > AddressMask || baseAddress > AddressMask - relative ||
+                    !inputs.ReadCleanMemory(baseAddress + relative, out candidate[dword]))
+                    return false;
+            }
+
+            if (NullImageDescriptor(candidate) || !ValidImageDescriptor(candidate, r128) ||
+                !ReservedImageBitsClear(candidate))
+                Array.Clear(candidate);
+            probed.Add(candidate);
+        }
+
+        return FinishIndirectImage(
+            probed,
+            Enumerable.Range(0, (int)indirect.KeyBound)
+                .Select(index => unchecked(indirect.DynamicOffsetBase + ((uint)index << 5))),
+            out result,
+            out failure);
+    }
+
+    private static bool FinishIndirectImage(
+        IReadOnlyList<uint[]> probed,
+        IEnumerable<uint> keys,
+        out IndirectImageTable result,
+        out ResourceMaterializationFailure failure)
+    {
+        failure = ResourceMaterializationFailure.Other;
+        result = new IndirectImageTable();
+        result.Keys.AddRange(keys);
+        foreach (var candidate in probed)
+        {
+            var words = new DescriptorWords(candidate);
+            var found = result.Descriptors.FindIndex(existing => existing.SameAs(words));
+            if (found < 0)
+            {
+                if (result.Descriptors.Count >= ShaderResourceInfo.MaxImages)
+                {
+                    failure = ResourceMaterializationFailure.ImageCapacityExceeded;
+                    return false;
+                }
+                found = result.Descriptors.Count;
+                result.Descriptors.Add(words);
+            }
+            result.Candidates.Add((uint)found);
+        }
         return true;
     }
 
@@ -643,6 +748,7 @@ public static class ResourceMaterializer
             }
 
             var imageClass = images[(int)exemplar];
+            var separateSampledDimensions = info.Images[rootIndex].ResourceClass == ImageResourceClass.Sampled;
             for (var candidate = 0; candidate < images.Count; candidate++)
             {
                 var image = images[candidate];
@@ -665,12 +771,12 @@ public static class ResourceMaterializer
                     images[candidate] = image;
                 }
 
-                // Sampled 2D cases use their own binding and coordinate width.
-                var separateDimensions = info.Images[rootIndex].ResourceClass == ImageResourceClass.Sampled &&
-                    !image.Cube && !imageClass.Cube &&
+                // Each sampled candidate has its own binding and coordinate width.
+                var compatibleDimensions = image.Dimension == imageClass.Dimension ||
+                    separateSampledDimensions && !image.Cube && !imageClass.Cube &&
                     image.Dimension is ImageDimension.Dim2D or ImageDimension.Dim2DArray &&
                     imageClass.Dimension is ImageDimension.Dim2D or ImageDimension.Dim2DArray;
-                if (image.NumericClass != imageClass.NumericClass || (!separateDimensions && image.Dimension != imageClass.Dimension) ||
+                if (image.NumericClass != imageClass.NumericClass || !compatibleDimensions ||
                     image.MipCount != imageClass.MipCount || image.ConversionFormat != imageClass.ConversionFormat ||
                     image.ShaderSwizzle != imageClass.ShaderSwizzle || image.Cube != imageClass.Cube)
                 {
@@ -863,8 +969,52 @@ public static class ResourceMaterializer
             {
                 pair.Sampler = samplerPlan.PointSampler[pair.Sampler];
             }
+        }
 
-            info.Samplers[(int)pair.Sampler].DepthCompare |= image.DepthCompare;
+        // A guest sampler can be shared by ordinary sampling and depth-reference
+        // sampling. Vulkan bakes compareEnable into VkSampler, so those uses cannot
+        // share one host sampler. Split only the mixed cases; compare-only samplers
+        // can use their existing slot.
+        var compareUsage = new byte[ShaderResourceInfo.MaxSamplers];
+        foreach (var pair in info.SampledPairs)
+        {
+            var image = info.Images[(int)pair.Image];
+            compareUsage[pair.Sampler] |= image.DepthCompare ? (byte)2 : (byte)1;
+        }
+
+        var compareSampler = new uint[ShaderResourceInfo.MaxSamplers];
+        Array.Fill(compareSampler, DescriptorConstants.NoIndex);
+        for (var index = 0; index < info.Samplers.Count; index++)
+        {
+            if ((compareUsage[index] & 2) == 0)
+            {
+                continue;
+            }
+
+            if ((compareUsage[index] & 1) == 0)
+            {
+                info.Samplers[index].DepthCompare = true;
+                compareSampler[index] = (uint)index;
+                continue;
+            }
+
+            if (info.Samplers.Count >= ShaderResourceInfo.MaxSamplers)
+            {
+                throw new ResourcePlanException($"shader resource specialization exceeds the sampler limit: hash=0x{plan.Hash:X16}");
+            }
+
+            var sampler = info.Samplers[index].Clone();
+            sampler.DepthCompare = true;
+            compareSampler[index] = (uint)info.Samplers.Count;
+            info.Samplers.Add(sampler);
+        }
+
+        foreach (var pair in info.SampledPairs)
+        {
+            if (info.Images[(int)pair.Image].DepthCompare)
+            {
+                pair.Sampler = compareSampler[pair.Sampler];
+            }
         }
 
         var samplerByMemory = new Dictionary<int, uint>();
@@ -877,9 +1027,25 @@ public static class ResourceMaterializer
             }
 
             var image = info.Images[(int)memory.Resource];
-            if (memory.NeedsSampler && RequiresPointSampler(image.NumericClass, image.ConversionFormat) && memory.Sampler < source.Samplers.Count)
+            if (!memory.NeedsSampler || memory.Sampler >= source.Samplers.Count)
             {
-                samplerByMemory[index] = samplerPlan.PointSampler[memory.Sampler];
+                continue;
+            }
+
+            var sampler = memory.Sampler;
+            if (RequiresPointSampler(image.NumericClass, image.ConversionFormat))
+            {
+                sampler = samplerPlan.PointSampler[sampler];
+            }
+
+            if (image.DepthCompare)
+            {
+                sampler = compareSampler[sampler];
+            }
+
+            if (sampler != memory.Sampler)
+            {
+                samplerByMemory[index] = sampler;
             }
         }
 

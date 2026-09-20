@@ -162,15 +162,59 @@ public sealed unsafe partial class CachedImage
         return new CommandBuffer(_scheduler.Current.Handle);
     }
 
+    private BufferImageCopy[]? SanitizeUploadCopies(ReadOnlySpan<BufferImageCopy> copies)
+    {
+        BufferImageCopy[]? sanitized = null;
+        for (var index = 0; index < copies.Length; index++)
+        {
+            var copy = copies[index];
+            var mip = (int)copy.ImageSubresource.MipLevel;
+            var width = Math.Max(Backing.Extent.Width >> mip, 1u);
+            var height = Math.Max(Backing.Extent.Height >> mip, 1u);
+            var depth = Backing.ImageType == ImageType.Type3D
+                ? Math.Max(Backing.Extent.Depth >> mip, 1u)
+                : 1u;
+            if (copy.ImageOffset.X < 0 || copy.ImageOffset.Y < 0 || copy.ImageOffset.Z < 0 ||
+                (uint)copy.ImageOffset.X >= width || (uint)copy.ImageOffset.Y >= height ||
+                (uint)copy.ImageOffset.Z >= depth)
+            {
+                throw SubmissionScheduler.Fatal(
+                    $"The image upload offset is outside the backing image: mip={mip} " +
+                    $"offset={copy.ImageOffset.X},{copy.ImageOffset.Y},{copy.ImageOffset.Z} extent={width}x{height}x{depth}.");
+            }
+
+            var availableWidth = width - (uint)copy.ImageOffset.X;
+            var availableHeight = height - (uint)copy.ImageOffset.Y;
+            var availableDepth = depth - (uint)copy.ImageOffset.Z;
+            var clamped = new Extent3D(
+                Math.Min(copy.ImageExtent.Width, availableWidth),
+                Math.Min(copy.ImageExtent.Height, availableHeight),
+                Math.Min(copy.ImageExtent.Depth, availableDepth));
+            if (clamped.Width == copy.ImageExtent.Width &&
+                clamped.Height == copy.ImageExtent.Height &&
+                clamped.Depth == copy.ImageExtent.Depth)
+            {
+                continue;
+            }
+
+            sanitized ??= copies.ToArray();
+            sanitized[index].ImageExtent = clamped;
+        }
+
+        return sanitized;
+    }
+
     public void UploadFromBuffer(ReadOnlySpan<BufferImageCopy> copies, VkBuffer buffer, ulong offset, ulong size)
     {
         var command = BeginTransfer(copies, buffer, size);
+        var sanitized = SanitizeUploadCopies(copies);
+        var uploadCopies = sanitized is null ? copies : sanitized.AsSpan();
         var bufferBarrier = BufferBarrier(buffer, offset, size, AccessFlags.MemoryWriteBit, AccessFlags.TransferReadBit);
         var (imageBarriers, sourceStages) = GetBarriers(ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, PipelineStageFlags.TransferBit, null);
         RecordBarriers(command, sourceStages | PipelineStageFlags.AllCommandsBit, PipelineStageFlags.TransferBit, &bufferBarrier, imageBarriers);
-        fixed (BufferImageCopy* regions = copies)
+        fixed (BufferImageCopy* regions = uploadCopies)
         {
-            _device.Vk.CmdCopyBufferToImage(command, buffer, Backing.Handle, ImageLayout.TransferDstOptimal, (uint)copies.Length, regions);
+            _device.Vk.CmdCopyBufferToImage(command, buffer, Backing.Handle, ImageLayout.TransferDstOptimal, (uint)uploadCopies.Length, regions);
         }
 
         bufferBarrier = BufferBarrier(buffer, offset, size, AccessFlags.TransferReadBit, MemoryAccess);
@@ -329,6 +373,52 @@ public sealed unsafe partial class CachedImage
             var region = new ImageResolve { SrcSubresource = sourceLayers, DstSubresource = destinationLayers, Extent = extent };
             _device.Vk.CmdResolveImage(command, source.Backing.Handle, ImageLayout.TransferSrcOptimal, Backing.Handle, ImageLayout.TransferDstOptimal, 1, &region);
         }
+    }
+
+    public void CopyDepthStencilFrom(CachedImage source, in SubresourceRange range, in Extent3D extent, ImageAspectFlags aspects)
+    {
+        var requested = aspects & (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit);
+        var available = ViewFormatRules.FullAspects(Backing.Format);
+        if (requested == 0 || (requested & ~available) != 0 || source.Backing.Format != Backing.Format ||
+            source.Backing.ImageType != ImageType.Type2D || Backing.ImageType != ImageType.Type2D ||
+            source.Backing.Samples != Backing.Samples || range.LevelCount != 1 ||
+            range.BaseLevel >= source.Backing.MipLevels || range.BaseLevel >= Backing.MipLevels ||
+            range.BaseLayer >= source.Backing.Layers || range.BaseLayer >= Backing.Layers ||
+            range.LayerCount == 0 || range.LayerCount > source.Backing.Layers - range.BaseLayer ||
+            range.LayerCount > Backing.Layers - range.BaseLayer)
+        {
+            throw SubmissionScheduler.Fatal(
+                $"The depth/stencil copy is invalid: aspects={(uint)aspects:X} format={(int)Backing.Format} sourceFormat={(int)source.Backing.Format} " +
+                $"range={range.BaseLevel}+{range.LevelCount}/{range.BaseLayer}+{range.LayerCount} samples={source.Backing.Samples}->{Backing.Samples}.");
+        }
+
+        _scheduler.EndRendering();
+        var command = new CommandBuffer(_scheduler.Current.Handle);
+        source.Transition(ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit, range, command);
+        Transition(ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, range, command);
+
+        ImageCopy* regions = stackalloc ImageCopy[2];
+        uint count = 0;
+        if ((requested & ImageAspectFlags.DepthBit) != 0)
+        {
+            var layers = new ImageSubresourceLayers(ImageAspectFlags.DepthBit, range.BaseLevel, range.BaseLayer, range.LayerCount);
+            regions[count++] = new ImageCopy { SrcSubresource = layers, DstSubresource = layers, Extent = extent };
+        }
+
+        if ((requested & ImageAspectFlags.StencilBit) != 0)
+        {
+            var layers = new ImageSubresourceLayers(ImageAspectFlags.StencilBit, range.BaseLevel, range.BaseLayer, range.LayerCount);
+            regions[count++] = new ImageCopy { SrcSubresource = layers, DstSubresource = layers, Extent = extent };
+        }
+
+        _device.Vk.CmdCopyImage(
+            command,
+            source.Backing.Handle,
+            ImageLayout.TransferSrcOptimal,
+            Backing.Handle,
+            ImageLayout.TransferDstOptimal,
+            count,
+            regions);
     }
 
     public static uint CalculateRowsPerCopy(ulong rowSize, uint rows, ulong capacity)

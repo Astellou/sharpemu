@@ -91,6 +91,7 @@ public static partial class Gen5SpirvTranslator
             ImageComponentKind Kind,
             bool IsStorage,
             bool Arrayed,
+            bool Cube,
             bool Multisampled,
             SpirvImageDim Dimension,
             IReadOnlyList<uint> Resources);
@@ -307,6 +308,7 @@ public static partial class Gen5SpirvTranslator
         private void DeclareImageClass(DescriptorBinding binding, uint bindingNumber)
         {
             var (resourceClass, numericClass, dimension, atomic) = ImageDescriptorBinding.Describe(binding.Kind);
+            var cube = ImageDescriptorBinding.IsCube(binding.Kind);
             if (resourceClass == ImageResourceClass.None)
             {
                 throw new InvalidOperationException($"binding kind {binding.Kind} is not an image class");
@@ -353,7 +355,7 @@ public static partial class Gen5SpirvTranslator
             _module.AddDecoration(variable, SpirvDecoration.DescriptorSet, 0);
             _module.AddDecoration(variable, SpirvDecoration.Binding, bindingNumber);
             _interfaces.Add(variable);
-            _imageClasses[binding.Kind] = new LayoutImageClass(variable, imageType, elementPointer, componentType, kind, isStorage, arrayed, multisampled, spirvDimension, binding.Resources);
+            _imageClasses[binding.Kind] = new LayoutImageClass(variable, imageType, elementPointer, componentType, kind, isStorage, arrayed, cube, multisampled, spirvDimension, binding.Resources);
         }
 
         // ---- initial state ----
@@ -721,7 +723,8 @@ public static partial class Gen5SpirvTranslator
                     value = LoadDeviceDword(component == 0 ? deviceAddress.Value : IAdd64(deviceAddress.Value, ULong((ulong)component * sizeof(uint))));
                 }
 
-                if (_indirectKeyScratch.TryGetValue(memoryIndex, out var keyScratch))
+                if (!request.IndirectOffsetKeyMemoryIndices.Contains(memoryIndex) &&
+                    _indirectKeyScratch.TryGetValue(memoryIndex, out var keyScratch))
                 {
                     Store(keyScratch, value);
                 }
@@ -921,6 +924,11 @@ public static partial class Gen5SpirvTranslator
                 var candidateElements = new List<(uint Resource, uint Element)>();
                 foreach (var candidate in candidates)
                 {
+                    if (candidate >= info.Images.Count)
+                    {
+                        error = $"indirect candidate {candidate} is outside the image table";
+                        return false;
+                    }
                     var candidateKind = ImageDescriptorBinding.ForImage(info.Images[(int)candidate]);
                     if (candidateKind is null || !_imageClasses.TryGetValue(candidateKind.Value, out var candidateClass))
                     {
@@ -978,17 +986,16 @@ public static partial class Gen5SpirvTranslator
             }
 
             var resourceIndex = (int)(fixedElement?.Resource ?? entry.Resource);
+            if ((uint)resourceIndex >= info.Images.Count)
+            {
+                error = $"image {resourceIndex} is outside the image table";
+                return false;
+            }
             var imageInfo = info.Images[resourceIndex];
             var kind = ImageDescriptorBinding.ForImage(imageInfo);
             if (kind is null || !_imageClasses.TryGetValue(kind.Value, out var imageClass))
             {
                 error = $"image {resourceIndex} has no declared binding class";
-                return false;
-            }
-
-            if (imageClass.Multisampled)
-            {
-                error = "multisampled image access is not supported";
                 return false;
             }
 
@@ -1052,7 +1059,11 @@ public static partial class Gen5SpirvTranslator
                 imageClass.Kind,
                 imageClass.IsStorage,
                 imageClass.Arrayed,
-                imageClass.Dimension);
+                imageClass.Cube,
+                imageClass.Multisampled,
+                imageClass.Dimension,
+                imageInfo.ConversionFormat,
+                imageInfo.ShaderSwizzle);
             dstSelect = imageInfo.ShaderSwizzle;
             return true;
         }
@@ -1147,6 +1158,24 @@ public static partial class Gen5SpirvTranslator
                 case "DsReadB32":
                     StoreV(instruction.Destinations[0].Value, LoadBlockWord(_globalDataShare, GlobalDataShareIndex(GetRawSource(instruction, 0), control.SingleOffsetBytes)));
                     return true;
+                case "DsReadI8":
+                {
+                    var address = GetRawSource(instruction, 0);
+                    var byteAddress = control.SingleOffsetBytes == 0
+                        ? address
+                        : IAdd(address, UInt(control.SingleOffsetBytes));
+                    var word = LoadBlockWord(_globalDataShare, GlobalDataShareIndex(address, control.SingleOffsetBytes));
+                    var shift = ShiftLeftLogical(BitwiseAnd(byteAddress, UInt(3)), UInt(3));
+                    var packed = ShiftRightLogical(word, shift);
+                    var signedByte = _module.AddInstruction(
+                        SpirvOp.BitFieldSExtract,
+                        _intType,
+                        Bitcast(_intType, packed),
+                        UInt(0),
+                        UInt(8));
+                    StoreV(instruction.Destinations[0].Value, Bitcast(_uintType, signedByte));
+                    return true;
+                }
                 case "DsReadB64":
                 {
                     var index = GlobalDataShareIndex(GetRawSource(instruction, 0), control.SingleOffsetBytes);
@@ -1240,6 +1269,29 @@ public static partial class Gen5SpirvTranslator
         private bool TryEmitGlobalDataShareAtomic(Gen5ShaderInstruction instruction, Gen5DataShareControl control, out string error)
         {
             error = string.Empty;
+            if (instruction.Opcode is "DsMinF32" or "DsMaxF32")
+            {
+                if (instruction.Sources.Count < 3)
+                {
+                    error = $"missing GDS operands for {instruction.Opcode}";
+                    return false;
+                }
+
+                var floatIndex = GlobalDataShareIndex(GetRawSource(instruction, 0), control.SingleOffsetBytes);
+                EmitExecConditional(() =>
+                {
+                    EmitConditional(IsBlockWordInRange(_globalDataShare, floatIndex), () =>
+                        EmitDataShareFloatAtomic(
+                            BlockWordPointer(_globalDataShare, floatIndex),
+                            GetRawSource(instruction, 1),
+                            GetRawSource(instruction, 2),
+                            instruction.Opcode == "DsMaxF32",
+                            scope: 1,
+                            semantics: 0x48));
+                });
+                return true;
+            }
+
             var atomicOp = instruction.Opcode switch
             {
                 "DsAddU32" or "DsAddRtnU32" => SpirvOp.AtomicIAdd,

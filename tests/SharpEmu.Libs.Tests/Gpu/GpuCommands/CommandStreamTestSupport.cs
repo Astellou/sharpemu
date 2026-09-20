@@ -168,7 +168,7 @@ internal sealed class RecordingCommandStreamHost : ICommandStreamHost
         Calls.Add($"draw_auto {submitId} {arguments.VertexCount}");
     }
 
-    public void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator) =>
+    public void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0) =>
         Calls.Add($"dispatch {submitId} {groupsX} {groupsY} {groupsZ} {dispatchInitiator:X}");
 
     public void OnQueueReset(int queueId) => Calls.Add($"queue_reset {queueId}");

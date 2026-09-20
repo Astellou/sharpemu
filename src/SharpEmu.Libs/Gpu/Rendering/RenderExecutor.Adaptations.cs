@@ -31,12 +31,14 @@ public sealed partial class RenderExecutor
 
         if (programs.SolidClear is { } clear && state.ColorCount != 0)
         {
+            TraceDrawDisposition(banks, in draw, "color-clear");
             _host.ClearColorTargets(BoundColors(ref state), clear);
             return false;
         }
 
         if (IsMetadataClearQuad(banks, in draw, ref state))
         {
+            TraceDrawDisposition(banks, in draw, "metadata-clear-quad");
             return false;
         }
 
@@ -44,10 +46,44 @@ public sealed partial class RenderExecutor
             programs.PixelInput.Stage.Program is { Images.Length: > 0 } pixelProgram && !WritesStorageImage(pixelProgram) &&
             _host.TryRetainTargetlessDraw(banks, programs, in arguments))
         {
+            TraceTargetlessAttachments(banks, arguments.SubmitId);
+            TraceDrawDisposition(banks, in draw, "retained-targetless-draw");
             return false;
         }
 
         return true;
+    }
+
+    private static void TraceDrawDisposition(RegisterBanks banks, in DrawCall draw, string reason)
+    {
+        if (!RenderTrace.Enabled)
+        {
+            return;
+        }
+
+        ref readonly var viewport = ref banks.Context.ScreenViewport.Viewports[0];
+        RenderTrace.Write(
+            $"DrawDisposition name={draw.Name} reason={reason} count={draw.Count} " +
+            $"export=0x{banks.Shader.Vertex.ExportAddress:X16} pixel=0x{banks.Shader.Pixel.Address:X16} " +
+            $"colorMode={banks.Context.ColorControl.Mode} targetMask=0x{banks.Context.RenderTargetMask:X8} " +
+            $"zScale={viewport.ZScale} zOffset={viewport.ZOffset}");
+    }
+
+    private static void TraceTargetlessAttachments(RegisterBanks banks, ulong submitId)
+    {
+        if (!RenderTrace.Enabled)
+        {
+            return;
+        }
+
+        var context = banks.Context;
+        RenderTrace.Write($"TargetlessDepth submit={submitId} registers={context.DepthTarget}");
+        for (var slot = 0; slot < ContextRegisters.ColorTargetCount; slot++)
+        {
+            RenderTrace.Write(
+                $"TargetlessColor submit={submitId} slot={slot} mask=0x{context.RenderTargetMaskForSlot((uint)slot):X} " +
+                $"registers={context.ColorTargets[slot]}");
+        }
     }
 
     private static bool WritesStorageImage(ShaderProgramInfo program)

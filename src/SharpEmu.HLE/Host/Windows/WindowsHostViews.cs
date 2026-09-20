@@ -13,6 +13,7 @@ internal sealed unsafe partial class WindowsHostViews : IHostViewMemory
     private const uint MEM_COMMIT = 0x1000;
     private const uint MEM_RESERVE = 0x2000;
     private const uint MEM_RELEASE = 0x8000;
+    private const uint MEM_FREE = 0x10000;
     private const uint MEM_COALESCE_PLACEHOLDERS = 0x1;
     private const uint MEM_PRESERVE_PLACEHOLDER = 0x2;
     private const uint MEM_REPLACE_PLACEHOLDER = 0x4000;
@@ -86,6 +87,47 @@ internal sealed unsafe partial class WindowsHostViews : IHostViewMemory
         }
 
         return address;
+    }
+
+    public IReadOnlyList<HostAddressRange> ReserveFreeAddressRanges(ulong start, ulong end, ulong minimumSize)
+    {
+        var reserved = new List<HostAddressRange>();
+        if (start >= end || minimumSize == 0)
+        {
+            return reserved;
+        }
+
+        var current = start;
+        while (current < end)
+        {
+            if (VirtualQuery((void*)current, out var info, (nuint)sizeof(MemoryBasicInformation)) == 0)
+            {
+                break;
+            }
+
+            var regionEnd = Math.Min(end, info.BaseAddress + info.RegionSize);
+            if (info.State == MEM_FREE)
+            {
+                var reserveStart = AlignUp(Math.Max(start, info.BaseAddress), Granularity);
+                var reserveEnd = AlignDown(regionEnd, Granularity);
+                if (reserveEnd > reserveStart && reserveEnd - reserveStart >= minimumSize)
+                {
+                    var size = reserveEnd - reserveStart;
+                    if (ReserveHole(reserveStart, size) == reserveStart)
+                    {
+                        reserved.Add(new HostAddressRange(reserveStart, size));
+                    }
+                }
+            }
+
+            if (regionEnd <= current)
+            {
+                break;
+            }
+            current = regionEnd;
+        }
+
+        return reserved;
     }
 
     public bool SplitHole(ulong address, ulong size) =>
@@ -211,6 +253,14 @@ internal sealed unsafe partial class WindowsHostViews : IHostViewMemory
 
         return true;
     }
+
+    private static ulong AlignUp(ulong value, ulong alignment)
+    {
+        var remainder = value % alignment;
+        return remainder == 0 ? value : value + (alignment - remainder);
+    }
+
+    private static ulong AlignDown(ulong value, ulong alignment) => value - value % alignment;
 
     private static void ReleaseBackingObject(HostBackingObject backing)
     {

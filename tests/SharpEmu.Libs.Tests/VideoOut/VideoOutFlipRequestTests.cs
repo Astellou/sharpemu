@@ -234,6 +234,60 @@ public sealed class VideoOutFlipRequestTests : IDisposable
         }
     }
 
+    [Fact]
+    public void OutputModeEventIsImmediatelyAvailableAndTracksConfiguration()
+    {
+        _context[CpuRegister.Rdi] = StatusAddress;
+        _context[CpuRegister.Rsi] = 0;
+        Assert.Equal(0, KernelEventQueueCompatExports.KernelCreateEqueue(_context));
+        var bytes = new byte[8];
+        Assert.True(_memory.TryRead(StatusAddress, bytes));
+        var queue = BinaryPrimitives.ReadUInt64LittleEndian(bytes);
+        try
+        {
+            const ulong userData = 0x1234_5678_9ABC_DEF0;
+            _context[CpuRegister.Rdi] = queue;
+            _context[CpuRegister.Rsi] = (ulong)_handle;
+            _context[CpuRegister.Rdx] = userData;
+            Assert.Equal(0, VideoOutExports.VideoOutAddOutputModeEvent(_context));
+
+            AssertOutputModeEvent(queue, expectedMode: 1, userData);
+
+            _context[CpuRegister.Rdi] = (ulong)_handle;
+            _context[CpuRegister.Rsi] = 1;
+            _context[CpuRegister.Rdx] = 0;
+            _context[CpuRegister.Rcx] = 0;
+            _context[CpuRegister.R8] = 0;
+            Assert.Equal(0, VideoOutExports.VideoOutConfigureOutput(_context));
+
+            AssertOutputModeEvent(queue, expectedMode: 1, userData);
+        }
+        finally
+        {
+            _context[CpuRegister.Rdi] = queue;
+            Assert.Equal(0, KernelEventQueueCompatExports.KernelDeleteEqueue(_context));
+        }
+    }
+
+    private void AssertOutputModeEvent(ulong queue, ulong expectedMode, ulong userData)
+    {
+        var timeoutAddress = MemoryBase + 0x400;
+        Assert.True(_memory.TryWrite(timeoutAddress, BitConverter.GetBytes(1_000_000u)));
+        _context[CpuRegister.Rdi] = queue;
+        _context[CpuRegister.Rsi] = MemoryBase + 0x200;
+        _context[CpuRegister.Rdx] = 1;
+        _context[CpuRegister.Rcx] = MemoryBase + 0x300;
+        _context[CpuRegister.R8] = timeoutAddress;
+        Assert.Equal(0, KernelEventQueueCompatExports.KernelWaitEqueue(_context));
+
+        var eventBytes = new byte[0x20];
+        Assert.True(_memory.TryRead(MemoryBase + 0x200, eventBytes));
+        Assert.Equal(8UL, BinaryPrimitives.ReadUInt64LittleEndian(eventBytes));
+        Assert.Equal(-13, BinaryPrimitives.ReadInt16LittleEndian(eventBytes.AsSpan(0x08)));
+        Assert.Equal(expectedMode, BinaryPrimitives.ReadUInt64LittleEndian(eventBytes.AsSpan(0x10)) >> 16);
+        Assert.Equal(userData, BinaryPrimitives.ReadUInt64LittleEndian(eventBytes.AsSpan(0x18)));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]

@@ -198,20 +198,48 @@ public static partial class AgcExports
         ExportName = "sceAgcUnknownQj7QZpgr9Uw",
         Target = Generation.Gen5,
         LibraryName = "libSceAgc")]
-    public static int UnknownQj7QZpgr9Uw(CpuContext ctx)
+    public static int DcbContextStateOperation(CpuContext ctx)
     {
         var commandBufferAddress = ctx[CpuRegister.Rdi];
-        if (commandBufferAddress == 0 ||
-            !TryAllocateCommandDwords(ctx, commandBufferAddress, 1, out var commandAddress) ||
-            !TryWriteUInt32(ctx, commandAddress, 0x8000_0000))
+        var operation = (uint)ctx[CpuRegister.Rsi];
+        if (commandBufferAddress == 0 || operation > (uint)ContextStateOperation.PushClear)
         {
             return ReturnPointer(ctx, 0);
         }
 
-        TraceAgc(
-            $"agc.unknown_qj7 buf=0x{commandBufferAddress:X16} cmd=0x{commandAddress:X16} " +
-            $"arg1=0x{ctx[CpuRegister.Rsi]:X16} arg2=0x{ctx[CpuRegister.Rdx]:X16}");
-        return ReturnPointer(ctx, commandAddress);
+        ulong firstPacket = 0;
+        bool Append(uint dwords)
+        {
+            if (!TryAllocateCommandDwords(ctx, commandBufferAddress, dwords, out var address))
+                return false;
+            Span<byte> packet = stackalloc byte[36];
+            packet.Clear();
+            var first = firstPacket == 0;
+            BinaryPrimitives.WriteUInt32LittleEndian(packet, Pm4(dwords, PacketOpcode.Nop, first ? PacketCustomCode.ContextState : 0));
+            if (first)
+                BinaryPrimitives.WriteUInt32LittleEndian(packet[4..], operation);
+            if (!ctx.Memory.TryWrite(address, packet[..(int)(dwords * sizeof(uint))]))
+                return false;
+            if (first)
+                firstPacket = address;
+            return true;
+        }
+
+        bool AppendSaveRestore() =>
+            TryPrepareCommandDwords(ctx, commandBufferAddress, 22, false, out _) &&
+            Append(5) && Append(8) && Append(9);
+
+        // Keep allocation boundaries while the first packet carries the context operation.
+        var complete = (ContextStateOperation)operation switch
+        {
+            ContextStateOperation.Clear => Append(5),
+            ContextStateOperation.Push => AppendSaveRestore() && Append(3) && Append(2),
+            ContextStateOperation.Pop => Append(3) && AppendSaveRestore() && Append(2),
+            ContextStateOperation.PushClear => AppendSaveRestore() && Append(3) && Append(2) && Append(5),
+            _ => false,
+        };
+        TraceAgc($"agc.context_state buf=0x{commandBufferAddress:X16} operation={operation} complete={complete}");
+        return ReturnPointer(ctx, complete ? firstPacket : 0);
     }
     #pragma warning restore SHEM006
 

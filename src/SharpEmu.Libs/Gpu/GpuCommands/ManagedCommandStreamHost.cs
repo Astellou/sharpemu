@@ -221,7 +221,7 @@ public class ManagedCommandStreamHost : ICommandStreamHost
     {
     }
 
-    public virtual void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator)
+    public virtual void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0)
     {
     }
 

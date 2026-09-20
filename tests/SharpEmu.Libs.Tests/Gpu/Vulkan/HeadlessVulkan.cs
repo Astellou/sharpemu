@@ -42,6 +42,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
 
     // Dynamic rendering with the two extended dynamic state extensions, as the presenter's render host needs.
     public bool SupportsDynamicRendering { get; }
+    public bool SupportsFragmentShaderBarycentric { get; private init; }
 
     private static readonly string[] RenderingExtensionNames =
     [
@@ -284,6 +285,22 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             }
         }
 
+        const string barycentricExtension = "VK_KHR_fragment_shader_barycentric";
+        var barycentricFeatures = new PhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+        {
+            SType = StructureType.PhysicalDeviceFragmentShaderBarycentricFeaturesKhr,
+        };
+        if (HasDeviceExtensions(vk, physical, [barycentricExtension]))
+        {
+            var query = new PhysicalDeviceFeatures2
+            {
+                SType = StructureType.PhysicalDeviceFeatures2,
+                PNext = &barycentricFeatures,
+            };
+            vk.GetPhysicalDeviceFeatures2(physical, &query);
+        }
+        var barycentric = (bool)barycentricFeatures.FragmentShaderBarycentric;
+
         var extendedDynamicState2Features = new PhysicalDeviceExtendedDynamicState2FeaturesEXT
         {
             SType = StructureType.PhysicalDeviceExtendedDynamicState2FeaturesExt,
@@ -359,7 +376,15 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             PNext = dynamicRendering ? &dynamicRenderingFeatures : null,
         };
         timelineFeatures.PNext = &addressFeatures;
-        var deviceExtensions = dynamicRendering ? SilkMarshal.StringArrayToPtr(RenderingExtensionNames) : 0;
+        if (barycentric)
+        {
+            barycentricFeatures.PNext = addressFeatures.PNext;
+            addressFeatures.PNext = &barycentricFeatures;
+        }
+        var extensionNames = new List<string>();
+        if (dynamicRendering) extensionNames.AddRange(RenderingExtensionNames);
+        if (barycentric) extensionNames.Add(barycentricExtension);
+        var deviceExtensions = extensionNames.Count > 0 ? SilkMarshal.StringArrayToPtr(extensionNames.ToArray()) : 0;
         var deviceInfo = new DeviceCreateInfo
         {
             SType = StructureType.DeviceCreateInfo,
@@ -367,11 +392,11 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             QueueCreateInfoCount = 1,
             PQueueCreateInfos = &queueInfo,
             PEnabledFeatures = &enabledFeatures,
-            EnabledExtensionCount = dynamicRendering ? (uint)RenderingExtensionNames.Length : 0u,
+            EnabledExtensionCount = (uint)extensionNames.Count,
             PpEnabledExtensionNames = (byte**)deviceExtensions,
         };
         var deviceCreated = vk.CreateDevice(physical, &deviceInfo, null, out var device);
-        if (dynamicRendering)
+        if (deviceExtensions != 0)
         {
             SilkMarshal.Free(deviceExtensions);
         }
@@ -383,7 +408,10 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         }
 
         vk.GetDeviceQueue(device, family, 0, out var queue);
-        var result = new HeadlessVulkan(vk, instance, physical, device, queue, family, apiVersion, enabledFeatures, dynamicRendering);
+        var result = new HeadlessVulkan(vk, instance, physical, device, queue, family, apiVersion, enabledFeatures, dynamicRendering)
+        {
+            SupportsFragmentShaderBarycentric = barycentric,
+        };
         if (validation)
         {
             result.RegisterDebugMessenger();

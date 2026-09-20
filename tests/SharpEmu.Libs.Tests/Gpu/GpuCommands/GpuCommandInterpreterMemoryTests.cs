@@ -152,6 +152,48 @@ public sealed class GpuCommandInterpreterMemoryTests
     }
 
     [Fact]
+    public void CopyDataBuilder_EncodesGuestArguments()
+    {
+        var runner = new StreamRunner();
+        var context = new CpuContext(runner.Host.Memory, Generation.Gen5);
+        const ulong commandBufferAddress = StreamRunner.TableAddress;
+        const ulong stackAddress = StreamRunner.TableAddress + 0x100;
+        const ulong immediateValue = 0x1122_3344_5566_7788;
+        runner.Host.WriteQword(commandBufferAddress + 0x10, StreamRunner.CommandAddress);
+        runner.Host.WriteQword(commandBufferAddress + 0x18, StreamRunner.CommandAddress + 0x100);
+        context[CpuRegister.Rdi] = commandBufferAddress;
+        context[CpuRegister.Rsi] = 2;
+        context[CpuRegister.Rdx] = 3;
+        context[CpuRegister.Rcx] = Label;
+        context[CpuRegister.R8] = 10;
+        context[CpuRegister.R9] = 2;
+        context[CpuRegister.Rsp] = stackAddress;
+        runner.Host.WriteQword(stackAddress + 8, immediateValue);
+        runner.Host.WriteQword(stackAddress + 16, 1);
+        runner.Host.WriteQword(stackAddress + 24, 1);
+
+        AgcExports.DcbCopyData(context);
+
+        var expectedControl =
+            ((10u >> 1) & 0xFu) |
+            (((2u >> 1) & 0xFu) << 8) |
+            ((2u & 0x3u) << 13) |
+            (1u << 16) |
+            (1u << 20) |
+            ((3u & 0x3u) << 25) |
+            ((10u & 0x1u) << 30);
+        Assert.Equal(StreamRunner.CommandAddress, context[CpuRegister.Rax]);
+        Assert.Equal(StreamRunner.CommandAddress + 24, runner.Host.ReadQword(commandBufferAddress + 0x10));
+        Assert.Equal(PacketHeader.Make(6, PacketOpcode.CopyData), runner.Host.ReadDword(StreamRunner.CommandAddress));
+        Assert.Equal(expectedControl, runner.Host.ReadDword(StreamRunner.CommandAddress + 4));
+        Assert.Equal(immediateValue, runner.Host.ReadQword(StreamRunner.CommandAddress + 8));
+        Assert.Equal(Label, runner.Host.ReadQword(StreamRunner.CommandAddress + 16));
+
+        runner.Interpreter.Process(new PacketCursorStack(), StreamRunner.CommandAddress, 6);
+        Assert.Equal(immediateValue, runner.Host.ReadQword(Label));
+    }
+
+    [Fact]
     public void CopyData_MapsSelectorsToTransfers()
     {
         var runner = new StreamRunner();

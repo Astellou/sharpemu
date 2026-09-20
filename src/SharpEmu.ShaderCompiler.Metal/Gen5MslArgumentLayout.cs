@@ -123,7 +123,8 @@ public sealed class Gen5MslArgumentLayout
             ImageNumericClass.Sint => "sint",
             _ => "float",
         };
-        return $"{classPart}_{numericPart}_{DimensionName(dimension)}";
+        var dimensionPart = ImageDescriptorBinding.IsCube(kind) ? "cube" : DimensionName(dimension);
+        return $"{classPart}_{numericPart}_{dimensionPart}";
     }
 
     public static string DimensionName(ImageDimension dimension) => dimension switch
@@ -138,9 +139,9 @@ public sealed class Gen5MslArgumentLayout
     };
 
     // The Metal texture type of an image class with the given component and access.
-    public static string TextureType(ImageDimension dimension, string componentType, string? access)
+    public static string TextureType(ImageDimension dimension, string componentType, string? access, bool cube = false)
     {
-        var typeName = dimension switch
+        var typeName = cube ? "texturecube" : dimension switch
         {
             ImageDimension.Dim1D => "texture1d",
             ImageDimension.Dim1DArray => "texture1d_array",

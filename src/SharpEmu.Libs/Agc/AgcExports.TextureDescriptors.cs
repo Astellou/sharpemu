@@ -201,10 +201,10 @@ public static partial class AgcExports
             return false;
         }
 
-        // Preserve the high address byte and the full width and height fields.
+        // Prospero T# stores width-minus-one across 14 bits and height-minus-one in 14 bits.
         var address = (((ulong)(fields[1] & 0xFFu) << 32) | fields[0]) << 8;
-        var width = (((fields[1] >> 30) & 0x3u) | ((fields[2] & 0x3FFFu) << 2)) + 1;
-        var height = ((fields[2] >> 14) & 0xFFFFu) + 1;
+        var width = (((fields[1] >> 30) & 0x3u) | ((fields[2] & 0x0FFFu) << 2)) + 1;
+        var height = ((fields[2] >> 14) & 0x3FFFu) + 1;
         var unifiedFormat = (fields[1] >> 20) & 0x1FFu;
         if (unifiedFormat == 0 ||
             !Gfx10UnifiedFormat.TryDecode(

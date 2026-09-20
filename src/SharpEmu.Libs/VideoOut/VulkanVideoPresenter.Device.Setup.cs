@@ -628,6 +628,9 @@ internal static unsafe partial class VulkanVideoPresenter
                 $"mode={graphicsSubgroupMode} compute_subgroups=unchanged");
         }
 
+        private bool _supportsFragmentShaderBarycentric;
+        private const string FragmentShaderBarycentricExtensionName = "VK_KHR_fragment_shader_barycentric";
+
         private void CreateDevice()
         {
             var priority = 1.0f;
@@ -706,6 +709,21 @@ internal static unsafe partial class VulkanVideoPresenter
                 Console.Error.WriteLine(
                     "[LOADER][WARN] GPU does not support textureCompressionBC " +
                     "guest BC1-BC7 textures cannot be sampled directly.");
+            }
+
+            var barycentricFeatures = new PhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+            {
+                SType = StructureType.PhysicalDeviceFragmentShaderBarycentricFeaturesKhr,
+            };
+            if (IsDeviceExtensionAvailable(FragmentShaderBarycentricExtensionName))
+            {
+                var barycentricQuery = new PhysicalDeviceFeatures2
+                {
+                    SType = StructureType.PhysicalDeviceFeatures2,
+                    PNext = &barycentricFeatures,
+                };
+                _vk.GetPhysicalDeviceFeatures2(_physicalDevice, &barycentricQuery);
+                _supportsFragmentShaderBarycentric = barycentricFeatures.FragmentShaderBarycentric;
             }
 
             var depthClipEnableFeatures = new PhysicalDeviceDepthClipEnableFeaturesEXT
@@ -809,15 +827,20 @@ internal static unsafe partial class VulkanVideoPresenter
             var colorWriteEnableExtension = (byte*)SilkMarshal.StringToPtr(ColorWriteEnableExtensionName);
             var depthClipControlExtension = (byte*)SilkMarshal.StringToPtr(DepthClipControlExtensionName);
             var depthClipEnableExtension = (byte*)SilkMarshal.StringToPtr(DepthClipEnableExtensionName);
+            var barycentricExtension = (byte*)SilkMarshal.StringToPtr(FragmentShaderBarycentricExtensionName);
             try
             {
-                var extensions = stackalloc byte*[11];
+                var extensions = stackalloc byte*[12];
                 var extensionCount = 0u;
                 extensions[extensionCount++] = swapchainExtension;
                 extensions[extensionCount++] = pushDescriptorExtension;
                 extensions[extensionCount++] = dynamicRenderingExtension;
                 extensions[extensionCount++] = extendedDynamicStateExtension;
                 extensions[extensionCount++] = extendedDynamicState2Extension;
+                if (_supportsFragmentShaderBarycentric)
+                {
+                    extensions[extensionCount++] = barycentricExtension;
+                }
                 if (supportsColorWriteEnable)
                 {
                     extensions[extensionCount++] = colorWriteEnableExtension;
@@ -880,6 +903,11 @@ internal static unsafe partial class VulkanVideoPresenter
                     PNext = &timelineSemaphoreFeatures,
                 };
                 void* renderingChain = &addressFeatures;
+                if (_supportsFragmentShaderBarycentric)
+                {
+                    barycentricFeatures.PNext = renderingChain;
+                    renderingChain = &barycentricFeatures;
+                }
                 if (_supportsDepthClipEnable)
                 {
                     depthClipEnableFeatures = new PhysicalDeviceDepthClipEnableFeaturesEXT
@@ -962,6 +990,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 SilkMarshal.Free((nint)depthClipControlExtension);
                 SilkMarshal.Free((nint)depthClipEnableExtension);
                 SilkMarshal.Free((nint)pushDescriptorExtension);
+                SilkMarshal.Free((nint)barycentricExtension);
             }
 
             _vk.GetDeviceQueue(_device, _queueFamilyIndex, 0, out _queue);

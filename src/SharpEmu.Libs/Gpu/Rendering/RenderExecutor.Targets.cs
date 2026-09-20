@@ -20,6 +20,7 @@ public sealed partial class RenderExecutor
         var context = banks.Context;
         if (TryResolveMultisampleColor(context))
         {
+            TraceDrawDisposition(banks, in draw, "multisample-color-resolve");
             return false;
         }
 
@@ -52,6 +53,7 @@ public sealed partial class RenderExecutor
         state.PixelActive = HasActivePixelShader(banks);
         if (state.ColorCount == 0 && !state.Depth.HasTarget && !state.PixelActive)
         {
+            TraceDrawDisposition(banks, in draw, "no-framebuffer");
             if (RenderTrace.Enabled && RenderTrace.FramebufferSkip())
             {
                 RenderTrace.Write(
@@ -94,6 +96,63 @@ public sealed partial class RenderExecutor
 
         _host.MarkGpuWritten(to.Image);
         _host.ResolveImage(from.Image, from.Resolution.BaseMipLevel, from.Resolution.BaseArrayLayer, to.Image, to.Resolution.BaseMipLevel, to.Resolution.BaseArrayLayer);
+        return true;
+    }
+
+    // DB_RENDER_OVERRIDE can turn a draw packet into a depth/stencil read-to-write copy.
+    private bool TryDepthStencilCopy(ContextRegisters context)
+    {
+        if (context.ColorControl.Mode != 0)
+        {
+            return false;
+        }
+
+        ref readonly var words = ref context.DepthTarget;
+        var renderOverride = context.DepthRenderOverride;
+        var depthCopy =
+            renderOverride.ForceZDirty &&
+            renderOverride.ForceZValid &&
+            words.DepthFormat != GuestDepthFormat.Invalid &&
+            words.ZReadBase != 0 &&
+            words.ZWriteBase != 0 &&
+            words.ZReadBase != words.ZWriteBase;
+        var stencilCopy =
+            renderOverride.ForceStencilDirty &&
+            renderOverride.ForceStencilValid &&
+            words.StencilFormat != GuestStencilFormat.Invalid &&
+            words.StencilReadBase != 0 &&
+            words.StencilWriteBase != 0 &&
+            words.StencilReadBase != words.StencilWriteBase;
+        if (!depthCopy && !stencilCopy)
+        {
+            return false;
+        }
+
+        var read = ImageRequestBuilders.DepthTargetCopy(in words, _host.FormatSupport, writeBuffer: false)
+            ?? throw _host.Fatal("A depth/stencil copy has no readable depth target.");
+        var write = ImageRequestBuilders.DepthTargetCopy(in words, _host.FormatSupport, writeBuffer: true)
+            ?? throw _host.Fatal("A depth/stencil copy has no writable depth target.");
+        var readRequest = read.Request;
+        var writeRequest = write.Request;
+        var source = _host.FindImage(ref readRequest, exactFormat: true);
+        var destination = _host.FindImage(ref writeRequest, exactFormat: true);
+        _host.BindRenderTarget(source);
+        _host.BindRenderTarget(destination);
+        if (source == destination || read.Format != write.Format)
+        {
+            throw _host.Fatal(
+                $"A depth/stencil copy must use distinct images with the same format: source={source.Index} destination={destination.Index} readFormat={(int)read.Format} writeFormat={(int)write.Format}.");
+        }
+
+        var range = new SubresourceRange(
+            readRequest.View.BaseLevel,
+            readRequest.View.LevelCount,
+            readRequest.View.BaseLayer,
+            readRequest.View.LayerCount);
+        var extent = new Extent3D(write.Width, write.Height, 1);
+        var aspects = (depthCopy ? ImageAspectFlags.DepthBit : 0) | (stencilCopy ? ImageAspectFlags.StencilBit : 0);
+        _host.MarkGpuWritten(destination);
+        _host.CopyDepthStencilImage(source, destination, in range, in extent, aspects);
         return true;
     }
 

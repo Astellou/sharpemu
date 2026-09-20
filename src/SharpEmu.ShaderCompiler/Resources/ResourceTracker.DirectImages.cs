@@ -13,6 +13,7 @@ public sealed partial class ResourceTracker
 
         var reads = handle.Operands;
         var memoryIndices = new int[8];
+        var canSuppressMemoryReads = true;
         for (var component = 0; component < reads.Length; component++)
         {
             var read = reads[component];
@@ -22,7 +23,7 @@ public sealed partial class ResourceTracker
             var memory = _plan.Memory[read.MemoryIndex];
             if (memory.Kind != MemoryResourceKind.ScalarAddress || memory.DataBits != 32 || memory.DataDwords != 1)
                 return false;
-            if (!HasOnlyImageConsumers(memory, handle)) return false;
+            canSuppressMemoryReads &= HasOnlyImageConsumers(memory, handle);
             memoryIndices[component] = read.MemoryIndex;
         }
 
@@ -86,6 +87,7 @@ public sealed partial class ResourceTracker
             Source = InternSource(imageSource),
             Key = keyRead,
             KeyIsAddressOffset = true,
+            SuppressMemoryReads = canSuppressMemoryReads,
             Memory = memoryIndices,
             Reads = reads,
         };

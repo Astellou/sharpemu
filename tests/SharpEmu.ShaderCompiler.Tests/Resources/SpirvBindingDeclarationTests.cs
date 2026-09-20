@@ -12,6 +12,8 @@ namespace SharpEmu.ShaderCompiler.Tests.Resources;
 public sealed class SpirvBindingDeclarationTests
 {
     private const uint ImageType2D = 9;
+    private const uint ImageTypeCube = 11;
+    private const uint ImageType2DArray = 13;
 
     private static IEnumerable<Gen5ShaderInstruction> ImageWords(ref uint pc, uint register, uint address, uint format)
     {
@@ -190,7 +192,10 @@ public sealed class SpirvBindingDeclarationTests
 
     // A plain sampled image before the indirect root, so the root is image 1 and its second
     // candidate image 2: the mapping's candidate-local index 1 must select image 2.
-    internal static Gen5ShaderProgram IndirectImageAfterPlainImageProgram(bool loadMip = false, bool gpuDependentSelector = false)
+    internal static Gen5ShaderProgram IndirectImageAfterPlainImageProgram(
+        bool loadMip = false,
+        bool gpuDependentSelector = false,
+        uint indirectDimension = 1)
     {
         var instructions = new List<Gen5ShaderInstruction>();
         uint pc = 0;
@@ -230,7 +235,7 @@ public sealed class SpirvBindingDeclarationTests
         }
         else
         {
-            Add(Image(pc, "ImageSampleLz", 16, 24, dmask: 1));
+            Add(Image(pc, "ImageSampleLz", 16, 24, dimension: indirectDimension, dmask: 1));
         }
 
         Add(BufferAccess(pc, "BufferStoreDword", 52, 4, 1, vectorData: 4));
@@ -239,7 +244,11 @@ public sealed class SpirvBindingDeclarationTests
     }
 
     // User data and memory for that program: record 1 of the material table selects heap descriptor 1.
-    internal static (uint[] UserData, TestWordMemory Memory) IndirectImageAfterPlainImageInputs(uint resultBytes, bool twoLevels = false)
+    internal static (uint[] UserData, TestWordMemory Memory) IndirectImageAfterPlainImageInputs(
+        uint resultBytes,
+        bool twoLevels = false,
+        uint? firstImageType = null,
+        uint? secondImageType = null)
     {
         var userData = new uint[64];
         uint[] tables = [0x1000, 224 << 16, 2, 0, 0x2000, 16 << 16, 4, 0, 1];
@@ -251,18 +260,38 @@ public sealed class SpirvBindingDeclarationTests
         {
             descriptor[3] |= 1u << 16;
         }
+        if (firstImageType is uint rootImageType)
+        {
+            descriptor[3] = (descriptor[3] & 0x0FFF_FFFF) | (rootImageType << 28);
+        }
 
         ResourceTrackerTests.WriteImage(memory, 0x2000, descriptor);
-        ResourceTrackerTests.WriteImage(memory, 0x2020, descriptor);
+        var secondDescriptor = descriptor.ToArray();
+        if (secondImageType is uint imageType)
+        {
+            secondDescriptor[3] = (secondDescriptor[3] & 0x0FFF_FFFF) | (imageType << 28);
+        }
+
+        ResourceTrackerTests.WriteImage(memory, 0x2020, secondDescriptor);
         memory.At(0x2020) ^= 1;
         memory.At(0x1000 + 228) = 1;
         return (userData, memory);
     }
 
-    internal static (ShaderCompileRequest Request, ResourceSnapshot Snapshot) IndirectImageAfterPlainImageRequest(uint resultBytes = 64, bool loadMip = false, bool gpuDependentSelector = false)
+    internal static (ShaderCompileRequest Request, ResourceSnapshot Snapshot) IndirectImageAfterPlainImageRequest(
+        uint resultBytes = 64,
+        bool loadMip = false,
+        bool gpuDependentSelector = false,
+        uint? firstImageType = null,
+        uint? secondImageType = null,
+        uint indirectDimension = 1)
     {
-        var plan = Extract(IndirectImageAfterPlainImageProgram(loadMip, gpuDependentSelector));
-        var (userData, memory) = IndirectImageAfterPlainImageInputs(resultBytes, loadMip);
+        var plan = Extract(IndirectImageAfterPlainImageProgram(loadMip, gpuDependentSelector, indirectDimension));
+        var (userData, memory) = IndirectImageAfterPlainImageInputs(
+            resultBytes,
+            loadMip,
+            firstImageType,
+            secondImageType);
         var snapshot = new ResourceSnapshot();
         var specialization = new ResourceSpecialization();
         Assert.True(ResourceMaterializer.Materialize(plan, Inputs(userData, readCleanMemory: memory.Read), ref snapshot, ref specialization));
@@ -290,6 +319,51 @@ public sealed class SpirvBindingDeclarationTests
         Assert.Equal(1u, snapshot.FlattenedResourceTable[mapping + 4]);
         Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
         Assert.Contains((ushort)SpirvOp.Select, new SpirvModuleInspector(shader.Spirv).Opcodes);
+    }
+
+    [Theory]
+    [InlineData(ImageType2D, ImageType2DArray)]
+    [InlineData(ImageType2DArray, ImageType2D)]
+    public void IndirectImage_Mixed2DAnd2DArrayCandidatesCompileAcrossBindingClasses(uint firstImageType, uint secondImageType)
+    {
+        var (request, snapshot) = IndirectImageAfterPlainImageRequest(
+            firstImageType: firstImageType, secondImageType: secondImageType, indirectDimension: 5);
+        var root = request.Resources.Info.Images[1];
+        var candidate = request.Resources.Info.Images[2];
+        Assert.NotEqual(root.Dimension, candidate.Dimension);
+        Assert.NotEqual(ImageDescriptorBinding.ForImage(root), ImageDescriptorBinding.ForImage(candidate));
+        Assert.Equal(firstImageType, snapshot.Images[1][3] >> 28);
+        Assert.Equal(secondImageType, snapshot.Images[2][3] >> 28);
+        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
+        Assert.Contains((ushort)SpirvOp.Select, new SpirvModuleInspector(shader.Spirv).Opcodes);
+        Assert.False(SharpEmu.ShaderCompiler.Metal.Gen5MslTranslator.TryCompileProgram(request, out _, out var metalError));
+        Assert.False(string.IsNullOrWhiteSpace(metalError));
+    }
+
+    [Theory]
+    [InlineData(ImageType2D, ImageTypeCube)]
+    [InlineData(ImageTypeCube, ImageType2D)]
+    public void IndirectImage_MixedCubeAnd2DCandidatesAreNotDiscarded(
+        uint firstImageType,
+        uint secondImageType)
+    {
+        AssertMixedImageCandidatesAreRejected(firstImageType, secondImageType);
+    }
+
+    private static void AssertMixedImageCandidatesAreRejected(uint firstImageType, uint secondImageType)
+    {
+        var plan = Extract(IndirectImageAfterPlainImageProgram(indirectDimension: 3));
+        var (userData, memory) = IndirectImageAfterPlainImageInputs(
+            64, false, firstImageType: firstImageType, secondImageType: secondImageType);
+        var snapshot = new ResourceSnapshot();
+        var specialization = new ResourceSpecialization();
+        var previousSnapshot = snapshot;
+        var previousSpecialization = specialization;
+        Assert.False(ResourceMaterializer.Materialize(plan, Inputs(userData, readCleanMemory: memory.Read),
+            ref snapshot, ref specialization, out var failure));
+        Assert.Equal(ResourceMaterializationFailure.IncompatibleImageCandidates, failure);
+        Assert.Same(previousSnapshot, snapshot);
+        Assert.Same(previousSpecialization, specialization);
     }
 
     [Fact]

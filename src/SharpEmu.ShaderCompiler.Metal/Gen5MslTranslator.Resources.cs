@@ -147,6 +147,7 @@ public static partial class Gen5MslTranslator
         private void DeclareImageClass(DescriptorBinding binding, ShaderResourceInfo info)
         {
             var (resourceClass, numericClass, dimension, atomic) = ImageDescriptorBinding.Describe(binding.Kind);
+            var cube = ImageDescriptorBinding.IsCube(binding.Kind);
             if (resourceClass == ImageResourceClass.None)
             {
                 throw new InvalidOperationException($"binding kind {binding.Kind} is not an image class");
@@ -177,7 +178,7 @@ public static partial class Gen5MslTranslator
             var multisampled = dimension is ImageDimension.Dim2DMsaa or ImageDimension.Dim2DMsaaArray;
             _imageClasses[binding.Kind] = new MslImageClass(
                 Gen5MslArgumentLayout.ImageClassName(binding.Kind),
-                Gen5MslArgumentLayout.TextureType(dimension, componentKind, access),
+                Gen5MslArgumentLayout.TextureType(dimension, componentKind, access, cube),
                 componentKind,
                 isStorage,
                 multisampled,
@@ -465,7 +466,8 @@ public static partial class Gen5MslTranslator
                     value = Temp("uint", $"sharpemu_load_device_dword({DeviceArguments}, {componentAddress})");
                 }
 
-                if (_indirectKeyScratch.TryGetValue(memoryIndex, out var keyScratch))
+                if (!request.IndirectOffsetKeyMemoryIndices.Contains(memoryIndex) &&
+                    _indirectKeyScratch.TryGetValue(memoryIndex, out var keyScratch))
                 {
                     Line($"{keyScratch} = {value};");
                 }

@@ -18,6 +18,8 @@ public sealed class ResourceMaterializerTests
     [Theory]
     [InlineData(32)]
     [InlineData(33)]
+    [InlineData(64)]
+    [InlineData(65)]
     public void MaterialImageCapacityPreservesTheLimitAndPublishedState(int distinctCount)
     {
         var plan = Extract(ResourceTrackerTests.IndirectImageProgram(false));

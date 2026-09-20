@@ -32,6 +32,27 @@ public sealed class ImageRequestBuildersTests : IClassFixture<HeadlessVulkanFixt
     }
     private static readonly ShaderImageShape Sampled2D = new(false, false, false, false, TextureNumericClass.Float);
 
+    [Theory]
+    [InlineData(GuestPixelFormat.Bits16UNorm, Format.D16Unorm, Format.R16Unorm)]
+    [InlineData(GuestPixelFormat.Bits32Float, Format.D32Sfloat, Format.R32Sfloat)]
+    public void ComparisonTexture_SelectsDepthWithoutChangingTheGuestLayout(
+        GuestPixelFormat guestFormat, Format depthFormat, Format colorFormat)
+    {
+        var words = RegisterWords.Texture(Base, guestFormat, 48, 24);
+        var ordinary = ImageRequestBuilders.Texture(words, Sampled2D);
+        var comparison = ImageRequestBuilders.Texture(words, Sampled2D with { DepthCompare = true });
+
+        Assert.Equal(colorFormat, ordinary.Request.Description.PixelFormat);
+        Assert.False(ordinary.Request.Description.IsDepth);
+        Assert.Equal(depthFormat, comparison.Request.Description.PixelFormat);
+        Assert.Equal(depthFormat, comparison.Request.View.Format);
+        Assert.True(comparison.Request.Description.IsDepth);
+        Assert.Equal(ordinary.Request.Description.Data, comparison.Request.Description.Data);
+        Assert.Equal(ordinary.Request.Description.Pitch, comparison.Request.Description.Pitch);
+        Assert.Equal(ordinary.Request.Description.MipLayout[0], comparison.Request.Description.MipLayout[0]);
+        Assert.Equal(ImageRole.Texture, comparison.Request.Role);
+    }
+
     private readonly HeadlessVulkan? _vulkan;
 
     public ImageRequestBuildersTests(HeadlessVulkanFixture fixture) => _vulkan = fixture.Vulkan;

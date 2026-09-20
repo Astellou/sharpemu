@@ -44,6 +44,35 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(1u, control.VectorData);
     }
 
+    [Theory]
+    [InlineData(0xE0FC4000u, "BufferAtomicFmin")]
+    [InlineData(0xE1004000u, "BufferAtomicFmax")]
+    public void BufferAtomicFloatMinMax_Decode(uint word, string opcode)
+    {
+        var instruction = DecodeSingle(word, 0x80000100);
+
+        Assert.Equal(opcode, instruction.Opcode);
+        var control = Assert.IsType<Gen5BufferMemoryControl>(instruction.Control);
+        Assert.Equal(1u, control.DwordCount);
+        Assert.Equal(1u, control.VectorData);
+        Assert.Equal(0u, control.ScalarResource);
+    }
+
+    [Fact]
+    public void BufferAtomicOrX2_UsesTwoDataRegisters()
+    {
+        // BUFFER_ATOMIC_OR_X2 v[1:2], off, s[0:3], 128 glc
+        var instruction = DecodeSingle(0xE1684000, 0x80000100);
+
+        Assert.Equal("BufferAtomicOrX2", instruction.Opcode);
+        var control = Assert.IsType<Gen5BufferMemoryControl>(instruction.Control);
+        Assert.Equal(2u, control.DwordCount);
+        Assert.Equal(1u, control.VectorData);
+        Assert.Equal(
+            new[] { Gen5Operand.Vector(1), Gen5Operand.Vector(2) },
+            instruction.Destinations);
+    }
+
     [Fact]
     public void ImageAtomicAdd_KeepsDataRegisterAsDestination()
     {
@@ -84,6 +113,21 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(new[] { Gen5Operand.Vector(3) }, instruction.Destinations);
     }
 
+    [Theory]
+    [InlineData(0xD8480004u, "DsMinF32")]
+    [InlineData(0xD84C0008u, "DsMaxF32")]
+    public void DsFloatMinMax_KeepReplacementAndCompareOperands(uint word, string opcode)
+    {
+        // DATA0 is the replacement value and DATA1 is the float compare operand.
+        var instruction = DecodeSingle(word, 0x00010907);
+
+        Assert.Equal(opcode, instruction.Opcode);
+        Assert.Equal(
+            new[] { Gen5Operand.Vector(7), Gen5Operand.Vector(9), Gen5Operand.Vector(1) },
+            instruction.Sources);
+        Assert.Empty(instruction.Destinations);
+    }
+
     [Fact]
     public void DsCmpstRtnB32_OrdersComparatorBeforeNewValue()
     {
@@ -111,6 +155,19 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(0x0808u, control.SingleOffsetBytes);
     }
 
+    [Fact]
+    public void DsReadI8_DecodesAddressAndDestination()
+    {
+        // DS_READ_I8 v5, v7 offset:3
+        var instruction = DecodeSingle(0xD8E40003, 0x05000007);
+
+        Assert.Equal("DsReadI8", instruction.Opcode);
+        Assert.Equal(new[] { Gen5Operand.Vector(7) }, instruction.Sources);
+        Assert.Equal(new[] { Gen5Operand.Vector(5) }, instruction.Destinations);
+        var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
+        Assert.Equal(3u, control.SingleOffsetBytes);
+    }
+
     [Theory]
     [InlineData(0xD8FA3412u, "DsAppend")]
     [InlineData(0xD8F63412u, "DsConsume")]
@@ -126,6 +183,20 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(0x34u, control.Offset1);
         Assert.Equal(0x3412u, control.SingleOffsetBytes);
         Assert.False(control.Gds);
+    }
+
+    [Fact]
+    public void VCmpxNeU64_DecodesVectorRegisterPairs()
+    {
+        // V_CMPX_NE_U64 v[0:1], v[3:4]. The translator consumes each encoded
+        // source as the low register of a 64-bit pair and updates EXEC.
+        var instruction = DecodeSingle(0x7DEA0700);
+
+        Assert.Equal("VCmpxNeU64", instruction.Opcode);
+        Assert.Equal(
+            new[] { Gen5Operand.Vector(0), Gen5Operand.Vector(3) },
+            instruction.Sources);
+        Assert.Empty(instruction.Destinations);
     }
 
     private static Gen5ShaderInstruction DecodeSingle(params uint[] words)

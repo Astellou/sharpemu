@@ -254,6 +254,60 @@ public sealed partial class GuestImageCache
         }
     }
 
+    private static bool GrowImageToLayers(ref ImageDescription info, uint layers)
+    {
+        var current = info.Resources.Layers;
+        if (info.Resources.Levels != 1 || current == 0 || layers <= current ||
+            info.MipLayout[0].Offset != 0 || info.MipLayout[0].Size != info.Data.Size)
+        {
+            return false;
+        }
+
+        static bool TryStretch(ref GuestSpan range, uint currentLayers, uint newLayers)
+        {
+            if (range.Size == 0)
+            {
+                return true;
+            }
+
+            if (range.Size % currentLayers != 0)
+            {
+                return false;
+            }
+
+            range = new GuestSpan(range.Address, range.Size / currentLayers * newLayers);
+            return true;
+        }
+
+        var grown = info;
+        if (!TryStretch(ref grown.Data, current, layers) ||
+            !TryStretch(ref grown.Stencil, current, layers) ||
+            !TryStretch(ref grown.Metadata.Range, current, layers))
+        {
+            return false;
+        }
+
+        grown.MipLayout[0].Size = grown.Data.Size;
+        grown.Resources = grown.Resources with { Layers = layers };
+        info = grown;
+        return true;
+    }
+
+    private static bool SameMipLayout(in ImageDescription left, in ImageDescription right)
+    {
+        for (var level = 0; level < ImageDescription.MaxLevels; level++)
+        {
+            var a = left.MipLayout[level];
+            var b = right.MipLayout[level];
+            if (a.Offset != b.Offset || a.Size != b.Size || a.Pitch != b.Pitch || a.Height != b.Height)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private ResourceSlotIdentifier ResolveDepthOverlap(in ImageDescription requested, ImageRole role, ResourceSlotIdentifier cachedImageIdentifier)
     {
         using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.ImageOverlap);
@@ -322,7 +376,13 @@ public sealed partial class GuestImageCache
         }
         else
         {
-            replacementInfo.Resources = SubresourceCount.Max(requested.Resources, cachedInfo.Resources);
+            var merged = SubresourceCount.Max(requested.Resources, cachedInfo.Resources);
+            if (merged.Layers > requested.Resources.Layers && !GrowImageToLayers(ref replacementInfo, merged.Layers))
+            {
+                merged = merged with { Layers = requested.Resources.Layers };
+            }
+
+            replacementInfo.Resources = merged;
         }
 
         replacementInfo.HtileClearMask = 0;
@@ -413,7 +473,8 @@ public sealed partial class GuestImageCache
                 return new OverlapResolution(GrowImage(requested, cachedImageIdentifier));
             }
 
-            if (requested.TileMode != cachedInfo.TileMode)
+            if (requested.TileMode != cachedInfo.TileMode ||
+                (requested.Resources == cachedInfo.Resources && !SameMipLayout(requested, cachedInfo)))
             {
                 if (safeToDelete)
                 {

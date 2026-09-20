@@ -119,7 +119,7 @@ public interface ICommandStreamHost
 
     void DrawAuto(ulong submitId, in DrawAutoArguments arguments);
 
-    void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator);
+    void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0);
 
     // Called when a queue reset packet clears the processor.
     void OnQueueReset(int queueId);

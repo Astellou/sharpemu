@@ -530,7 +530,21 @@ public sealed class MslTranslationTests
         Assert.DoesNotContain("16u <= sharpemu_resources.buffer_bytes[0] && ", shader.Source, StringComparison.Ordinal);
     }
 
-    private static Gen5MslShader CompileTypedBufferAccess(string opcode, uint dwordCount, uint typedFormat)
+    [Fact]
+    public void FormattedBufferStoreUsesDescriptorFormatForPackedNormals()
+    {
+        var shader = CompileTypedBufferAccess("BufferStoreFormatXyzw", 4, 0, typed: false, descriptorFormat: 50);
+
+        Assert.Contains("sharpemu_format_encode(v[4], 2u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_format_encode(v[5], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_format_encode(v[6], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_format_encode(v[7], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("uint4(0xFFFFFFFFu, 0x0u, 0x0u, 0x0u)", shader.Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("sharpemu_store_bytes(b", shader.Source, StringComparison.Ordinal);
+    }
+
+    private static Gen5MslShader CompileTypedBufferAccess(string opcode, uint dwordCount, uint typedFormat,
+        bool typed = true, uint descriptorFormat = 77)
     {
         var data = new Gen5Operand[dwordCount];
         for (var index = 0; index < data.Length; index++)
@@ -540,7 +554,7 @@ public sealed class MslTranslationTests
 
         var access = new Gen5ShaderInstruction(
             0,
-            Gen5ShaderEncoding.Mtbuf,
+            typed ? Gen5ShaderEncoding.Mtbuf : Gen5ShaderEncoding.Mubuf,
             opcode,
             [0, 0],
             [Gen5Operand.Vector(0), Gen5Operand.Scalar(8), Gen5Operand.Source(128, null)],
@@ -555,13 +569,13 @@ public sealed class MslTranslationTests
                 OffsetEnabled: false,
                 Glc: false,
                 Slc: false,
-                Typed: true,
+                Typed: typed,
                 TypedFormat: typedFormat));
         var end = new Gen5ShaderInstruction(8, Gen5ShaderEncoding.Sopp, "SEndpgm", [0xBF810000], [], [], null);
         var scalars = new uint[256];
         scalars[8] = 0x2000;
         scalars[10] = 64;
-        scalars[11] = 77u << 12;
+        scalars[11] = descriptorFormat << 12;
         var shader = CompileMaterialized(new Gen5ShaderProgram(0, [access, end]), scalars[..12]);
         return shader;
     }

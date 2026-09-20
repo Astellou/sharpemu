@@ -827,6 +827,28 @@ internal static unsafe partial class VulkanVideoPresenter
             CountDraw();
         }
 
+        public bool TryDispatchIndirect(ulong argumentsAddress)
+        {
+            using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.DrawRecording);
+            var (buffer, offset) = _bufferCache.ObtainBuffer(argumentsAddress, 3u * sizeof(uint), false);
+            var command = BeginBatchedGuestCommands();
+            var barrier = new BufferMemoryBarrier
+            {
+                SType = StructureType.BufferMemoryBarrier,
+                SrcAccessMask = AccessFlags.ShaderWriteBit | AccessFlags.TransferWriteBit | AccessFlags.MemoryWriteBit,
+                DstAccessMask = AccessFlags.IndirectCommandReadBit,
+                SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                Buffer = buffer.Handle,
+                Offset = offset,
+                Size = 3u * sizeof(uint),
+            };
+            _vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit, PipelineStageFlags.DrawIndirectBit, 0, 0, null, 1, &barrier, 0, null);
+            _vk.CmdDispatchIndirect(command, buffer.Handle, offset);
+            CountDraw();
+            return true;
+        }
+
         private void RecordMemoryBarrier(PipelineStageFlags sourceStages, PipelineStageFlags destinationStages, AccessFlags sourceAccess, AccessFlags destinationAccess)
         {
             EndRendering();
@@ -914,6 +936,17 @@ internal static unsafe partial class VulkanVideoPresenter
                 sourceImage,
                 new SubresourceRange(sourceMip, 1, sourceLayer, 1),
                 new SubresourceRange(destinationMip, 1, destinationLayer, 1));
+            _ = BeginBatchedGuestCommands();
+        }
+
+        public void CopyDepthStencilImage(ResourceSlotIdentifier source, ResourceSlotIdentifier destination, in SubresourceRange range, in Extent3D extent, ImageAspectFlags aspects)
+        {
+            EndRendering();
+            _imageCache.RefreshImage(source);
+            _imageCache.RefreshImage(destination);
+            var sourceImage = _imageCache.GetImage(source);
+            var destinationImage = _imageCache.GetImage(destination);
+            destinationImage.CopyDepthStencilFrom(sourceImage, in range, in extent, aspects);
             _ = BeginBatchedGuestCommands();
         }
 

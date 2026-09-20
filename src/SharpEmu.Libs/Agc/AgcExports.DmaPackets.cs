@@ -11,6 +11,58 @@ public static partial class AgcExports
     // This partial constructs AGC DMA transfer packets.
 
     [SysAbiExport(
+        Nid = "1rZSWUv1IRc",
+        ExportName = "sceAgcDcbCopyData",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int DcbCopyData(CpuContext ctx)
+    {
+        var commandBufferAddress = ctx[CpuRegister.Rdi];
+        var destinationSelector = (uint)(ctx[CpuRegister.Rsi] & 0xFF);
+        var destinationPolicy = (uint)(ctx[CpuRegister.Rdx] & 0xFF);
+        var destinationAddress = ctx[CpuRegister.Rcx];
+        var sourceSelector = (uint)(ctx[CpuRegister.R8] & 0xFF);
+        var sourcePolicy = (uint)(ctx[CpuRegister.R9] & 0xFF);
+        var stackAddress = ctx[CpuRegister.Rsp];
+
+        if (!TryReadUInt64(ctx, stackAddress + sizeof(ulong), out var sourceValue) ||
+            !TryReadUInt64(ctx, stackAddress + (2 * sizeof(ulong)), out var elementSizeRaw) ||
+            !TryReadUInt64(ctx, stackAddress + (3 * sizeof(ulong)), out var confirmWriteRaw) ||
+            commandBufferAddress == 0 ||
+            !TryAllocateCommandDwords(ctx, commandBufferAddress, 6, out var packetAddress))
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        var elementSize = (uint)(elementSizeRaw & 0xFF);
+        var confirmWrite = (uint)(confirmWriteRaw & 0xFF);
+        var control =
+            ((sourceSelector >> 1) & 0xFu) |
+            (((destinationSelector >> 1) & 0xFu) << 8) |
+            ((sourcePolicy & 0x3u) << 13) |
+            ((elementSize & 0x1u) << 16) |
+            ((confirmWrite & 0x1u) << 20) |
+            ((destinationPolicy & 0x3u) << 25) |
+            ((sourceSelector & 0x1u) << 30);
+
+        if (!TryWriteUInt32(ctx, packetAddress, Pm4(6, ItCopyData, 0)) ||
+            !TryWriteUInt32(ctx, packetAddress + 4, control) ||
+            !TryWriteUInt32(ctx, packetAddress + 8, (uint)sourceValue) ||
+            !TryWriteUInt32(ctx, packetAddress + 12, (uint)(sourceValue >> 32)) ||
+            !TryWriteUInt32(ctx, packetAddress + 16, (uint)destinationAddress) ||
+            !TryWriteUInt32(ctx, packetAddress + 20, (uint)(destinationAddress >> 32)))
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        TraceAgc(
+            $"agc.dcb_copy_data buf=0x{commandBufferAddress:X16} cmd=0x{packetAddress:X16} " +
+            $"dstSel=0x{destinationSelector:X2} srcSel=0x{sourceSelector:X2} " +
+            $"dst=0x{destinationAddress:X16} src=0x{sourceValue:X16} control=0x{control:X8}");
+        return ReturnPointer(ctx, packetAddress);
+    }
+
+    [SysAbiExport(
         Nid = "WmAc2MEj6Io",
         ExportName = "sceAgcDcbDmaData",
         Target = Generation.Gen5,

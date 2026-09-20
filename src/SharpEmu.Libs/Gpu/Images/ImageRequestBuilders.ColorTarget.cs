@@ -69,6 +69,10 @@ public static partial class ImageRequestBuilders
 
         if (words.BaseAddress == 0 || mask == 0)
         {
+            if (Rendering.RenderTrace.Enabled)
+            {
+                Rendering.RenderTrace.Write($"ColorAttachmentRejected reason={(words.BaseAddress == 0 ? "zero-address" : "masked-output")} address=0x{words.BaseAddress:X16} mask=0x{mask:X}");
+            }
             return null;
         }
 

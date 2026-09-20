@@ -157,9 +157,8 @@ public static partial class AgcExports
         return (int)ctx[CpuRegister.Rax];
     }
 
-    // COND_EXEC gates the following execCount dwords on a 32-bit predicate in
-    // memory. Our submitted-packet walker skips unknown PM4 ops, so the recorded
-    // packet degrades to "predicate always true" — the gated commands always run.
+    // The interpreter reads the predicate when this packet executes.
+    // A zero value skips the specified number of following dwords.
     [SysAbiExport(
         Nid = "BIPexNBSGog",
         ExportName = "sceAgcDcbCondExec",
