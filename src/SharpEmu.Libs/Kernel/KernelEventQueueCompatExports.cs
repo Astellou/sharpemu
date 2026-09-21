@@ -15,10 +15,12 @@ public static class KernelEventQueueCompatExports
     private const int KernelEventSize = 0x20;
     public const short KernelEventFilterRead = -1;
     public const short KernelEventFilterGraphics = -14;
+    public const short KernelEventFilterHrTimer = -15;
     public const short KernelEventFilterUser = -11;
     public const short KernelEventFilterAmpr = -25;
     public const short KernelEventFilterAmprSystem = -30;
     public const ushort KernelEventFlagClear = 0x20;
+    public const ushort KernelEventFlagOneShot = 0x10;
     public const ushort KernelEventFlagEof = 0x8000;
     private const int ReadEventPollPeriodMilliseconds = 10;
 
@@ -28,6 +30,7 @@ public static class KernelEventQueueCompatExports
         _eventQueueRuntimeIdentities = new();
     private static readonly Dictionary<ulong, KernelEventDeque> _pendingEvents = new();
     private static readonly Dictionary<ulong, Dictionary<(ulong Ident, short Filter), KernelEventRegistration>> _registeredEvents = new();
+    private static readonly Dictionary<(ulong Handle, int Id), HrTimerState> _hrTimers = new();
     private static long _nextEventQueueHandle = 1;
     private static long _nextEventQueueWaiterId;
     private static long _nextEventRegistrationGeneration;
@@ -42,6 +45,14 @@ public static class KernelEventQueueCompatExports
         Timeout.Infinite);
 
     private sealed record EventQueueRuntimeIdentity(ulong Id);
+
+    private sealed class HrTimerState
+    {
+        public required ulong Handle { get; init; }
+        public required int Id { get; init; }
+        public required ulong UserData { get; init; }
+        public Timer? Timer { get; set; }
+    }
 
     private sealed class EventQueueState
     {
@@ -332,6 +343,7 @@ public static class KernelEventQueueCompatExports
 
             state.Deleted = true;
             _pendingEvents.Remove(handle);
+            CancelHrTimersLocked(handle);
             if (_registeredEvents.Remove(handle, out var registrations))
             {
                 _readEventRegistrationCount -= registrations.Values.Count(
@@ -349,6 +361,114 @@ public static class KernelEventQueueCompatExports
             "delete",
             handle,
             $"generation={state.Generation}");
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "R74tt43xP6k",
+        ExportName = "sceKernelAddHRTimerEvent",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelAddHrTimerEvent(CpuContext ctx)
+    {
+        var handle = ctx[CpuRegister.Rdi];
+        var id = unchecked((int)ctx[CpuRegister.Rsi]);
+        var timespecAddress = ctx[CpuRegister.Rdx];
+        var userData = ctx[CpuRegister.Rcx];
+
+        if (timespecAddress == 0 ||
+            !ctx.TryReadUInt64(timespecAddress, out var secondsBits) ||
+            !ctx.TryReadUInt64(timespecAddress + sizeof(ulong), out var nanosecondsBits))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        var seconds = unchecked((long)secondsBits);
+        var nanoseconds = unchecked((long)nanosecondsBits);
+        if (seconds < 0 || nanoseconds < 0 || nanoseconds >= 1_000_000_000 ||
+            seconds > (long.MaxValue - nanoseconds) / 1_000_000_000)
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+        }
+
+        var totalNanoseconds = seconds * 1_000_000_000 + nanoseconds;
+        HrTimerState timerState;
+        lock (_eventQueueGate)
+        {
+            if (!_eventQueues.TryGetValue(handle, out var equeue) || equeue.Deleted)
+            {
+                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+            }
+
+            var key = (handle, id);
+            if (_hrTimers.Remove(key, out var previous))
+            {
+                previous.Timer?.Dispose();
+            }
+
+            if (!_registeredEvents.TryGetValue(handle, out var events))
+            {
+                events = new Dictionary<(ulong Ident, short Filter), KernelEventRegistration>();
+                _registeredEvents[handle] = events;
+            }
+
+            events[(unchecked((uint)id), KernelEventFilterHrTimer)] = new KernelEventRegistration(
+                unchecked((uint)id),
+                KernelEventFilterHrTimer,
+                userData,
+                (ushort)(KernelEventFlagOneShot | KernelEventFlagClear),
+                0,
+                unchecked((ulong)Interlocked.Increment(ref _nextEventRegistrationGeneration)));
+
+            timerState = new HrTimerState
+            {
+                Handle = handle,
+                Id = id,
+                UserData = userData,
+            };
+            _hrTimers[key] = timerState;
+            ScheduleHrTimer(timerState, totalNanoseconds);
+        }
+
+        TraceEventQueue(ctx, "add_hrtimer", handle, $"id={id} ns={totalNanoseconds} user_data=0x{userData:X16}");
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "J+LF6LwObXU",
+        ExportName = "sceKernelDeleteHRTimerEvent",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelDeleteHrTimerEvent(CpuContext ctx)
+    {
+        var handle = ctx[CpuRegister.Rdi];
+        var id = unchecked((int)ctx[CpuRegister.Rsi]);
+        var ident = unchecked((uint)id);
+
+        lock (_eventQueueGate)
+        {
+            if (!_eventQueues.TryGetValue(handle, out var equeue) || equeue.Deleted)
+            {
+                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+            }
+
+            if (!_hrTimers.Remove((handle, id), out var timerState))
+            {
+                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+            }
+
+            timerState.Timer?.Dispose();
+            if (_registeredEvents.TryGetValue(handle, out var events))
+            {
+                events.Remove((ident, KernelEventFilterHrTimer));
+            }
+            if (_pendingEvents.TryGetValue(handle, out var pending))
+            {
+                _ = pending.Remove(ident, KernelEventFilterHrTimer);
+            }
+        }
+
+        TraceEventQueue(ctx, "delete_hrtimer", handle, $"id={id}");
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -871,6 +991,90 @@ public static class KernelEventQueueCompatExports
     private static bool HasPendingEventsLocked(ulong handle) =>
         _pendingEvents.TryGetValue(handle, out var events) &&
         events.Count != 0;
+
+    private static void ScheduleHrTimer(HrTimerState timerState, long totalNanoseconds)
+    {
+        if (totalNanoseconds < 1_200_000)
+        {
+            ThreadPool.UnsafeQueueUserWorkItem(
+                static state =>
+                {
+                    var (timer, nanoseconds) = ((HrTimerState Timer, long Nanoseconds))state!;
+                    global::SharpEmu.Libs.HostTiming.SleepMicroseconds((nanoseconds + 999) / 1000);
+                    FireHrTimer(timer);
+                },
+                (timerState, totalNanoseconds));
+            return;
+        }
+
+        var dueTime = TimeSpan.FromTicks(Math.Max(1, totalNanoseconds / 100));
+        timerState.Timer = new Timer(
+            static state => FireHrTimer((HrTimerState)state!),
+            timerState,
+            dueTime,
+            Timeout.InfiniteTimeSpan);
+    }
+
+    private static void FireHrTimer(HrTimerState timerState)
+    {
+        EventQueueState? equeueState = null;
+        lock (_eventQueueGate)
+        {
+            var key = (timerState.Handle, timerState.Id);
+            if (!_hrTimers.TryGetValue(key, out var current) ||
+                !ReferenceEquals(current, timerState) ||
+                !_eventQueues.TryGetValue(timerState.Handle, out var equeue) ||
+                equeue.Deleted)
+            {
+                return;
+            }
+
+            _hrTimers.Remove(key);
+            timerState.Timer?.Dispose();
+
+            var ident = unchecked((uint)timerState.Id);
+            if (_registeredEvents.TryGetValue(timerState.Handle, out var events))
+            {
+                events.Remove((ident, KernelEventFilterHrTimer));
+            }
+
+            if (!_pendingEvents.TryGetValue(timerState.Handle, out var pending))
+            {
+                pending = new KernelEventDeque();
+                _pendingEvents[timerState.Handle] = pending;
+            }
+
+            pending.AddLast(new KernelQueuedEvent(
+                ident,
+                KernelEventFilterHrTimer,
+                (ushort)(KernelEventFlagOneShot | KernelEventFlagClear),
+                0,
+                1,
+                timerState.UserData));
+            Monitor.PulseAll(_eventQueueGate);
+            equeueState = equeue;
+        }
+
+        WakeEventQueue(
+            equeueState,
+            _logEqueue
+                ? $"source=hrtimer ident=0x{unchecked((uint)timerState.Id):X16}"
+                : null);
+    }
+
+    private static void CancelHrTimersLocked(ulong handle)
+    {
+        var keys = _hrTimers.Keys
+            .Where(key => key.Handle == handle)
+            .ToArray();
+        foreach (var key in keys)
+        {
+            if (_hrTimers.Remove(key, out var timerState))
+            {
+                timerState.Timer?.Dispose();
+            }
+        }
+    }
 
     public static bool EnqueueEvent(ulong handle, KernelQueuedEvent queuedEvent)
     {
