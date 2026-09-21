@@ -1018,8 +1018,7 @@ public static class KernelRuntimeCompatExports
         LibraryName = "libKernel")]
     public static int KernelDebugRaiseException(CpuContext ctx)
     {
-        _ = ctx;
-        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        return KernelDebugRaiseExceptionCore(ctx, "sceKernelDebugRaiseException");
     }
 
     [SysAbiExport(
@@ -1028,6 +1027,34 @@ public static class KernelRuntimeCompatExports
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libKernel")]
     public static int KernelDebugRaiseExceptionOnReleaseMode(CpuContext ctx)
+    {
+        return KernelDebugRaiseExceptionCore(ctx, "sceKernelDebugRaiseExceptionOnReleaseMode");
+    }
+
+    private static int KernelDebugRaiseExceptionCore(CpuContext ctx, string exportName)
+    {
+        var error = unchecked((uint)ctx[CpuRegister.Rdi]);
+        var unknown = unchecked((long)ctx[CpuRegister.Rsi]);
+        if (unknown != 0)
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+        }
+
+        // libkernel treats this as a fatal debug exception. Callers commonly place
+        // UD2 immediately after the noreturn call, so returning normally turns the
+        // guest's intended termination into a host illegal-instruction fault.
+        Console.Error.WriteLine($"[LOADER][ERROR] {exportName}: error=0x{error:X8}");
+        GuestThreadExecution.RequestCurrentEntryExit(exportName, unchecked((ulong)error));
+        ctx[CpuRegister.Rax] = error;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "cfwBSQyr5Ys",
+        ExportName = "sceKernelDebugWriteCppExceptionInfo",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelDebugWriteCppExceptionInfo(CpuContext ctx)
     {
         _ = ctx;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
