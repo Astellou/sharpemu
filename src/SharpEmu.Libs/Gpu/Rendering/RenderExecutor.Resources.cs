@@ -310,6 +310,7 @@ public sealed partial class RenderExecutor
             case GuestPrimitiveType.TriangleList:
             case GuestPrimitiveType.TriangleFan:
             case GuestPrimitiveType.TriangleStrip:
+            case GuestPrimitiveType.Polygon:
             case GuestPrimitiveType.RectangleList:
                 if (emission.Indexed)
                 {

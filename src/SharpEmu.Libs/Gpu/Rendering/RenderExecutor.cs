@@ -24,6 +24,7 @@ public enum GuestPrimitiveType : uint
     RectangleList = 7,
     RectangleListLegacy = 17,
     QuadListLegacy = 19,
+    Polygon = 21,
 }
 
 public enum GuestIndexType : uint
@@ -479,6 +480,7 @@ public sealed partial class RenderExecutor
                 topology = PrimitiveTopology.TriangleList;
                 break;
             case GuestPrimitiveType.TriangleFan:
+            case GuestPrimitiveType.Polygon:
                 topology = PrimitiveTopology.TriangleFan;
                 break;
             case GuestPrimitiveType.TriangleStrip:
