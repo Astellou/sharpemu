@@ -72,6 +72,14 @@ public static class GameServiceStubs
         Target = Generation.Gen5, LibraryName = "libSceWebBrowserDialog")]
     public static int WebBrowserDialogTerminate(CpuContext ctx) => Ok(ctx);
 
+    [SysAbiExport(Nid = "mlYGfmqE3fQ", ExportName = "sceSigninDialogInitialize",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceSigninDialog")]
+    public static int SigninDialogInitialize(CpuContext ctx) => Ok(ctx);
+
+    [SysAbiExport(Nid = "LXlmS6PvJdU", ExportName = "sceSigninDialogTerminate",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceSigninDialog")]
+    public static int SigninDialogTerminate(CpuContext ctx) => Ok(ctx);
+
     [SysAbiExport(Nid = "kvYEw2lBndk", ExportName = "sceGameLiveStreamingInitialize",
         Target = Generation.Gen5, LibraryName = "libSceGameLiveStreaming")]
     public static int GameLiveStreamingInitialize(CpuContext ctx) => Ok(ctx);
@@ -115,6 +123,40 @@ public static class GameServiceStubs
     [SysAbiExport(Nid = "Oo0S5PH7FIQ", ExportName = "sceVoiceEnd",
         Target = Generation.Gen5, LibraryName = "libSceVoice")]
     public static int VoiceEnd(CpuContext ctx) => Ok(ctx);
+
+    [SysAbiExport(Nid = "amuBfI-AQc4", ExportName = "sceRudpInit",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceRudp")]
+    public static int RudpInit(CpuContext ctx) => Ok(ctx);
+
+    [SysAbiExport(Nid = "84fDxStrG44", ExportName = "sceDeviceServiceInitialize",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceDeviceService")]
+    public static int DeviceServiceInitialize(CpuContext ctx) => Ok(ctx);
+
+    [SysAbiExport(Nid = "9ddRUOV8Q5A", ExportName = "sceDeviceServiceGetEventState",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceDeviceService")]
+    public static int DeviceServiceGetEventState(CpuContext ctx) => Ok(ctx);
+
+    [SysAbiExport(Nid = "UNMEa+5lrUA", ExportName = "sceDeviceServiceQueryDeviceInfo_",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceDeviceService")]
+    public static int DeviceServiceQueryDeviceInfo(CpuContext ctx)
+    {
+        // No host device-service backend yet. Report the device as unavailable
+        // so callers can take their normal gamepad/non-special-device fallback.
+        const int notFound = (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+        ctx[CpuRegister.Rax] = unchecked((ulong)notFound);
+        return notFound;
+    }
+
+    [SysAbiExport(Nid = "c812oYs7Vsc", ExportName = "sceHmd2Initialize",
+        Target = Generation.Gen4 | Generation.Gen5, LibraryName = "libSceHmd2")]
+    public static int Hmd2Initialize(CpuContext ctx)
+    {
+        // HMD2 is optional for this title; keep VR unavailable rather than
+        // advertising an initialized headset that SharpEmu cannot service.
+        const int notFound = (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+        ctx[CpuRegister.Rax] = unchecked((ulong)notFound);
+        return notFound;
+    }
 
     [SysAbiExport(Nid = "dPj4ZtRcIWk", ExportName = "sceContentSearchInit",
         Target = Generation.Gen5, LibraryName = "libSceContentSearch")]
