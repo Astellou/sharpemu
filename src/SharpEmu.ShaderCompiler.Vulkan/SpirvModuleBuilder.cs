@@ -207,8 +207,7 @@ public enum SpirvCapability : uint
     GroupNonUniformVote = 62,
     GroupNonUniformBallot = 64,
     GroupNonUniformShuffle = 65,
-    ShaderLayer = 5253,
-    ShaderViewportIndex = 5254,
+    ShaderViewportIndexLayerExt = 5254,
     RuntimeDescriptorArray = 5302,
     PhysicalStorageBufferAddresses = 5347,
 }

@@ -5165,9 +5165,13 @@ public static partial class Gen5SpirvTranslator
                     SpirvBuiltIn.PointSize,
                     "gl_PointSize");
             }
+            if (needLayer || needViewport)
+            {
+                _module.AddExtension("SPV_EXT_shader_viewport_index_layer");
+                _module.AddCapability(SpirvCapability.ShaderViewportIndexLayerExt);
+            }
             if (needLayer)
             {
-                _module.AddCapability(SpirvCapability.ShaderLayer);
                 _layerOutput = DeclareBuiltInOutput(
                     _uintType,
                     SpirvBuiltIn.Layer,
@@ -5175,7 +5179,6 @@ public static partial class Gen5SpirvTranslator
             }
             if (needViewport)
             {
-                _module.AddCapability(SpirvCapability.ShaderViewportIndex);
                 _viewportIndexOutput = DeclareBuiltInOutput(
                     _uintType,
                     SpirvBuiltIn.ViewportIndex,
