@@ -69,22 +69,7 @@ Our goal is **not** to emulate PS4 games, as there is already an excellent emula
 
 ## Status
 
-The emulator can currently load the `eboot.bin` of real games, execute native CPU instructions, and partially handle kernel-related functionality. However, several critical components are still missing.
-
-Current capabilities include:
-
-* Loading `eboot.bin` and `.elf` files
-* Executing native CPU instructions
-* Reading basic game metadata (title, version, etc.)
-* Loading system modules (`prx` / `sys_module`)
-* Partial support for some kernel functions  
-* `Fiber` and `AMPR` exports
-* PlayGo scenarios
-* Initial loading game files
-* Shader/resource submits and AGC initial
-* Video outputs in some games
-
-Some games have reached like `sceVideoOut` and AGC stages.
+The emulator can currently load the `eboot.bin` of real games, execute native CPU instructions, and partially handle gpu-related functionality. Included 3D games.
 
 SharpEmu supports Windows, Linux, and macOS hosts. Video output uses Vulkan on
 Windows and Linux, and MoltenVK on macOS. Platform support is still experimental,
@@ -95,11 +80,12 @@ so compatibility and performance vary by game, operating system, and GPU driver.
 Download the release archive for your operating system, extract it, and launch
 SharpEmu with the path to a legally obtained game's `eboot.bin`.
 
+Or command line;
+
 Windows PowerShell:
 
 ```powershell
-.\SharpEmu.exe "C:\path\to\game\eboot.bin" 2>&1 |
-  Tee-Object -FilePath "SharpEmu.log"
+.\SharpEmu.exe "C:\path\to\game\eboot.bin" --log-to-file
 ```
 
 Linux and macOS:
@@ -107,9 +93,12 @@ Linux and macOS:
 ```bash
 chmod +x ./SharpEmu
 
-./SharpEmu "/path/to/game/eboot.bin" 2>&1 |
-  tee SharpEmu.log
+./SharpEmu "/path/to/game/eboot.bin" --log-to-file
 ```
+
+SharpEmu supports environment variables that can be configured from the GUI. Undocumented variables are listed here: [docs/sharpemu-gui-undocumented-env-vars.md](docs/sharpemu-gui-undocumented-env-vars.md)
+
+You can set them per game or globally in the GUI, or pass them directly through the CLI.
 
 A Vulkan-capable GPU and current graphics driver are required. The macOS
 release includes the MoltenVK Vulkan implementation.
