@@ -3,6 +3,7 @@
 
 using SharpEmu.Libs.Tests.Gpu.Scheduling;
 using SharpEmu.Libs.Tests.Gpu.Vulkan;
+using SharpEmu.Libs.Gpu.Vulkan;
 using SharpEmu.Libs.VideoOut;
 using Silk.NET.Vulkan;
 using Xunit;
@@ -64,13 +65,13 @@ public sealed unsafe class PresentationColorTests : IClassFixture<HeadlessVulkan
             var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1);
             harness.Vk.CmdClearColorImage(command, target.Backing.Handle,
                 ImageLayout.TransferDstOptimal, &black, 1, &range);
-            var clearComplete = new MemoryBarrier
+            var clearComplete = new MemoryBarrier2
             {
-                SType = StructureType.MemoryBarrier,
-                SrcAccessMask = AccessFlags.TransferWriteBit,
-                DstAccessMask = AccessFlags.TransferWriteBit,
+                SType = StructureType.MemoryBarrier2,
+                SrcAccessMask = AccessFlags2.TransferWriteBit,
+                DstAccessMask = AccessFlags2.TransferWriteBit,
             };
-            harness.Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit,
+            VulkanSynchronization.PipelineBarrier(harness.Vk, command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit,
                 0, 1, &clearComplete, 0, null, 0, null);
             var blit = new ImageBlit
             {

@@ -63,6 +63,14 @@ internal static unsafe partial class VulkanVideoPresenter
             _relay.BindCurrentThread();
             WaitForRenderDocAttachIfRequested();
             _vk = Vk.GetApi();
+            uint loaderVersion = Vk.Version10;
+            Check(_vk.EnumerateInstanceVersion(ref loaderVersion), "vkEnumerateInstanceVersion");
+            if (loaderVersion < Vk.Version13)
+            {
+                throw new InvalidOperationException(
+                    $"SharpEmu requires Vulkan 1.3; loader exposes {loaderVersion >> 22}.{(loaderVersion >> 12) & 0x3ff}.");
+            }
+
             CreateInstance();
             CreateSurface();
             SelectPhysicalDevice();
@@ -253,7 +261,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     ApplicationVersion = Vk.MakeVersion(0, 0, 1),
                     PEngineName = applicationName,
                     EngineVersion = Vk.MakeVersion(0, 0, 1),
-                    ApiVersion = Vk.Version12,
+                    ApiVersion = Vk.Version13,
                 };
 
                 var extensions = _window.GetRequiredVulkanInstanceExtensions(out var extensionCount);
@@ -515,6 +523,14 @@ internal static unsafe partial class VulkanVideoPresenter
                     }
 
                     _vk.GetPhysicalDeviceProperties(device, out var properties);
+                    if (properties.ApiVersion < Vk.Version13)
+                    {
+                        var unsupportedName = SilkMarshal.PtrToString((nint)properties.DeviceName) ?? string.Empty;
+                        Console.Error.WriteLine(
+                            $"[LOADER][INFO] Vulkan candidate skipped: {unsupportedName} api={properties.ApiVersion >> 22}.{(properties.ApiVersion >> 12) & 0x3ff} requires=1.3");
+                        break;
+                    }
+
                     var name = SilkMarshal.PtrToString((nint)properties.DeviceName) ?? string.Empty;
                     var score = ScorePhysicalDevice(properties, name, deviceOverride);
                     Console.Error.WriteLine(
@@ -740,25 +756,15 @@ internal static unsafe partial class VulkanVideoPresenter
                 SType = StructureType.PhysicalDeviceColorWriteEnableFeaturesExt,
                 PNext = &depthClipControlFeatures,
             };
-            var extendedDynamicState2Features = new PhysicalDeviceExtendedDynamicState2FeaturesEXT
+            var vulkan13Features = new PhysicalDeviceVulkan13Features
             {
-                SType = StructureType.PhysicalDeviceExtendedDynamicState2FeaturesExt,
+                SType = StructureType.PhysicalDeviceVulkan13Features,
                 PNext = &colorWriteEnableFeatures,
-            };
-            var extendedDynamicStateFeatures = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            {
-                SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
-                PNext = &extendedDynamicState2Features,
-            };
-            var dynamicRenderingFeatures = new PhysicalDeviceDynamicRenderingFeaturesKHR
-            {
-                SType = StructureType.PhysicalDeviceDynamicRenderingFeaturesKhr,
-                PNext = &extendedDynamicStateFeatures,
             };
             var maintenance8Features = new PhysicalDeviceMaintenance8FeaturesKHR
             {
                 SType = StructureType.PhysicalDeviceMaintenance8FeaturesKhr,
-                PNext = &dynamicRenderingFeatures,
+                PNext = &vulkan13Features,
             };
             var robustness2Features = new PhysicalDeviceRobustness2FeaturesEXT
             {
@@ -790,10 +796,8 @@ internal static unsafe partial class VulkanVideoPresenter
             var supportsRobustness2 = supportsRobustImageAccess2 || supportsNullDescriptor;
             _vk.GetPhysicalDeviceProperties(_physicalDevice, out var deviceProperties);
             var deviceName = SilkMarshal.PtrToString((nint)deviceProperties.DeviceName) ?? "unknown";
-            RequireRenderingFeature(dynamicRenderingFeatures.DynamicRendering, DynamicRenderingExtensionName, deviceName);
-            RequireRenderingFeature(extendedDynamicStateFeatures.ExtendedDynamicState, ExtendedDynamicStateExtensionName, deviceName);
-            RequireRenderingFeature(
-                extendedDynamicState2Features.ExtendedDynamicState2, ExtendedDynamicState2ExtensionName, deviceName);
+            RequireRenderingFeature(vulkan13Features.DynamicRendering, "Vulkan 1.3 dynamicRendering", deviceName);
+            RequireRenderingFeature(vulkan13Features.Synchronization2, "Vulkan 1.3 synchronization2", deviceName);
             var supportsColorWriteEnable = colorWriteEnableFeatures.ColorWriteEnable;
             _supportsDepthClipControl = depthClipControlFeatures.DepthClipControl;
             _supportsDepthClipEnable = depthClipEnableFeatures.DepthClipEnable;
@@ -821,9 +825,6 @@ internal static unsafe partial class VulkanVideoPresenter
             var maintenance8Extension = (byte*)SilkMarshal.StringToPtr("VK_KHR_maintenance8");
             var robustness2Extension = (byte*)SilkMarshal.StringToPtr("VK_EXT_robustness2");
             var portabilitySubsetExtension = (byte*)SilkMarshal.StringToPtr(PortabilitySubsetExtensionName);
-            var dynamicRenderingExtension = (byte*)SilkMarshal.StringToPtr(DynamicRenderingExtensionName);
-            var extendedDynamicStateExtension = (byte*)SilkMarshal.StringToPtr(ExtendedDynamicStateExtensionName);
-            var extendedDynamicState2Extension = (byte*)SilkMarshal.StringToPtr(ExtendedDynamicState2ExtensionName);
             var colorWriteEnableExtension = (byte*)SilkMarshal.StringToPtr(ColorWriteEnableExtensionName);
             var depthClipControlExtension = (byte*)SilkMarshal.StringToPtr(DepthClipControlExtensionName);
             var depthClipEnableExtension = (byte*)SilkMarshal.StringToPtr(DepthClipEnableExtensionName);
@@ -834,9 +835,6 @@ internal static unsafe partial class VulkanVideoPresenter
                 var extensionCount = 0u;
                 extensions[extensionCount++] = swapchainExtension;
                 extensions[extensionCount++] = pushDescriptorExtension;
-                extensions[extensionCount++] = dynamicRenderingExtension;
-                extensions[extensionCount++] = extendedDynamicStateExtension;
-                extensions[extensionCount++] = extendedDynamicState2Extension;
                 if (_supportsFragmentShaderBarycentric)
                 {
                     extensions[extensionCount++] = barycentricExtension;
@@ -941,28 +939,17 @@ internal static unsafe partial class VulkanVideoPresenter
                     renderingChain = &colorWriteEnableFeatures;
                 }
 
-                extendedDynamicState2Features = new PhysicalDeviceExtendedDynamicState2FeaturesEXT
+                vulkan13Features = new PhysicalDeviceVulkan13Features
                 {
-                    SType = StructureType.PhysicalDeviceExtendedDynamicState2FeaturesExt,
-                    ExtendedDynamicState2 = true,
-                    PNext = renderingChain,
-                };
-                extendedDynamicStateFeatures = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
-                {
-                    SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
-                    ExtendedDynamicState = true,
-                    PNext = &extendedDynamicState2Features,
-                };
-                dynamicRenderingFeatures = new PhysicalDeviceDynamicRenderingFeaturesKHR
-                {
-                    SType = StructureType.PhysicalDeviceDynamicRenderingFeaturesKhr,
+                    SType = StructureType.PhysicalDeviceVulkan13Features,
                     DynamicRendering = true,
-                    PNext = &extendedDynamicStateFeatures,
+                    Synchronization2 = true,
+                    PNext = renderingChain,
                 };
                 var features2 = new PhysicalDeviceFeatures2
                 {
                     SType = StructureType.PhysicalDeviceFeatures2,
-                    PNext = &dynamicRenderingFeatures,
+                    PNext = &vulkan13Features,
                     Features = enabledFeatures,
                 };
                 var createInfo = new DeviceCreateInfo
@@ -983,9 +970,6 @@ internal static unsafe partial class VulkanVideoPresenter
                 SilkMarshal.Free((nint)maintenance8Extension);
                 SilkMarshal.Free((nint)robustness2Extension);
                 SilkMarshal.Free((nint)portabilitySubsetExtension);
-                SilkMarshal.Free((nint)dynamicRenderingExtension);
-                SilkMarshal.Free((nint)extendedDynamicStateExtension);
-                SilkMarshal.Free((nint)extendedDynamicState2Extension);
                 SilkMarshal.Free((nint)colorWriteEnableExtension);
                 SilkMarshal.Free((nint)depthClipControlExtension);
                 SilkMarshal.Free((nint)depthClipEnableExtension);

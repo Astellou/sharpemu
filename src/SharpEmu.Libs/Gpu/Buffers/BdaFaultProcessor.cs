@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using SharpEmu.HLE.GpuMemory;
 using SharpEmu.Libs.Gpu.Scheduling;
 using SharpEmu.ShaderCompiler.Vulkan;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 
 namespace SharpEmu.Libs.Gpu.Buffers;
@@ -191,11 +192,11 @@ public sealed unsafe class BdaFaultProcessor : IDisposable
         _downloadBuffer.Mapped.Slice((int)offset, (int)PageFaultAreaSize).Clear();
         _downloadBuffer.Flush(offset, PageFaultAreaSize);
 
-        var preBarrier = new BufferMemoryBarrier
+        var preBarrier = new BufferMemoryBarrier2
         {
-            SType = StructureType.BufferMemoryBarrier,
-            SrcAccessMask = AccessFlags.ShaderWriteBit,
-            DstAccessMask = AccessFlags.ShaderReadBit,
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcAccessMask = AccessFlags2.ShaderWriteBit,
+            DstAccessMask = AccessFlags2.ShaderReadBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
             Buffer = _faultBuffer.Handle,
@@ -203,12 +204,12 @@ public sealed unsafe class BdaFaultProcessor : IDisposable
             Size = _faultBufferSize,
         };
         var postBarrier = preBarrier;
-        postBarrier.DstAccessMask = AccessFlags.ShaderWriteBit;
+        postBarrier.DstAccessMask = AccessFlags2.ShaderWriteBit;
 
         _scheduler.EndRendering();
         var vk = _device.Vk;
         var command = new CommandBuffer(_scheduler.Current.Handle);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             command, PipelineStageFlags.AllCommandsBit, PipelineStageFlags.ComputeShaderBit, DependencyFlags.ByRegionBit,
             0, null, 1, &preBarrier, 0, null);
         vk.CmdBindPipeline(command, PipelineBindPoint.Compute, _pipeline);
@@ -216,7 +217,7 @@ public sealed unsafe class BdaFaultProcessor : IDisposable
         vk.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, _pipelineLayout, 0, 1, &set, 0, null);
         var threads = _pageCount / 32;
         vk.CmdDispatch(command, (uint)((threads + 63) / 64), 1, 1);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit,
             0, null, 1, &postBarrier, 0, null);
 

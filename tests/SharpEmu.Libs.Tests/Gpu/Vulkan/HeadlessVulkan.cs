@@ -40,15 +40,12 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         SupportsDynamicRendering = dynamicRendering;
     }
 
-    // Dynamic rendering with the two extended dynamic state extensions, as the presenter's render host needs.
+    // Dynamic rendering support required by the presenter's render host.
     public bool SupportsDynamicRendering { get; }
     public bool SupportsFragmentShaderBarycentric { get; private init; }
 
     private static readonly string[] RenderingExtensionNames =
     [
-        "VK_KHR_dynamic_rendering",
-        "VK_EXT_extended_dynamic_state",
-        "VK_EXT_extended_dynamic_state2",
         "VK_KHR_push_descriptor",
     ];
 
@@ -78,7 +75,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
 
     public object QueueGate { get; } = new();
 
-    // The device API version: 1.3 when the loader and the device support it, else 1.2.
+    // The device API version. The production renderer requires Vulkan 1.3.
     public uint ApiVersion { get; }
 
     // SPIR-V 1.6 modules (the compiled reference blobs) need a Vulkan 1.3 device.
@@ -209,7 +206,11 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         var vk = Vk.GetApi();
         uint instanceVersion = Vk.Version10;
         vk.EnumerateInstanceVersion(ref instanceVersion);
-        var apiVersion = instanceVersion >= Vk.Version13 ? Vk.Version13 : Vk.Version12;
+        if (instanceVersion < Vk.Version13)
+        {
+            return null;
+        }
+        var apiVersion = Vk.Version13;
         var appInfo = new ApplicationInfo { SType = StructureType.ApplicationInfo, ApiVersion = apiVersion };
         var validation = Environment.GetEnvironmentVariable(ValidationVariable) == "1";
         var layers = validation ? SilkMarshal.StringArrayToPtr(new[] { "VK_LAYER_KHRONOS_validation" }) : 0;
@@ -261,9 +262,10 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         }
 
         vk.GetPhysicalDeviceProperties(physical, out var physicalProperties);
-        if (physicalProperties.ApiVersion < apiVersion)
+        if (physicalProperties.ApiVersion < Vk.Version13)
         {
-            apiVersion = Vk.Version12;
+            vk.DestroyInstance(instance, null);
+            return null;
         }
 
         uint familyCount = 0;
@@ -301,24 +303,14 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         }
         var barycentric = (bool)barycentricFeatures.FragmentShaderBarycentric;
 
-        var extendedDynamicState2Features = new PhysicalDeviceExtendedDynamicState2FeaturesEXT
+        var vulkan13Features = new PhysicalDeviceVulkan13Features
         {
-            SType = StructureType.PhysicalDeviceExtendedDynamicState2FeaturesExt,
-        };
-        var extendedDynamicStateFeatures = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
-        {
-            SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
-            PNext = &extendedDynamicState2Features,
-        };
-        var dynamicRenderingFeatures = new PhysicalDeviceDynamicRenderingFeaturesKHR
-        {
-            SType = StructureType.PhysicalDeviceDynamicRenderingFeaturesKhr,
-            PNext = &extendedDynamicStateFeatures,
+            SType = StructureType.PhysicalDeviceVulkan13Features,
         };
         var addressFeatures = new PhysicalDeviceBufferDeviceAddressFeatures
         {
             SType = StructureType.PhysicalDeviceBufferDeviceAddressFeatures,
-            PNext = &dynamicRenderingFeatures,
+            PNext = &vulkan13Features,
         };
         var timelineFeatures = new PhysicalDeviceTimelineSemaphoreFeatures
         {
@@ -327,9 +319,10 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         };
         var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2, PNext = &timelineFeatures };
         vk.GetPhysicalDeviceFeatures2(physical, &features);
-        var dynamicRendering = dynamicRenderingFeatures.DynamicRendering && extendedDynamicStateFeatures.ExtendedDynamicState &&
-            extendedDynamicState2Features.ExtendedDynamicState2 && HasDeviceExtensions(vk, physical, RenderingExtensionNames);
-        if (family == uint.MaxValue || !timelineFeatures.TimelineSemaphore || !addressFeatures.BufferDeviceAddress)
+        var dynamicRendering = vulkan13Features.DynamicRendering && vulkan13Features.Synchronization2 &&
+            HasDeviceExtensions(vk, physical, RenderingExtensionNames);
+        if (family == uint.MaxValue || !timelineFeatures.TimelineSemaphore || !addressFeatures.BufferDeviceAddress ||
+            !vulkan13Features.Synchronization2)
         {
             vk.DestroyInstance(instance, null);
             return null;
@@ -352,34 +345,23 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             PQueuePriorities = &priority,
         };
         timelineFeatures.TimelineSemaphore = true;
-        extendedDynamicState2Features = new PhysicalDeviceExtendedDynamicState2FeaturesEXT
+        vulkan13Features = new PhysicalDeviceVulkan13Features
         {
-            SType = StructureType.PhysicalDeviceExtendedDynamicState2FeaturesExt,
-            ExtendedDynamicState2 = true,
-        };
-        extendedDynamicStateFeatures = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
-        {
-            SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
-            ExtendedDynamicState = true,
-            PNext = &extendedDynamicState2Features,
-        };
-        dynamicRenderingFeatures = new PhysicalDeviceDynamicRenderingFeaturesKHR
-        {
-            SType = StructureType.PhysicalDeviceDynamicRenderingFeaturesKhr,
-            DynamicRendering = true,
-            PNext = &extendedDynamicStateFeatures,
+            SType = StructureType.PhysicalDeviceVulkan13Features,
+            DynamicRendering = dynamicRendering,
+            Synchronization2 = true,
         };
         addressFeatures = new PhysicalDeviceBufferDeviceAddressFeatures
         {
             SType = StructureType.PhysicalDeviceBufferDeviceAddressFeatures,
             BufferDeviceAddress = true,
-            PNext = dynamicRendering ? &dynamicRenderingFeatures : null,
+            PNext = &vulkan13Features,
         };
         timelineFeatures.PNext = &addressFeatures;
         if (barycentric)
         {
-            barycentricFeatures.PNext = addressFeatures.PNext;
-            addressFeatures.PNext = &barycentricFeatures;
+            barycentricFeatures.PNext = vulkan13Features.PNext;
+            vulkan13Features.PNext = &barycentricFeatures;
         }
         var extensionNames = new List<string>();
         if (dynamicRendering) extensionNames.AddRange(RenderingExtensionNames);

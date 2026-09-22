@@ -9,6 +9,7 @@ using SharpEmu.HLE.Host;
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Images;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.Libs.Gpu.Vulkan;
 using SharpEmu.Libs.Tests.Gpu.Buffers;
 using SharpEmu.Libs.Tests.Gpu.Vulkan;
 using Silk.NET.Vulkan;
@@ -231,22 +232,22 @@ internal sealed unsafe class ImageTestHarness : IDisposable
         var aligned = (size + 3) & ~3UL;
         using var download = new GpuBuffer(Device, Scheduler, GpuBufferUsage.Download, 0, GpuBuffer.AllFlags, aligned);
         var command = new CommandBuffer(Scheduler.Current.Handle);
-        var before = new BufferMemoryBarrier
+        var before = new BufferMemoryBarrier2
         {
-            SType = StructureType.BufferMemoryBarrier,
-            SrcAccessMask = AccessFlags.MemoryWriteBit | AccessFlags.ShaderWriteBit | AccessFlags.TransferWriteBit | AccessFlags.HostWriteBit,
-            DstAccessMask = AccessFlags.TransferReadBit,
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcAccessMask = AccessFlags2.MemoryWriteBit | AccessFlags2.ShaderWriteBit | AccessFlags2.TransferWriteBit | AccessFlags2.HostWriteBit,
+            DstAccessMask = AccessFlags2.TransferReadBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
             Buffer = source,
             Offset = offset,
             Size = aligned,
         };
-        Vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.TransferBit, 0, 0, null, 1, &before, 0, null);
+        VulkanSynchronization.PipelineBarrier(Vk, command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.TransferBit, 0, 0, null, 1, &before, 0, null);
         var region = new BufferCopy(offset, 0, aligned);
         Vk.CmdCopyBuffer(command, source, download.Handle, 1, &region);
-        var after = before with { Buffer = download.Handle, Offset = 0, SrcAccessMask = AccessFlags.TransferWriteBit, DstAccessMask = AccessFlags.HostReadBit };
-        Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &after, 0, null);
+        var after = before with { Buffer = download.Handle, Offset = 0, SrcAccessMask = AccessFlags2.TransferWriteBit, DstAccessMask = AccessFlags2.HostReadBit };
+        VulkanSynchronization.PipelineBarrier(Vk, command, PipelineStageFlags.TransferBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &after, 0, null);
         Scheduler.Finish();
         download.Invalidate(0, aligned);
         return download.Mapped[..(int)size].ToArray();
@@ -499,14 +500,14 @@ internal sealed unsafe class TilerComputeRunner : IDisposable
 
         vk.UpdateDescriptorSets(device, 3, writes, 0, null);
         var command = new CommandBuffer(_harness.Scheduler.Current.Handle);
-        var barriers = stackalloc BufferMemoryBarrier[3];
+        var barriers = stackalloc BufferMemoryBarrier2[3];
         for (var index = 0; index < 3; index++)
         {
-            barriers[index] = new BufferMemoryBarrier
+            barriers[index] = new BufferMemoryBarrier2
             {
-                SType = StructureType.BufferMemoryBarrier,
-                SrcAccessMask = AccessFlags.HostWriteBit | AccessFlags.MemoryWriteBit,
-                DstAccessMask = index == 1 ? AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit : index == 2 ? AccessFlags.UniformReadBit : AccessFlags.ShaderReadBit,
+                SType = StructureType.BufferMemoryBarrier2,
+                SrcAccessMask = AccessFlags2.HostWriteBit | AccessFlags2.MemoryWriteBit,
+                DstAccessMask = index == 1 ? AccessFlags2.ShaderReadBit | AccessFlags2.ShaderWriteBit : index == 2 ? AccessFlags2.UniformReadBit : AccessFlags2.ShaderReadBit,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 Buffer = infos[index].Buffer,
@@ -515,7 +516,7 @@ internal sealed unsafe class TilerComputeRunner : IDisposable
             };
         }
 
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.ComputeShaderBit, 0, 0, null, 3, barriers, 0, null);
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.ComputeShaderBit, 0, 0, null, 3, barriers, 0, null);
         vk.CmdBindPipeline(command, PipelineBindPoint.Compute, pipeline);
         vk.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, _pipelineLayout, 0, 1, &set, 0, null);
         fixed (TileTransferArguments* pointer = &push)
@@ -524,8 +525,8 @@ internal sealed unsafe class TilerComputeRunner : IDisposable
         }
 
         vk.CmdDispatch(command, groupsX, groupsY, groupsZ);
-        var after = barriers[1] with { SrcAccessMask = AccessFlags.ShaderWriteBit, DstAccessMask = AccessFlags.TransferReadBit | AccessFlags.MemoryReadBit };
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.AllCommandsBit, 0, 0, null, 1, &after, 0, null);
+        var after = barriers[1] with { SrcAccessMask = AccessFlags2.ShaderWriteBit, DstAccessMask = AccessFlags2.TransferReadBit | AccessFlags2.MemoryReadBit };
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.AllCommandsBit, 0, 0, null, 1, &after, 0, null);
     }
 
     public void Dispose()

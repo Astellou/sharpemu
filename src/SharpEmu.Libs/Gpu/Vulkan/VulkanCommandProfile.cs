@@ -89,7 +89,7 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
         queries.Count = 1;
         queries.Submitted = false;
         _vulkan.CmdResetQueryPool(command, queries.Pool, 0, QueryCapacity);
-        _vulkan.CmdWriteTimestamp(command, PipelineStageFlags.TopOfPipeBit, queries.Pool, 0);
+        _vulkan.CmdWriteTimestamp2(command, PipelineStageFlags2.TopOfPipeBit, queries.Pool, 0);
     }
 
     public void WriteMarker(CommandBuffer command, IntervalKind kind, ulong pipeline = 0, uint first = 0, uint second = 0, uint third = 0)
@@ -108,7 +108,7 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
         var index = queries.Count++;
         queries.Markers[index] = new Marker(new IntervalKey(kind, pipeline), first, second, third);
         // Completion intervals do not isolate shader stages or eliminate overlap with later work.
-        _vulkan.CmdWriteTimestamp(command, PipelineStageFlags.BottomOfPipeBit, queries.Pool, (uint)index);
+        _vulkan.CmdWriteTimestamp2(command, PipelineStageFlags2.BottomOfPipeBit, queries.Pool, (uint)index);
     }
 
     public void MarkSubmitted(nint command)

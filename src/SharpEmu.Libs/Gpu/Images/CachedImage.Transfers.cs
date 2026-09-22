@@ -3,6 +3,7 @@
 
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 
@@ -17,11 +18,11 @@ public sealed unsafe partial class CachedImage
     private const ImageLayout ReadyLayout = ImageLayout.General;
     private const AccessFlags ReadyAccess = AccessFlags.ShaderReadBit | AccessFlags.TransferReadBit;
 
-    private ImageMemoryBarrier MakeBarrier(in ImageAccessState from, ImageLayout layout, AccessFlags access, uint baseLevel, uint levelCount, uint baseLayer, uint layerCount) => new()
+    private ImageMemoryBarrier2 MakeBarrier(in ImageAccessState from, ImageLayout layout, AccessFlags access, uint baseLevel, uint levelCount, uint baseLayer, uint layerCount) => new()
     {
-        SType = StructureType.ImageMemoryBarrier,
-        SrcAccessMask = from.Access,
-        DstAccessMask = access,
+        SType = StructureType.ImageMemoryBarrier2,
+        SrcAccessMask = VulkanSynchronization.Access(from.Access),
+        DstAccessMask = VulkanSynchronization.Access(access),
         OldLayout = from.Layout,
         NewLayout = layout,
         SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -31,9 +32,9 @@ public sealed unsafe partial class CachedImage
     };
 
     // Barriers for the requested state; a repeated write always gets a barrier.
-    public (List<ImageMemoryBarrier> Barriers, PipelineStageFlags SourceStages) GetBarriers(ImageLayout layout, AccessFlags access, PipelineStageFlags stage, SubresourceRange? range)
+    public (List<ImageMemoryBarrier2> Barriers, PipelineStageFlags SourceStages) GetBarriers(ImageLayout layout, AccessFlags access, PipelineStageFlags stage, SubresourceRange? range)
     {
-        var barriers = new List<ImageMemoryBarrier>();
+        var barriers = new List<ImageMemoryBarrier2>();
         PipelineStageFlags sourceStages = 0;
         if (range is { } && Description.IsVolume)
         {
@@ -128,22 +129,22 @@ public sealed unsafe partial class CachedImage
         RecordBarriers(command, sourceStages, stage, null, barriers);
     }
 
-    private void RecordBarriers(CommandBuffer command, PipelineStageFlags sourceStages, PipelineStageFlags destinationStages, BufferMemoryBarrier* bufferBarrier, List<ImageMemoryBarrier> imageBarriers)
+    private void RecordBarriers(CommandBuffer command, PipelineStageFlags sourceStages, PipelineStageFlags destinationStages, BufferMemoryBarrier2* bufferBarrier, List<ImageMemoryBarrier2> imageBarriers)
     {
         var images = imageBarriers.ToArray();
-        fixed (ImageMemoryBarrier* imagePointer = images)
+        fixed (ImageMemoryBarrier2* imagePointer = images)
         {
-            _device.Vk.CmdPipelineBarrier(
+            VulkanSynchronization.PipelineBarrier(_device.Vk,
                 command, sourceStages == 0 ? PipelineStageFlags.TopOfPipeBit : sourceStages, destinationStages, DependencyFlags.ByRegionBit,
                 0, null, bufferBarrier == null ? 0u : 1u, bufferBarrier, (uint)images.Length, imagePointer);
         }
     }
 
-    private static BufferMemoryBarrier BufferBarrier(VkBuffer buffer, ulong offset, ulong size, AccessFlags source, AccessFlags destination) => new()
+    private static BufferMemoryBarrier2 BufferBarrier(VkBuffer buffer, ulong offset, ulong size, AccessFlags source, AccessFlags destination) => new()
     {
-        SType = StructureType.BufferMemoryBarrier,
-        SrcAccessMask = source,
-        DstAccessMask = destination,
+        SType = StructureType.BufferMemoryBarrier2,
+        SrcAccessMask = VulkanSynchronization.Access(source),
+        DstAccessMask = VulkanSynchronization.Access(destination),
         SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
         DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
         Buffer = buffer,
@@ -218,7 +219,7 @@ public sealed unsafe partial class CachedImage
         }
 
         bufferBarrier = BufferBarrier(buffer, offset, size, AccessFlags.TransferReadBit, MemoryAccess);
-        _device.Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit, 0, null, 1, &bufferBarrier, 0, null);
+        VulkanSynchronization.PipelineBarrier(_device.Vk,command, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit, 0, null, 1, &bufferBarrier, 0, null);
         Transition(ReadyLayout, ReadyAccess, null, command);
     }
 
@@ -234,7 +235,7 @@ public sealed unsafe partial class CachedImage
         }
 
         bufferBarrier = BufferBarrier(buffer, offset, size, AccessFlags.TransferWriteBit, MemoryAccess);
-        _device.Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit, 0, null, 1, &bufferBarrier, 0, null);
+        VulkanSynchronization.PipelineBarrier(_device.Vk,command, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit, 0, null, 1, &bufferBarrier, 0, null);
     }
 
     private static (uint SourceLayers, uint DestinationLayers) SanitizeCopyLayers(CachedImage source, CachedImage destination, uint depth)
@@ -528,10 +529,10 @@ public sealed unsafe partial class CachedImage
                     destinationCopy.ImageSubresource = new ImageSubresourceLayers(destinationAspect, level, Backing.ImageType == ImageType.Type3D ? 0 : slice, 1);
                     destinationCopy.ImageOffset.Z = Backing.ImageType == ImageType.Type3D ? (int)slice : 0;
                     var barrier = BufferBarrier(buffer.Handle, 0, copySize, AccessFlags.TransferReadBit, AccessFlags.TransferWriteBit);
-                    _device.Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit, 0, null, 1, &barrier, 0, null);
+                    VulkanSynchronization.PipelineBarrier(_device.Vk,command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit, 0, null, 1, &barrier, 0, null);
                     _device.Vk.CmdCopyImageToBuffer(command, source.Backing.Handle, ImageLayout.TransferSrcOptimal, buffer.Handle, 1, &sourceCopy);
                     barrier = BufferBarrier(buffer.Handle, 0, copySize, AccessFlags.TransferWriteBit, AccessFlags.TransferReadBit);
-                    _device.Vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit, 0, null, 1, &barrier, 0, null);
+                    VulkanSynchronization.PipelineBarrier(_device.Vk,command, PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit, 0, null, 1, &barrier, 0, null);
                     _device.Vk.CmdCopyBufferToImage(command, buffer.Handle, Backing.Handle, ImageLayout.TransferDstOptimal, 1, &destinationCopy);
                 }
             }

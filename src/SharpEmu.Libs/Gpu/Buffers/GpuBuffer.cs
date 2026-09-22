@@ -3,6 +3,7 @@
 
 using System.Numerics;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 
@@ -190,18 +191,18 @@ public unsafe class GpuBuffer : IDisposable
         command.EndRendering();
         var vk = _device.Vk;
         var native = new CommandBuffer(command.Handle);
-        var before = stackalloc BufferMemoryBarrier[2];
+        var before = stackalloc BufferMemoryBarrier2[2];
         before[0] = source.CreateBarrier(sourceOffset, size, sourceBefore, AccessFlags.TransferReadBit);
         before[1] = CreateBarrier(destinationOffset, size, destinationBefore, AccessFlags.TransferWriteBit);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             native, GetAccessStage(sourceBefore | destinationBefore), PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit,
             0, null, 2, before, 0, null);
         var copy = new BufferCopy(sourceOffset, destinationOffset, size);
         vk.CmdCopyBuffer(native, source.Handle, Handle, 1, &copy);
-        var after = stackalloc BufferMemoryBarrier[2];
+        var after = stackalloc BufferMemoryBarrier2[2];
         after[0] = source.CreateBarrier(sourceOffset, size, AccessFlags.TransferReadBit, sourceAfter);
         after[1] = CreateBarrier(destinationOffset, size, AccessFlags.TransferWriteBit, destinationAfter);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             native, PipelineStageFlags.TransferBit, GetAccessStage(sourceAfter | destinationAfter), DependencyFlags.ByRegionBit,
             0, null, 2, after, 0, null);
     }
@@ -218,12 +219,12 @@ public unsafe class GpuBuffer : IDisposable
         var vk = _device.Vk;
         var native = new CommandBuffer(command.Handle);
         var before = CreateBarrier(offset, size, MemoryAccess, AccessFlags.TransferWriteBit);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             native, PipelineStageFlags.AllCommandsBit, PipelineStageFlags.TransferBit, DependencyFlags.ByRegionBit,
             0, null, 1, &before, 0, null);
         vk.CmdFillBuffer(native, Handle, offset, size, value);
         var after = CreateBarrier(offset, size, AccessFlags.TransferWriteBit, MemoryAccess);
-        vk.CmdPipelineBarrier(
+        VulkanSynchronization.PipelineBarrier(vk,
             native, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, DependencyFlags.ByRegionBit,
             0, null, 1, &after, 0, null);
     }
@@ -284,7 +285,7 @@ public unsafe class GpuBuffer : IDisposable
         };
     }
 
-    private BufferMemoryBarrier CreateBarrier(ulong offset, ulong size, AccessFlags source, AccessFlags destination)
+    private BufferMemoryBarrier2 CreateBarrier(ulong offset, ulong size, AccessFlags source, AccessFlags destination)
     {
         if (Handle.Handle == 0 || size == 0 || offset > Size || size > Size - offset)
         {
@@ -292,11 +293,11 @@ public unsafe class GpuBuffer : IDisposable
                 $"The DMA barrier range is invalid: handle=0x{Handle.Handle:X} offset=0x{offset:X16} size=0x{size:X16} capacity=0x{Size:X16}");
         }
 
-        return new BufferMemoryBarrier
+        return new BufferMemoryBarrier2
         {
-            SType = StructureType.BufferMemoryBarrier,
-            SrcAccessMask = source,
-            DstAccessMask = destination,
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcAccessMask = VulkanSynchronization.Access(source),
+            DstAccessMask = VulkanSynchronization.Access(destination),
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
             Buffer = Handle,

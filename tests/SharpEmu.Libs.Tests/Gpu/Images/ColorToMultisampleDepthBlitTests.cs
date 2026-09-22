@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Images;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.Libs.Gpu.Vulkan;
 using SharpEmu.Libs.Tests.Gpu.Scheduling;
 using SharpEmu.Libs.Tests.Gpu.Vulkan;
 using SharpEmu.ShaderCompiler.Vulkan;
@@ -122,18 +123,18 @@ internal sealed unsafe class MultisampleDepthSampleReader : IDisposable
             var count = samples;
             vk.CmdPushConstants(command, _pipelineLayout, ShaderStageFlags.ComputeBit, 0, 4, &count);
             vk.CmdDispatch(command, 1, 1, 1);
-            var barrier = new BufferMemoryBarrier
+            var barrier = new BufferMemoryBarrier2
             {
-                SType = StructureType.BufferMemoryBarrier,
-                SrcAccessMask = AccessFlags.ShaderWriteBit,
-                DstAccessMask = AccessFlags.HostReadBit,
+                SType = StructureType.BufferMemoryBarrier2,
+                SrcAccessMask = AccessFlags2.ShaderWriteBit,
+                DstAccessMask = AccessFlags2.HostReadBit,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 Buffer = output.Handle,
                 Offset = 0,
                 Size = output.Size,
             };
-            vk.CmdPipelineBarrier(command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &barrier, 0, null);
+            VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &barrier, 0, null);
             _scheduler.Finish();
             output.Invalidate(0, output.Size);
             bytes = output.Mapped[..(int)(samples * 4)].ToArray();

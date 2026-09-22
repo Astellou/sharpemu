@@ -6,6 +6,7 @@ using SharpEmu.HLE.GpuMemory;
 using SharpEmu.HLE.Host;
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Images;
+using SharpEmu.Libs.Gpu.Vulkan;
 using SharpEmu.Libs.Tests.Gpu.Buffers;
 using Silk.NET.Vulkan;
 using Xunit;
@@ -176,22 +177,22 @@ internal static class ImageCacheTestSupport
         var aligned = (size + 3) & ~3UL;
         using var download = new GpuBuffer(harness.Vulkan.DeviceInfo, harness.Scheduler, GpuBufferUsage.Download, 0, GpuBuffer.AllFlags, aligned);
         var command = new CommandBuffer(harness.Scheduler.Current.Handle);
-        var before = new BufferMemoryBarrier
+        var before = new BufferMemoryBarrier2
         {
-            SType = StructureType.BufferMemoryBarrier,
-            SrcAccessMask = AccessFlags.MemoryWriteBit | AccessFlags.ShaderWriteBit | AccessFlags.TransferWriteBit | AccessFlags.HostWriteBit,
-            DstAccessMask = AccessFlags.TransferReadBit,
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcAccessMask = AccessFlags2.MemoryWriteBit | AccessFlags2.ShaderWriteBit | AccessFlags2.TransferWriteBit | AccessFlags2.HostWriteBit,
+            DstAccessMask = AccessFlags2.TransferReadBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
             Buffer = source,
             Offset = offset,
             Size = aligned,
         };
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.TransferBit, 0, 0, null, 1, &before, 0, null);
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.TransferBit, 0, 0, null, 1, &before, 0, null);
         var region = new BufferCopy(offset, 0, aligned);
         vk.CmdCopyBuffer(command, source, download.Handle, 1, &region);
-        var after = before with { Buffer = download.Handle, Offset = 0, SrcAccessMask = AccessFlags.TransferWriteBit, DstAccessMask = AccessFlags.HostReadBit };
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.TransferBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &after, 0, null);
+        var after = before with { Buffer = download.Handle, Offset = 0, SrcAccessMask = AccessFlags2.TransferWriteBit, DstAccessMask = AccessFlags2.HostReadBit };
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.TransferBit, PipelineStageFlags.HostBit, 0, 0, null, 1, &after, 0, null);
         harness.Scheduler.Finish();
         download.Invalidate(0, aligned);
         return download.Mapped[..(int)size].ToArray();

@@ -8,6 +8,7 @@ using SharpEmu.Libs.Gpu;
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Images;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 
@@ -751,11 +752,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 }
 
                 var initialized = texture.HostMoviePlane == 0 ? _hostMovieImageInitialized : _hostMovieChromaImageInitialized;
-                var toTransfer = new ImageMemoryBarrier
+                var toTransfer = new ImageMemoryBarrier2
                 {
-                    SType = StructureType.ImageMemoryBarrier,
-                    SrcAccessMask = initialized ? AccessFlags.ShaderReadBit : 0,
-                    DstAccessMask = AccessFlags.TransferWriteBit,
+                    SType = StructureType.ImageMemoryBarrier2,
+                    SrcAccessMask = initialized ? AccessFlags2.ShaderReadBit : 0,
+                    DstAccessMask = AccessFlags2.TransferWriteBit,
                     OldLayout = initialized ? ImageLayout.ShaderReadOnlyOptimal : ImageLayout.Undefined,
                     NewLayout = ImageLayout.TransferDstOptimal,
                     SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -763,7 +764,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     Image = texture.Image,
                     SubresourceRange = ColorSubresourceRange(),
                 };
-                _vk.CmdPipelineBarrier(
+                VulkanSynchronization.PipelineBarrier(_vk,
                     _commandBuffer, initialized ? PipelineStageFlags.AllCommandsBit : PipelineStageFlags.TopOfPipeBit, PipelineStageFlags.TransferBit,
                     0, 0, null, 0, null, 1, &toTransfer);
                 var copyRegion = new BufferImageCopy
@@ -773,11 +774,11 @@ internal static unsafe partial class VulkanVideoPresenter
                     ImageExtent = new Extent3D(texture.Width, texture.Height, 1),
                 };
                 _vk.CmdCopyBufferToImage(_commandBuffer, texture.StagingBuffer, texture.Image, ImageLayout.TransferDstOptimal, 1, &copyRegion);
-                var toShaderRead = new ImageMemoryBarrier
+                var toShaderRead = new ImageMemoryBarrier2
                 {
-                    SType = StructureType.ImageMemoryBarrier,
-                    SrcAccessMask = AccessFlags.TransferWriteBit,
-                    DstAccessMask = AccessFlags.ShaderReadBit,
+                    SType = StructureType.ImageMemoryBarrier2,
+                    SrcAccessMask = AccessFlags2.TransferWriteBit,
+                    DstAccessMask = AccessFlags2.ShaderReadBit,
                     OldLayout = ImageLayout.TransferDstOptimal,
                     NewLayout = ImageLayout.ShaderReadOnlyOptimal,
                     SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -785,7 +786,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     Image = texture.Image,
                     SubresourceRange = ColorSubresourceRange(),
                 };
-                _vk.CmdPipelineBarrier(_commandBuffer, PipelineStageFlags.TransferBit, shaderStage, 0, 0, null, 0, null, 1, &toShaderRead);
+                VulkanSynchronization.PipelineBarrier(_vk,_commandBuffer, PipelineStageFlags.TransferBit, shaderStage, 0, 0, null, 0, null, 1, &toShaderRead);
                 if (texture.HostMoviePlane == 0)
                 {
                     _hostMovieImageInitialized = true;

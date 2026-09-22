@@ -10,6 +10,7 @@ using SharpEmu.Libs.Gpu.GpuCommands;
 using SharpEmu.Libs.Gpu.Images;
 using SharpEmu.Libs.Gpu.Scheduling;
 using SharpEmu.ShaderCompiler;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 
 internal static unsafe partial class VulkanVideoPresenter
@@ -311,13 +312,13 @@ internal static unsafe partial class VulkanVideoPresenter
             EndRendering();
             EndRendering();
             var commandBuffer = BeginBatchedGuestCommands();
-            var barrier = new MemoryBarrier
+            var barrier = new MemoryBarrier2
             {
-                SType = StructureType.MemoryBarrier,
-                SrcAccessMask = AccessFlags.MemoryWriteBit,
-                DstAccessMask = AccessFlags.MemoryReadBit | AccessFlags.MemoryWriteBit,
+                SType = StructureType.MemoryBarrier2,
+                SrcAccessMask = AccessFlags2.MemoryWriteBit,
+                DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
             };
-            _vk.CmdPipelineBarrier(
+            VulkanSynchronization.PipelineBarrier(_vk,
                 commandBuffer,
                 PipelineStageFlags.AllCommandsBit,
                 PipelineStageFlags.AllCommandsBit,
@@ -547,11 +548,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 snapshot = CreateGuestFlipSnapshot(GetPresentationSnapshotFormat(source.Backing.Format),
                     extent.Width, extent.Height, displayBuffer.Address, version);
                 source.Transition(ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit, null, commandBuffer);
-                var toTransferDst = new ImageMemoryBarrier
+                var toTransferDst = new ImageMemoryBarrier2
                 {
-                    SType = StructureType.ImageMemoryBarrier,
+                    SType = StructureType.ImageMemoryBarrier2,
                     SrcAccessMask = 0,
-                    DstAccessMask = AccessFlags.TransferWriteBit,
+                    DstAccessMask = AccessFlags2.TransferWriteBit,
                     OldLayout = ImageLayout.Undefined,
                     NewLayout = ImageLayout.TransferDstOptimal,
                     SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -559,7 +560,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     Image = snapshot.Image,
                     SubresourceRange = ColorSubresourceRange(),
                 };
-                _vk.CmdPipelineBarrier(
+                VulkanSynchronization.PipelineBarrier(_vk,
                     commandBuffer, PipelineStageFlags.TopOfPipeBit, PipelineStageFlags.TransferBit, 0, 0, null, 0, null, 1, &toTransferDst);
                 var copy = new ImageCopy
                 {
@@ -569,11 +570,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 };
                 _vk.CmdCopyImage(
                     commandBuffer, source.Backing.Handle, ImageLayout.TransferSrcOptimal, snapshot.Image, ImageLayout.TransferDstOptimal, 1, &copy);
-                var toShaderRead = new ImageMemoryBarrier
+                var toShaderRead = new ImageMemoryBarrier2
                 {
-                    SType = StructureType.ImageMemoryBarrier,
-                    SrcAccessMask = AccessFlags.TransferWriteBit,
-                    DstAccessMask = AccessFlags.ShaderReadBit | AccessFlags.TransferReadBit,
+                    SType = StructureType.ImageMemoryBarrier2,
+                    SrcAccessMask = AccessFlags2.TransferWriteBit,
+                    DstAccessMask = AccessFlags2.ShaderReadBit | AccessFlags2.TransferReadBit,
                     OldLayout = ImageLayout.TransferDstOptimal,
                     NewLayout = ImageLayout.ShaderReadOnlyOptimal,
                     SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -581,7 +582,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     Image = snapshot.Image,
                     SubresourceRange = ColorSubresourceRange(),
                 };
-                _vk.CmdPipelineBarrier(
+                VulkanSynchronization.PipelineBarrier(_vk,
                     commandBuffer, PipelineStageFlags.TransferBit, PipelineStageFlags.AllCommandsBit, 0, 0, null, 0, null, 1, &toShaderRead);
 
                 FlushBatchedGuestCommands();

@@ -13,18 +13,18 @@ public static class GlobalDataShareBarrier
     public const PipelineStageFlags SourceStages =
         PipelineStageFlags.HostBit | PipelineStageFlags.TransferBit | PipelineStageFlags.AllGraphicsBit | PipelineStageFlags.ComputeShaderBit;
 
-    public static BufferMemoryBarrier Make(VkBuffer buffer)
+    public static BufferMemoryBarrier2 Make(VkBuffer buffer)
     {
         if (buffer.Handle == 0)
         {
             throw SubmissionScheduler.Fatal("The global data share buffer is missing.");
         }
 
-        return new BufferMemoryBarrier
+        return new BufferMemoryBarrier2
         {
-            SType = StructureType.BufferMemoryBarrier,
-            SrcAccessMask = AccessFlags.HostWriteBit | AccessFlags.TransferWriteBit | AccessFlags.ShaderWriteBit,
-            DstAccessMask = AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit,
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcAccessMask = AccessFlags2.HostWriteBit | AccessFlags2.TransferWriteBit | AccessFlags2.ShaderWriteBit,
+            DstAccessMask = AccessFlags2.ShaderReadBit | AccessFlags2.ShaderWriteBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
             DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
             Buffer = buffer,

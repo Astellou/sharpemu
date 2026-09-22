@@ -24,20 +24,17 @@ using VkBuffer = Silk.NET.Vulkan.Buffer;
 // This partial is the render host: it records what the executor resolved with dynamic rendering.
 internal static unsafe partial class VulkanVideoPresenter
 {
-    private const string DynamicRenderingExtensionName = "VK_KHR_dynamic_rendering";
-    private const string ExtendedDynamicStateExtensionName = "VK_EXT_extended_dynamic_state";
-    private const string ExtendedDynamicState2ExtensionName = "VK_EXT_extended_dynamic_state2";
     private const string ColorWriteEnableExtensionName = "VK_EXT_color_write_enable";
     private const string DepthClipControlExtensionName = "VK_EXT_depth_clip_control";
     private const string DepthClipEnableExtensionName = "VK_EXT_depth_clip_enable";
     private const int DrawsPerBatch = 64;
     private const uint SingleRectangleVertexCount = 4;
 
-    private static void RequireRenderingFeature(bool supported, string extension, string deviceName)
+    private static void RequireRenderingFeature(bool supported, string feature, string deviceName)
     {
         if (!supported)
         {
-            throw SubmissionScheduler.Fatal($"The device lacks a required rendering feature: device={deviceName} extension={extension}.");
+            throw SubmissionScheduler.Fatal($"The device lacks a required rendering feature: device={deviceName} feature={feature}.");
         }
     }
 
@@ -99,9 +96,6 @@ internal static unsafe partial class VulkanVideoPresenter
             }
         }
 
-        private KhrDynamicRendering _dynamicRenderingApi = null!;
-        private ExtExtendedDynamicState _extendedDynamicStateApi = null!;
-        private ExtExtendedDynamicState2 _extendedDynamicState2Api = null!;
         private ExtColorWriteEnable? _colorWriteEnableApi;
         private bool _supportsDepthClipControl;
         private bool _supportsDepthClipEnable;
@@ -127,21 +121,6 @@ internal static unsafe partial class VulkanVideoPresenter
 
         private void LoadRenderingCommands(bool supportsColorWriteEnable, string deviceName)
         {
-            if (!_vk.TryGetDeviceExtension(_instance, _device, out _dynamicRenderingApi))
-            {
-                throw SubmissionScheduler.Fatal($"The device extension commands are unavailable: device={deviceName} extension={DynamicRenderingExtensionName}.");
-            }
-
-            if (!_vk.TryGetDeviceExtension(_instance, _device, out _extendedDynamicStateApi))
-            {
-                throw SubmissionScheduler.Fatal($"The device extension commands are unavailable: device={deviceName} extension={ExtendedDynamicStateExtensionName}.");
-            }
-
-            if (!_vk.TryGetDeviceExtension(_instance, _device, out _extendedDynamicState2Api))
-            {
-                throw SubmissionScheduler.Fatal($"The device extension commands are unavailable: device={deviceName} extension={ExtendedDynamicState2ExtensionName}.");
-            }
-
             if (!_vk.TryGetDeviceExtension(_instance, _device, out _pushDescriptorApi))
             {
                 throw SubmissionScheduler.Fatal($"The device extension commands are unavailable: device={deviceName} extension={PushDescriptorExtensionName}.");
@@ -525,10 +504,10 @@ internal static unsafe partial class VulkanVideoPresenter
             _vk.CmdSetLineWidth(command, state.LineWidth);
             var blendConstants = stackalloc float[4] { state.BlendRed, state.BlendGreen, state.BlendBlue, state.BlendAlpha };
             _vk.CmdSetBlendConstants(command, blendConstants);
-            _extendedDynamicStateApi.CmdSetDepthTestEnable(command, state.DepthTestEnabled);
-            _extendedDynamicStateApi.CmdSetDepthWriteEnable(command, state.DepthWriteEnabled);
-            _extendedDynamicStateApi.CmdSetDepthCompareOp(command, state.DepthCompare);
-            _extendedDynamicState2Api.CmdSetDepthBiasEnable(command, state.DepthBiasEnabled);
+            _vk.CmdSetDepthTestEnable(command, state.DepthTestEnabled);
+            _vk.CmdSetDepthWriteEnable(command, state.DepthWriteEnabled);
+            _vk.CmdSetDepthCompareOp(command, state.DepthCompare);
+            _vk.CmdSetDepthBiasEnable(command, state.DepthBiasEnabled);
             if (state.DepthBiasEnabled)
             {
                 _vk.CmdSetDepthBias(command, state.DepthBiasConstantFactor, _supportsDepthBiasClamp ? state.DepthBiasClamp : 0f, state.DepthBiasSlopeFactor);
@@ -718,7 +697,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 PDepthAttachment = depthStencil.HasDepth ? &depth : null,
                 PStencilAttachment = depthStencil.HasStencil ? &stencil : null,
             };
-            _dynamicRenderingApi.CmdBeginRendering(command, &rendering);
+            _vk.CmdBeginRendering(command, &rendering);
             _renderingScopesBegun++;
             _renderingActive = true;
             _renderingState = state;
@@ -733,7 +712,7 @@ internal static unsafe partial class VulkanVideoPresenter
 
             _renderingActive = false;
             _renderingState = default;
-            _dynamicRenderingApi.CmdEndRendering(new CommandBuffer(_scheduler.Current.Handle));
+            _vk.CmdEndRendering(new CommandBuffer(_scheduler.Current.Handle));
         }
 
         public void BindPipeline(PipelineBindPoint bindPoint, in PipelineHandle pipeline)
@@ -832,18 +811,18 @@ internal static unsafe partial class VulkanVideoPresenter
             using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.DrawRecording);
             var (buffer, offset) = _bufferCache.ObtainBuffer(argumentsAddress, 3u * sizeof(uint), false);
             var command = BeginBatchedGuestCommands();
-            var barrier = new BufferMemoryBarrier
+            var barrier = new BufferMemoryBarrier2
             {
-                SType = StructureType.BufferMemoryBarrier,
-                SrcAccessMask = AccessFlags.ShaderWriteBit | AccessFlags.TransferWriteBit | AccessFlags.MemoryWriteBit,
-                DstAccessMask = AccessFlags.IndirectCommandReadBit,
+                SType = StructureType.BufferMemoryBarrier2,
+                SrcAccessMask = AccessFlags2.ShaderWriteBit | AccessFlags2.TransferWriteBit | AccessFlags2.MemoryWriteBit,
+                DstAccessMask = AccessFlags2.IndirectCommandReadBit,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
                 Buffer = buffer.Handle,
                 Offset = offset,
                 Size = 3u * sizeof(uint),
             };
-            _vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit, PipelineStageFlags.DrawIndirectBit, 0, 0, null, 1, &barrier, 0, null);
+            VulkanSynchronization.PipelineBarrier(_vk,command, PipelineStageFlags.AllCommandsBit, PipelineStageFlags.DrawIndirectBit, 0, 0, null, 1, &barrier, 0, null);
             _vk.CmdDispatchIndirect(command, buffer.Handle, offset);
             CountDraw();
             return true;
@@ -853,13 +832,13 @@ internal static unsafe partial class VulkanVideoPresenter
         {
             EndRendering();
             var command = BeginBatchedGuestCommands();
-            var barrier = new MemoryBarrier
+            var barrier = new MemoryBarrier2
             {
-                SType = StructureType.MemoryBarrier,
-                SrcAccessMask = sourceAccess,
-                DstAccessMask = destinationAccess,
+                SType = StructureType.MemoryBarrier2,
+                SrcAccessMask = VulkanSynchronization.Access(sourceAccess),
+                DstAccessMask = VulkanSynchronization.Access(destinationAccess),
             };
-            _vk.CmdPipelineBarrier(command, sourceStages, destinationStages, 0, 1, &barrier, 0, null, 0, null);
+            VulkanSynchronization.PipelineBarrier(_vk,command, sourceStages, destinationStages, 0, 1, &barrier, 0, null, 0, null);
         }
 
         public void ShaderWriteBarrier(PipelineStageFlags sourceStages) =>

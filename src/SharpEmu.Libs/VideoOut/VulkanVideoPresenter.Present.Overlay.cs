@@ -3,6 +3,7 @@
 
 namespace SharpEmu.Libs.VideoOut;
 
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 
@@ -91,11 +92,11 @@ internal static unsafe partial class VulkanVideoPresenter
             PerfOverlay.Fill(pixels, pendingWork, _pendingGuestSubmissions.Count);
             var presentationTarget = PresentationTargetImage(imageIndex);
 
-            var toTransferDst = new ImageMemoryBarrier
+            var toTransferDst = new ImageMemoryBarrier2
             {
-                SType = StructureType.ImageMemoryBarrier,
-                SrcAccessMask = _overlayImageInitialized ? AccessFlags.TransferReadBit : 0,
-                DstAccessMask = AccessFlags.TransferWriteBit,
+                SType = StructureType.ImageMemoryBarrier2,
+                SrcAccessMask = _overlayImageInitialized ? AccessFlags2.TransferReadBit : 0,
+                DstAccessMask = AccessFlags2.TransferWriteBit,
                 OldLayout = _overlayImageInitialized
                     ? ImageLayout.TransferSrcOptimal
                     : ImageLayout.Undefined,
@@ -105,7 +106,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 Image = _overlayImage,
                 SubresourceRange = ColorSubresourceRange(),
             };
-            _vk.CmdPipelineBarrier(
+            VulkanSynchronization.PipelineBarrier(_vk,
                 _commandBuffer,
                 PipelineStageFlags.TransferBit,
                 PipelineStageFlags.TransferBit,
@@ -124,11 +125,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 1,
                 &copyRegion);
 
-            var toTransferSrc = new ImageMemoryBarrier
+            var toTransferSrc = new ImageMemoryBarrier2
             {
-                SType = StructureType.ImageMemoryBarrier,
-                SrcAccessMask = AccessFlags.TransferWriteBit,
-                DstAccessMask = AccessFlags.TransferReadBit,
+                SType = StructureType.ImageMemoryBarrier2,
+                SrcAccessMask = AccessFlags2.TransferWriteBit,
+                DstAccessMask = AccessFlags2.TransferReadBit,
                 OldLayout = ImageLayout.TransferDstOptimal,
                 NewLayout = ImageLayout.TransferSrcOptimal,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -136,11 +137,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 Image = _overlayImage,
                 SubresourceRange = ColorSubresourceRange(),
             };
-            var swapchainToDst = new ImageMemoryBarrier
+            var swapchainToDst = new ImageMemoryBarrier2
             {
-                SType = StructureType.ImageMemoryBarrier,
+                SType = StructureType.ImageMemoryBarrier2,
                 SrcAccessMask = 0,
-                DstAccessMask = AccessFlags.TransferWriteBit,
+                DstAccessMask = AccessFlags2.TransferWriteBit,
                 OldLayout = PresentationTargetFinalLayout,
                 NewLayout = ImageLayout.TransferDstOptimal,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -148,8 +149,8 @@ internal static unsafe partial class VulkanVideoPresenter
                 Image = presentationTarget,
                 SubresourceRange = ColorSubresourceRange(),
             };
-            var preBlitBarriers = stackalloc ImageMemoryBarrier[2] { toTransferSrc, swapchainToDst };
-            _vk.CmdPipelineBarrier(
+            var preBlitBarriers = stackalloc ImageMemoryBarrier2[2] { toTransferSrc, swapchainToDst };
+            VulkanSynchronization.PipelineBarrier(_vk,
                 _commandBuffer,
                 PipelineStageFlags.TransferBit | PipelineStageFlags.ColorAttachmentOutputBit,
                 PipelineStageFlags.TransferBit,
@@ -180,11 +181,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 1,
                 &copy);
 
-            var presentationTargetToFinal = new ImageMemoryBarrier
+            var presentationTargetToFinal = new ImageMemoryBarrier2
             {
-                SType = StructureType.ImageMemoryBarrier,
-                SrcAccessMask = AccessFlags.TransferWriteBit,
-                DstAccessMask = _hdrOutputActive ? AccessFlags.ShaderReadBit : 0,
+                SType = StructureType.ImageMemoryBarrier2,
+                SrcAccessMask = AccessFlags2.TransferWriteBit,
+                DstAccessMask = _hdrOutputActive ? AccessFlags2.ShaderReadBit : 0,
                 OldLayout = ImageLayout.TransferDstOptimal,
                 NewLayout = PresentationTargetFinalLayout,
                 SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
@@ -192,7 +193,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 Image = presentationTarget,
                 SubresourceRange = ColorSubresourceRange(),
             };
-            _vk.CmdPipelineBarrier(
+            VulkanSynchronization.PipelineBarrier(_vk,
                 _commandBuffer,
                 PipelineStageFlags.TransferBit,
                 _hdrOutputActive

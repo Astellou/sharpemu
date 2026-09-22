@@ -13,6 +13,7 @@ using SharpEmu.Libs.Gpu.Rendering;
 using SharpEmu.Libs.Gpu.Scheduling;
 using SharpEmu.ShaderCompiler;
 using SharpEmu.ShaderCompiler.Resources;
+using SharpEmu.Libs.Gpu.Vulkan;
 using Silk.NET.Vulkan;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 
@@ -678,7 +679,7 @@ internal static unsafe partial class VulkanVideoPresenter
                         EndRendering();
                         command = BeginBatchedGuestCommands();
                         var barrier = GlobalDataShareBarrier.Make(descriptors.GlobalDataShare.Buffer);
-                        _vk.CmdPipelineBarrier(command, GlobalDataShareBarrier.SourceStages, DescriptorWriter.PipelineStageFlag(stageFlag), 0, 0, null, 1, &barrier, 0, null);
+                        VulkanSynchronization.PipelineBarrier(_vk,command, GlobalDataShareBarrier.SourceStages, DescriptorWriter.PipelineStageFlag(stageFlag), 0, 0, null, 1, &barrier, 0, null);
                     }
 
                     RecordStageTextureTransitions(stage.Textures);

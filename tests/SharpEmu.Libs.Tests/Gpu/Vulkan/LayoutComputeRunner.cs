@@ -3,6 +3,7 @@
 
 using System.Runtime.InteropServices;
 using SharpEmu.Libs.Gpu.Buffers;
+using SharpEmu.Libs.Gpu.Vulkan;
 using SharpEmu.Libs.Tests.Gpu.Images;
 using SharpEmu.ShaderCompiler;
 using SharpEmu.ShaderCompiler.Resources;
@@ -288,13 +289,13 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
         }
 
         var command = new CommandBuffer(_harness.Scheduler.Current.Handle);
-        var barrier = new MemoryBarrier
+        var barrier = new MemoryBarrier2
         {
-            SType = StructureType.MemoryBarrier,
-            SrcAccessMask = AccessFlags.HostWriteBit | AccessFlags.MemoryWriteBit,
-            DstAccessMask = AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit,
+            SType = StructureType.MemoryBarrier2,
+            SrcAccessMask = AccessFlags2.HostWriteBit | AccessFlags2.MemoryWriteBit,
+            DstAccessMask = AccessFlags2.ShaderReadBit | AccessFlags2.ShaderWriteBit,
         };
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.ComputeShaderBit, 0, 1, &barrier, 0, null, 0, null);
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, PipelineStageFlags.ComputeShaderBit, 0, 1, &barrier, 0, null, 0, null);
         vk.CmdBindPipeline(command, PipelineBindPoint.Compute, _pipeline);
         vk.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, _pipelineLayout, 0, 1, &set, 0, null);
         if (layout.UsesPushData)
@@ -306,13 +307,13 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
         }
 
         vk.CmdDispatch(command, groupsX, groupsY, groupsZ);
-        var after = new MemoryBarrier
+        var after = new MemoryBarrier2
         {
-            SType = StructureType.MemoryBarrier,
-            SrcAccessMask = AccessFlags.ShaderWriteBit,
-            DstAccessMask = AccessFlags.TransferReadBit | AccessFlags.MemoryReadBit | AccessFlags.HostReadBit,
+            SType = StructureType.MemoryBarrier2,
+            SrcAccessMask = AccessFlags2.ShaderWriteBit,
+            DstAccessMask = AccessFlags2.TransferReadBit | AccessFlags2.MemoryReadBit | AccessFlags2.HostReadBit,
         };
-        vk.CmdPipelineBarrier(command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, 0, 1, &after, 0, null, 0, null);
+        VulkanSynchronization.PipelineBarrier(vk, command, PipelineStageFlags.ComputeShaderBit, PipelineStageFlags.AllCommandsBit | PipelineStageFlags.HostBit, 0, 1, &after, 0, null, 0, null);
     }
 
     public byte[] ReadBack(GpuBuffer buffer, ulong offset, ulong size) => _harness.ReadBack(buffer.Handle, offset, size);
