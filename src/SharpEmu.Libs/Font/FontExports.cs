@@ -87,6 +87,13 @@ public static class FontExports
     public static int BindRenderer(CpuContext ctx) => SetSuccess(ctx);
 
     [SysAbiExport(
+        Nid = "Z2cdsqJH+5k",
+        ExportName = "sceFontRebindRenderer",
+        Target = Generation.Gen5,
+        LibraryName = "libSceFont")]
+    public static int RebindRenderer(CpuContext ctx) => SetSuccess(ctx);
+
+    [SysAbiExport(
         Nid = "N1EBMeGhf7E",
         ExportName = "sceFontSetScalePixel",
         Target = Generation.Gen5,
@@ -288,6 +295,40 @@ public static class FontExports
                     ctx,
                     metricsAddress + (ulong)(index * sizeof(float)),
                     BitConverter.SingleToUInt32Bits(values[index])))
+            {
+                return SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+        }
+
+        return SetSuccess(ctx);
+    }
+
+    [SysAbiExport(
+        Nid = "L97d+3OgMlE",
+        ExportName = "sceFontGetCharGlyphMetrics",
+        Target = Generation.Gen5,
+        LibraryName = "libSceFont")]
+    public static int GetCharGlyphMetrics(CpuContext ctx) => GetRenderCharGlyphMetrics(ctx);
+
+    [SysAbiExport(
+        Nid = "sDuhHGNhHvE",
+        ExportName = "sceFontGetKerning",
+        Target = Generation.Gen5,
+        LibraryName = "libSceFont")]
+    public static int GetKerning(CpuContext ctx)
+    {
+        var kerningAddress = ctx[CpuRegister.Rcx];
+        if (kerningAddress == 0)
+        {
+            return SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        // OrbisFontKerning is four floats (offsetX, offsetY, positionX, positionY).
+        // Until the font backend exposes real kerning data, match the safe fallback
+        // used when no kerning-capable face is available and return zero offsets.
+        for (var offset = 0; offset < 16; offset += sizeof(float))
+        {
+            if (!TryWriteUInt32(ctx, kerningAddress + (ulong)offset, 0))
             {
                 return SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
             }
