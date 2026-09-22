@@ -1740,7 +1740,7 @@ public static partial class KernelMemoryCompatExports
                 return -1;
             }
 
-            var fileId = AmprFileRegistry.Register(guestPath, hostPath);
+            var fileId = AmprFileRegistry.RegisterAprResolvedPath(guestPath, hostPath);
             LogIoTrace("apr_resolve", guestPath, $"host='{hostPath}' index={i} count={count} id=0x{fileId:X8} size={fileSize}");
 
             if (idsAddress != 0 &&
@@ -1832,7 +1832,7 @@ public static partial class KernelMemoryCompatExports
                 return -1;
             }
 
-            var fileId = AmprFileRegistry.Register(guestPath, hostPath);
+            var fileId = AmprFileRegistry.RegisterAprResolvedPath(guestPath, hostPath);
             LogIoTrace("apr_resolve_with_prefix", guestPath, $"host='{hostPath}' index={i} count={count} id=0x{fileId:X8} size={fileSize}");
 
             if (idsAddress != 0 &&
@@ -1873,7 +1873,8 @@ public static partial class KernelMemoryCompatExports
     // IDs, then hand those IDs to sceAmprAprCommandBufferReadFile. Without it
     // the paths never register in AmprFileRegistry, so every subsequent
     // ReadFile fails with NOT_FOUND and the streaming pipeline stalls forever.
-    // Signature: (const char* const* paths, size_t count, uint32_t* ids).
+    // Signature: (const char* const* paths, uint32_t count, uint32_t* ids,
+    // uint32_t* errorIndex).
     [SysAbiExport(
         Nid = "WT-5NKy42fw",
         ExportName = "sceKernelAprResolveFilepathsToIds",
@@ -1884,6 +1885,7 @@ public static partial class KernelMemoryCompatExports
         var pathListAddress = ctx[CpuRegister.Rdi];
         var count = ctx[CpuRegister.Rsi];
         var idsAddress = ctx[CpuRegister.Rdx];
+        var errorIndexAddress = ctx[CpuRegister.Rcx];
         if (pathListAddress == 0 || count == 0 || idsAddress == 0 || count > 1024)
         {
             KernelRuntimeCompatExports.TrySetErrno(ctx, Einval);
@@ -1908,11 +1910,19 @@ public static partial class KernelMemoryCompatExports
             if (!TryGetAprFileSize(hostPath, out _))
             {
                 LogIoTrace("apr_resolve_ids", guestPath, $"host='{hostPath}' index={i} count={count} result=not_found");
+                if (errorIndexAddress != 0 &&
+                    !TryWriteUInt32Compat(ctx, errorIndexAddress, (uint)i))
+                {
+                    KernelRuntimeCompatExports.TrySetErrno(ctx, Efault);
+                    return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+                }
+
                 KernelRuntimeCompatExports.TrySetErrno(ctx, 2);
-                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+                ctx[CpuRegister.Rax] = ulong.MaxValue;
+                return -1;
             }
 
-            var fileId = AmprFileRegistry.Register(guestPath, hostPath);
+            var fileId = AmprFileRegistry.RegisterAprResolvedPath(guestPath, hostPath);
             LogIoTrace("apr_resolve_ids", guestPath, $"host='{hostPath}' index={i} count={count} id=0x{fileId:X8}");
 
             if (!TryWriteUInt32Compat(ctx, idsAddress + (i * sizeof(uint)), fileId))
@@ -4808,6 +4818,17 @@ public static partial class KernelMemoryCompatExports
             if (guestPath.StartsWith("app0/", StringComparison.OrdinalIgnoreCase))
             {
                 var relative = NormalizeMountRelativePath(guestPath["app0/".Length..]);
+                return CombineWithinMount(app0Root, relative);
+            }
+
+            if (string.Equals(guestPath, "/contents", StringComparison.OrdinalIgnoreCase))
+            {
+                return CombineWithinMount(app0Root, "contents");
+            }
+
+            if (guestPath.StartsWith("/contents/", StringComparison.OrdinalIgnoreCase))
+            {
+                var relative = NormalizeMountRelativePath(guestPath[1..]);
                 return CombineWithinMount(app0Root, relative);
             }
 

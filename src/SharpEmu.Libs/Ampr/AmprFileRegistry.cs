@@ -50,6 +50,23 @@ internal static class AmprFileRegistry
         }
     }
 
+    public static uint RegisterAprResolvedPath(string guestPath, string hostPath)
+    {
+        if (TryGetApp0Relative(guestPath, out var relative) && relative.Length != 0)
+        {
+            RegisterApp0Relative(relative, hostPath);
+        }
+
+        // APR file ids are part of the guest ABI: ResolveFilepathsToIds returns
+        // the 31-bit FNV-1a hash of the guest path. Keep the collision-safe
+        // process-local handles used by Register() separate from this path so a
+        // title can compare resolved ids with ids baked into its asset tables.
+        var fileId = ComputeFileId(guestPath);
+        _hostPathsById[fileId] = hostPath;
+        _ambiguousCompatibilityIds.TryRemove(fileId, out _);
+        return fileId;
+    }
+
     public static bool TryGetHostPath(uint id, out string hostPath)
     {
         if ((id & 0x80000000) != 0)
