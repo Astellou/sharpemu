@@ -516,6 +516,14 @@ public static class KernelPthreadCompatExports
     public static int PthreadCondSignal(CpuContext ctx) => PthreadCondSignalCore(ctx, ctx[CpuRegister.Rdi], broadcast: false);
 
     [SysAbiExport(
+        Nid = "o69RpYO-Mu0",
+        ExportName = "scePthreadCondSignalto",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PthreadCondSignalto(CpuContext ctx) =>
+        PthreadCondSignalToCore(ctx, ctx[CpuRegister.Rdi], ctx[CpuRegister.Rsi]);
+
+    [SysAbiExport(
         Nid = "JGgj7Uvrl+A",
         ExportName = "scePthreadCondBroadcast",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -2057,6 +2065,57 @@ public static class KernelPthreadCompatExports
             }
         }
 
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static int PthreadCondSignalToCore(CpuContext ctx, ulong condAddress, ulong threadId)
+    {
+        if (threadId == 0)
+        {
+            return PthreadCondSignalCore(ctx, condAddress, broadcast: false);
+        }
+
+        if (condAddress == 0)
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+        }
+
+        if (!TryResolveCondState(ctx, condAddress, createIfZero: true, out _, out var state))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+        }
+
+        PthreadCondWaiter? completedWaiter = null;
+        lock (state.SyncRoot)
+        {
+            state.SignalEpoch++;
+            for (var node = state.WaiterQueue.First; node is not null; node = node.Next)
+            {
+                var waiter = node.Value;
+                if (waiter.ThreadId != threadId ||
+                    waiter.CompletionState != 0 ||
+                    !CompleteCondWaiterLocked(state, waiter, timedOut: false))
+                {
+                    continue;
+                }
+
+                completedWaiter = waiter;
+                break;
+            }
+
+            TracePthreadCond("signalto", condAddress, mutexAddress: 0, state, timed: false,
+                completedWaiter is null ? 1 : (int)OrbisGen2Result.ORBIS_GEN2_OK);
+        }
+
+        if (completedWaiter is null)
+        {
+            // Matches pthread_cond_signalto_np: a valid target that is not
+            // currently waiting on this condition returns EPERM (1), which
+            // the Orbis wrapper maps to its kernel error form.
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_PERMISSION_DENIED;
+        }
+
+        WakeCooperativeWaiter(completedWaiter);
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
