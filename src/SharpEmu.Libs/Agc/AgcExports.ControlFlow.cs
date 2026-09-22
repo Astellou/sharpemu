@@ -54,6 +54,35 @@ public static partial class AgcExports
         return ReturnPointer(ctx, cmd);
     }
 
+    [SysAbiExport(
+        Nid = "DwICrVxerkY",
+        ExportName = "sceAgcAcbRewind",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int AcbRewind(CpuContext ctx)
+    {
+        var acb = ctx[CpuRegister.Rdi];
+        var flags = ctx[CpuRegister.Rsi];
+        var valid = (flags & 1UL) != 0;
+        var offloadEnable = (flags & 2UL) != 0;
+        if (acb == 0)
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        var body = (valid ? RewindValidBit : 0u) |
+                   (offloadEnable ? RewindOffloadEnableBit : 0u);
+        if (!TryAllocateCommandDwords(ctx, acb, 2, out var cmd) ||
+            !ctx.TryWriteUInt32(cmd, Pm4(2, ItRewind, RZero)) ||
+            !ctx.TryWriteUInt32(cmd + 4, body))
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        TraceAgc($"agc.acb_rewind buf=0x{acb:X16} cmd=0x{cmd:X16} valid={valid} offload={offloadEnable}");
+        return ReturnPointer(ctx, cmd);
+    }
+
     // Patches the REWIND body dword's valid bit and wakes any DCB suspended on it.
     // rdi is the packet pointer returned by sceAgcDcbRewind (header address).
     [SysAbiExport(
@@ -96,6 +125,14 @@ public static partial class AgcExports
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
+
+    [SysAbiExport(
+        Nid = "eWaWyFegzgQ",
+        ExportName = "sceAgcAsyncRewindPatchSetRewindState",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int AsyncRewindPatchSetRewindState(CpuContext ctx) =>
+        RewindPatchSetRewindState(ctx);
 
     // Matches the 4-dword INDIRECT_BUFFER packet DcbJump writes below.
     // Returning NOT_FOUND here left callers with a null packet pointer and an
