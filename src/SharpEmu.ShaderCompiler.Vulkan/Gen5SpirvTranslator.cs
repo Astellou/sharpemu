@@ -493,13 +493,10 @@ public static partial class Gen5SpirvTranslator
 
             var scalarArrayType = _module.TypeArray(_uintType, ScalarRegisterCount);
             var vectorArrayType = _module.TypeArray(_uintType, VectorRegisterCount);
-            var packedHalfArrayType = _module.TypeArray(_vec2Type, VectorRegisterCount);
             var privateScalarArrayPointer =
                 _module.TypePointer(SpirvStorageClass.Private, scalarArrayType);
             var privateVectorArrayPointer =
                 _module.TypePointer(SpirvStorageClass.Private, vectorArrayType);
-            var privatePackedHalfArrayPointer =
-                _module.TypePointer(SpirvStorageClass.Private, packedHalfArrayType);
             _scalarRegisters = _module.AddGlobalVariable(
                 privateScalarArrayPointer,
                 SpirvStorageClass.Private,
@@ -508,10 +505,6 @@ public static partial class Gen5SpirvTranslator
                 privateVectorArrayPointer,
                 SpirvStorageClass.Private,
                 _module.ConstantNull(vectorArrayType));
-            _packedHalfRegisters = _module.AddGlobalVariable(
-                privatePackedHalfArrayPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantNull(packedHalfArrayType));
             _scc = _module.AddGlobalVariable(
                 _privateBoolPointer,
                 SpirvStorageClass.Private,
@@ -555,7 +548,6 @@ public static partial class Gen5SpirvTranslator
 
             _interfaces.Add(_scalarRegisters);
             _interfaces.Add(_vectorRegisters);
-            _interfaces.Add(_packedHalfRegisters);
             _interfaces.Add(_scc);
             _interfaces.Add(_vcc);
             _interfaces.Add(_exec);
@@ -569,7 +561,6 @@ public static partial class Gen5SpirvTranslator
             _interfaces.Add(_programActive);
             _module.AddName(_scalarRegisters, "sgpr");
             _module.AddName(_vectorRegisters, "vgpr");
-            _module.AddName(_packedHalfRegisters, "vgprPackedHalf");
 
             {
                 DeclareLayoutBindings();
@@ -5980,8 +5971,28 @@ public static partial class Gen5SpirvTranslator
             _module.AddInstruction(
                 SpirvOp.AccessChain,
                 _privateVec2Pointer,
-                _packedHalfRegisters,
+                PackedHalfRegisters(),
                 UInt(register));
+
+        // Declared on first use. AMD's compiler keeps an unused 4 KiB private array as a
+        // named .bss global: two stages then fail to link, and the driver copies the
+        // NOBITS section as file data and reads past the end of the ELF.
+        private uint PackedHalfRegisters()
+        {
+            if (_packedHalfRegisters != 0)
+            {
+                return _packedHalfRegisters;
+            }
+
+            var arrayType = _module.TypeArray(_vec2Type, VectorRegisterCount);
+            _packedHalfRegisters = _module.AddGlobalVariable(
+                _module.TypePointer(SpirvStorageClass.Private, arrayType),
+                SpirvStorageClass.Private,
+                _module.ConstantNull(arrayType));
+            _interfaces.Add(_packedHalfRegisters);
+            _module.AddName(_packedHalfRegisters, "vgprPackedHalf");
+            return _packedHalfRegisters;
+        }
 
         private uint LoadS(uint register) => Load(_uintType, ScalarPointer(register));
 
