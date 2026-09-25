@@ -205,6 +205,11 @@
   "Updater.Status.ChecksumFailed": "فشل التحديث المنزَّل في اجتياز تحقق SHA-256.",
   "Updater.Status.Unsupported": "يتطلب التحديث التلقائي إصدار x64 لنظام Windows أو Linux أو macOS.",
   "Options.Graphics": "الرسومات",
+
+  "Options.Console.Type.Label": "وحدة التحكم",
+  "Options.Console.Type.Desc": "طراز وحدة التحكم الذي يتم إبلاغ الألعاب به.",
+  "Options.Console.Language.Label": "لغة وحدة التحكم",
+  "Options.Console.Language.Desc": "لغة النظام التي يتم إبلاغ الألعاب بها.",
   "Options.Section.Rendering": "التصيير",
   "Options.Section.Display": "العرض",
   "Options.WindowMode.Label": "وضع النافذة",

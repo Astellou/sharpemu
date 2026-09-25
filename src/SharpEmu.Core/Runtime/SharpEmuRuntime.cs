@@ -42,6 +42,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     private readonly CpuExecutionOptions _cpuExecutionOptions;
     private readonly IFileSystem _fileSystem;
     private readonly GuestGpuMemory? _gpuMemory;
+    private readonly int _systemLanguage;
     private readonly object _dynamicModuleGate = new();
     private bool _disposed;
 
@@ -63,7 +64,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         ISymbolCatalog? symbolCatalog = null,
         CpuExecutionOptions cpuExecutionOptions = default,
         IFileSystem? fileSystem = null,
-        GuestGpuMemory? gpuMemory = null)
+        GuestGpuMemory? gpuMemory = null,
+        int systemLanguage = 1)
     {
         _gpuMemory = gpuMemory;
         _selfLoader = selfLoader ?? throw new ArgumentNullException(nameof(selfLoader));
@@ -79,6 +81,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             DebugHook = cpuExecutionOptions.DebugHook,
         };
         _fileSystem = fileSystem ?? new PhysicalFileSystem();
+        _systemLanguage = systemLanguage;
     }
 
     public static ISharpEmuRuntime CreateDefault(SharpEmuRuntimeOptions options = default)
@@ -112,7 +115,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             Aerolib.Instance,
             cpuExecutionOptions,
             fileSystem,
-            gpuMemory);
+            gpuMemory,
+            options.SystemLanguage ?? 1);
     }
 
     public SelfImage LoadImage(string ebootPath)
@@ -160,7 +164,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         VideoOutExports.ConfigureApplicationInfo(image.Title, image.TitleId, image.Version);
         KernelMemoryCompatExports.ConfigureApplicationInfo(image.TitleId);
         SaveDataExports.ConfigureApplicationInfo(image.TitleId);
-        SystemServiceExports.ConfigureApplicationInfo(image.TitleId);
+        SystemServiceExports.ConfigureApplicationInfo(image.TitleId, _systemLanguage);
         _ = RegisterLoadedModule(normalizedEbootPath, image, isMain: true, isSystemModule: false);
         KernelRuntimeCompatExports.ConfigureProcessProcParamAddress(image.ProcParamAddress);
         Console.Error.WriteLine($"[RUNTIME] Entry: 0x{image.EntryPoint:X16}");

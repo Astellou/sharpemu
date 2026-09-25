@@ -205,6 +205,11 @@
   "Updater.Status.ChecksumFailed": "ダウンロードしたアップデートはSHA-256検証に失敗しました。",
   "Updater.Status.Unsupported": "自動アップデートにはWindows、Linux、またはmacOSのx64ビルドが必要です。",
   "Options.Graphics": "グラフィックス",
+
+  "Options.Console.Type.Label": "コンソール",
+  "Options.Console.Type.Desc": "ゲームに通知するコンソールモデル。",
+  "Options.Console.Language.Label": "コンソールの言語",
+  "Options.Console.Language.Desc": "ゲームに通知するシステム言語。",
   "Options.Section.Rendering": "レンダリング",
   "Options.Section.Display": "ディスプレイ",
   "Options.WindowMode.Label": "ウィンドウモード",

@@ -73,6 +73,11 @@
   "Options.Section.Display": "KUVA",
   "Options.Graphics": "Graafika",
 
+  "Options.Console.Type.Label": "Konsool",
+  "Options.Console.Type.Desc": "Mängudele teatatud konsoolimudel.",
+  "Options.Console.Language.Label": "Konsooli keel",
+  "Options.Console.Language.Desc": "Mängudele teatatud süsteemikeel.",
+
   "Options.WindowMode.Label": "Aknarežiim",
   "Options.WindowMode.Desc": "Tavaline aken, äärteta töölauavaade või eksklusiivne täisekraan.",
   "Options.WindowMode.Windowed": "Aken",

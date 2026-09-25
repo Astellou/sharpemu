@@ -206,6 +206,11 @@
   "Updater.Status.ChecksumFailed": "La mise à jour téléchargée a échoué à la vérification SHA-256.",
   "Updater.Status.Unsupported": "La mise à jour automatique nécessite un build x64 pour Windows, Linux ou macOS.",
   "Options.Graphics": "Graphismes",
+
+  "Options.Console.Type.Label": "Console",
+  "Options.Console.Type.Desc": "Modèle de console signalé aux jeux.",
+  "Options.Console.Language.Label": "Langue de la console",
+  "Options.Console.Language.Desc": "Langue système signalée aux jeux.",
   "Options.Section.Rendering": "RENDU",
   "Options.Section.Display": "AFFICHAGE",
   "Options.WindowMode.Label": "Mode fenêtre",

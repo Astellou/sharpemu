@@ -1185,6 +1185,28 @@ SPDX-License-Identifier: GPL-2.0-or-later
                                   VerticalAlignment="Center" />
                       </local:SettingRow>
 
+                      <local:SettingRow x:Name="ConsoleTypeRow"
+                                        Classes="optionRow"
+                                        Label="{Binding [Options.Console.Type.Label], Source={x:Static local:Localization.Instance}}"
+                                        Description="{Binding [Options.Console.Type.Desc], Source={x:Static local:Localization.Instance}}">
+                        <ComboBox x:Name="ConsoleTypeBox"
+                                  Classes="optionValue"
+                                  ItemTemplate="{StaticResource LocalizedChoiceTemplate}"
+                                  HorizontalContentAlignment="Left"
+                                  VerticalAlignment="Center" />
+                      </local:SettingRow>
+
+                      <local:SettingRow x:Name="ConsoleLanguageRow"
+                                        Classes="optionRow"
+                                        Label="{Binding [Options.Console.Language.Label], Source={x:Static local:Localization.Instance}}"
+                                        Description="{Binding [Options.Console.Language.Desc], Source={x:Static local:Localization.Instance}}">
+                        <ComboBox x:Name="ConsoleLanguageBox"
+                                  Classes="optionValue"
+                                  ItemTemplate="{StaticResource LocalizedChoiceTemplate}"
+                                  HorizontalContentAlignment="Left"
+                                  VerticalAlignment="Center" />
+                      </local:SettingRow>
+
                       <local:SettingRow x:Name="StrictRow"
                                         Classes="optionRow"
                                         Label="{Binding [Options.Strict.Label], Source={x:Static local:Localization.Instance}}"

@@ -54,6 +54,11 @@
   "Options.Section.Display": "GÖRÜNTÜ",
   "Options.Graphics": "Grafik",
 
+  "Options.Console.Type.Label": "Konsol",
+  "Options.Console.Type.Desc": "Oyunlara bildirilen konsol modeli.",
+  "Options.Console.Language.Label": "Konsol dili",
+  "Options.Console.Language.Desc": "Oyunlara bildirilen sistem dili.",
+
   "Options.WindowMode.Label": "Pencere modu",
   "Options.WindowMode.Desc": "Normal pencere, kenarlıksız masaüstü veya özel tam ekran.",
   "Options.Resolution.Label": "Çözünürlük",
