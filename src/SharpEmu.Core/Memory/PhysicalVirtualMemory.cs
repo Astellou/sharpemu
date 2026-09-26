@@ -371,6 +371,33 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         return true;
     }
 
+    // Aligned starts of the free host ranges in [low, highExclusive) that can hold size
+    // bytes, from the host's own region map. The ranges are free when listed; another
+    // thread may take one before the caller allocates it.
+    public IEnumerable<ulong> EnumerateFreeHostRanges(ulong low, ulong highExclusive, ulong size, ulong alignment)
+    {
+        var address = low;
+        while (address < highExclusive && _hostMemory.Query(address, out var info) && info.RegionSize != 0)
+        {
+            var regionEnd = info.BaseAddress + info.RegionSize;
+            if (regionEnd <= address)
+            {
+                yield break;
+            }
+
+            if (info.State == HostRegionState.Free)
+            {
+                var start = (address + alignment - 1) & ~(alignment - 1);
+                if (start >= address && start + size >= start && start + size <= Math.Min(regionEnd, highExclusive))
+                {
+                    yield return start;
+                }
+            }
+
+            address = regionEnd;
+        }
+    }
+
     public string DescribeAddressForDiagnostics(ulong address)
     {
         if (!_hostMemory.Query(address, out var info))

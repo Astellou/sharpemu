@@ -497,6 +497,34 @@ internal static class GuestRedZonePatcher
             }
         }
 
+        // The image can sit among dense host allocations (the runtime's own heaps) where
+        // every fixed step above is taken. Look for any free range in reach instead.
+        var low = Math.Max(maximumSite > MaximumRelativeJumpDistance ? maximumSite - MaximumRelativeJumpDistance : 0, AllocationAlignment);
+        var highExclusive = minimumSite <= ulong.MaxValue - MaximumRelativeJumpDistance - 1
+            ? minimumSite + MaximumRelativeJumpDistance + 1
+            : ulong.MaxValue;
+        foreach (var candidate in memory.EnumerateFreeHostRanges(low, highExclusive, requiredBytes, AllocationAlignment))
+        {
+            if (!CanReach(candidate, minimumSite) ||
+                !CanReach(candidate + requiredBytes - 1, maximumSite))
+            {
+                continue;
+            }
+
+            try
+            {
+                address = memory.AllocateAt(candidate, requiredBytes, executable: true, allowAlternative: false);
+                if (address == candidate)
+                {
+                    return true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Taken since it was listed; keep looking.
+            }
+        }
+
         address = 0;
         return false;
     }

@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using Iced.Intel;
 using SharpEmu.Core.Loader;
 using SharpEmu.Core.Memory;
+using SharpEmu.HLE;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.Loader;
@@ -68,7 +69,13 @@ public sealed class GuestRedZonePatcherTests
 
         using var memory = new PhysicalVirtualMemory();
         const ulong imageSize = 0x10000;
-        var imageBase = memory.AllocateAt(0, imageSize);
+        // Put the image at the start of a large free hole so the trampoline range beside it
+        // is free too: the runtime's heaps around an arbitrary address can leave none in reach.
+        const ulong holeSize = 0x4000000;
+        var hole = (ulong)HostMemory.Alloc(null, (nuint)holeSize, HostMemory.MEM_RESERVE, HostMemory.PAGE_NOACCESS);
+        Assert.NotEqual(0UL, hole);
+        Assert.True(HostMemory.Free((void*)hole, 0, HostMemory.MEM_RELEASE));
+        var imageBase = memory.AllocateAt(hole, imageSize);
         const ulong expected = 0x1122_3344_5566_7788;
         // Save a value in the red zone before the memory read.
         // Read the saved value after the memory read and return it.

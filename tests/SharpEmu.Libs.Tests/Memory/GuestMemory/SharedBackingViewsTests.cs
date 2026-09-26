@@ -33,20 +33,20 @@ public sealed unsafe class SharedBackingViewsTests
         try
         {
             *(ulong*)(baseAddress + Segment - 8) = Marker;
-            Span<byte> bytes = stackalloc byte[8];
-            for (var index = 0; index < 256; index++)
-                Assert.True(store.TryReadBacking(baseAddress + Segment - 8, bytes));
-
-            var initialAllocation = GC.GetAllocatedBytesForCurrentThread();
+            var bytes = new byte[8];
             var succeeded = true;
-            for (var index = 0; index < 1024; index++)
-                succeeded &= store.TryReadBacking(baseAddress + Segment - 8, bytes);
-            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - initialAllocation;
+            void ReadMarker(int count)
+            {
+                for (var index = 0; index < count; index++)
+                    succeeded &= store.TryReadBacking(baseAddress + Segment - 8, bytes);
+            }
+
+            var allocatedBytes = AllocationMeasurement.SteadyState(() => ReadMarker(256), () => ReadMarker(1024));
 
             Assert.True(succeeded);
             Assert.Equal(Marker, System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(bytes));
             Assert.Equal(0L, allocatedBytes);
-            bytes.Fill(0xA5);
+            bytes.AsSpan().Fill(0xA5);
             Assert.False(store.TryReadBacking(baseAddress + Segment - 4, bytes));
             Assert.True(bytes.SequenceEqual(new byte[] { 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5 }));
         }
