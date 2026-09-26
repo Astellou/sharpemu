@@ -185,6 +185,11 @@ public sealed partial class DirectExecutionBackend
 			return hotMemoryResult;
 		}
 
+		if (importStubEntry.IsTrivialLeaf && !_disableTrivialLeafDispatch)
+		{
+			return DispatchTrivialLeaf(cpuContext, in importStubEntry, argPackPtr, num);
+		}
+
 		if (importStubEntry.IsLeaf &&
 			TryDispatchLeafImport(cpuContext, importStubEntry, argPackPtr, num, out var leafResult))
 		{
@@ -1457,6 +1462,68 @@ public sealed partial class DirectExecutionBackend
 			Volatile.Write(ref completedGuestThreadState.LastImportResultValid, 1);
 		}
 		return true;
+	}
+
+	private static readonly bool _disableTrivialLeafDispatch = string.Equals(
+		Environment.GetEnvironmentVariable("SHARPEMU_DISABLE_TRIVIAL_LEAF"), "1", StringComparison.Ordinal);
+
+	// Tiny exports called millions of times per second, where the ~250ns of full
+	// import bookkeeping costs more than the export itself. Each one reads only
+	// argument registers (RDI..R9) and thread-local state, returns in RAX, never
+	// blocks, yields, calls back into the guest or reads the guest stack.
+	private static bool IsTrivialLeafImport(string nid) =>
+		nid is
+			"0-KXaS70xy4" or // pthread_getspecific
+			"eoht7mQOCmo" or // scePthreadGetspecific
+			"EI-5-jlq2dE" or // scePthreadGetthreadid
+			"3eqs37G74-s" or // pthread_getthreadid_np
+			"BNowx2l588E" or // sceKernelGetProcessTimeCounterFrequency
+			"fgxnMeTNUtY" or // sceKernelGetProcessTimeCounter
+			"4J2sUJmuHZQ" or // sceKernelGetProcessTime
+			"-2IRUCO--PM" or // sceKernelReadTsc
+			"1j3S3n-tTW4" or // sceKernelGetTscFrequency
+			"ob5xAW4ln-0" or // strchr
+			"9yDWMxEFdJU" or // strrchr
+			"V++UgBtQhn0";   // sceAgcGetDataPacketPayloadAddress
+
+	private unsafe ulong DispatchTrivialLeaf(
+		CpuContext cpuContext,
+		in ImportStubEntry importStubEntry,
+		nint argPackPtr,
+		long dispatchIndex)
+	{
+		// Polling loops on the host main thread use the time queries as loop-guard
+		// boundaries; keep resetting the pattern so skipping the guard here cannot
+		// turn a legitimate time-polling loop into a forced exit.
+		if (importStubEntry.IsLoopGuardBoundary && !GuestThreadExecution.IsGuestThread)
+		{
+			ResetImportLoopPattern();
+		}
+
+		cpuContext.Rip = importStubEntry.Address;
+		cpuContext[CpuRegister.Rdi] = *(ulong*)argPackPtr;
+		cpuContext[CpuRegister.Rsi] = *(ulong*)(argPackPtr + 8);
+		cpuContext[CpuRegister.Rdx] = *(ulong*)(argPackPtr + 16);
+		cpuContext[CpuRegister.Rcx] = *(ulong*)(argPackPtr + 24);
+		cpuContext[CpuRegister.R8] = *(ulong*)(argPackPtr + 32);
+		cpuContext[CpuRegister.R9] = *(ulong*)(argPackPtr + 40);
+		cpuContext.ClearRaxWriteFlag();
+		var returnValue = importStubEntry.Export!.Function(cpuContext);
+		if (!cpuContext.WasRaxWritten)
+		{
+			cpuContext[CpuRegister.Rax] = unchecked((ulong)returnValue);
+		}
+
+		if (returnValue != (int)OrbisGen2Result.ORBIS_GEN2_OK &&
+			ShouldLogImportResult(importStubEntry.Nid, (OrbisGen2Result)returnValue))
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][WARN] Import#{dispatchIndex} result: {(OrbisGen2Result)returnValue} ({importStubEntry.Nid}) " +
+				$"rdi=0x{cpuContext[CpuRegister.Rdi]:X16} rsi=0x{cpuContext[CpuRegister.Rsi]:X16} " +
+				$"ret=0x{*(ulong*)(argPackPtr + 96):X16}");
+		}
+
+		return cpuContext[CpuRegister.Rax];
 	}
 
 	private static bool IsNoBlockLeafImport(string nid) =>

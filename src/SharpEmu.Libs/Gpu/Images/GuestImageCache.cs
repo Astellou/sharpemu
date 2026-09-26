@@ -27,6 +27,7 @@ public sealed unsafe partial class GuestImageCache : IGuestImageCache, IGuestIma
     private readonly GuestBufferCache _bufferCache;
     private readonly IGuestBackedSpace _backing;
     private readonly SlotTable<CachedImage> _slots = new();
+    private readonly ImageBackingPool? _backingPool;
     private readonly ImagePageOwnerTable _pageOwners = new();
     private readonly Dictionary<Format, ResourceSlotIdentifier> _nullImages = new();
     private RecencyQueue<ResourceSlotIdentifier> _recencyQueue = new();
@@ -51,6 +52,7 @@ public sealed unsafe partial class GuestImageCache : IGuestImageCache, IGuestIma
         _readbackLinearImages = readbackLinearImages;
         _blit = new ColorToMultisampleDepthBlit(device, scheduler);
         _tiler = new GpuTiler(device, scheduler, bufferCache.GetUtilityBuffer(GpuBufferUsage.Stream));
+        _backingPool = ImageBackingPool.Enabled ? new ImageBackingPool(device) : null;
     }
 
     public ulong TotalUsedMemory => _totalUsedMemory;
@@ -95,6 +97,7 @@ public sealed unsafe partial class GuestImageCache : IGuestImageCache, IGuestIma
 
         _disposed = true;
         _slots.ForEach((_, image) => image.Dispose());
+        _backingPool?.Dispose();
         _tiler.Dispose();
         _blit.Dispose();
     }
@@ -463,7 +466,7 @@ public sealed unsafe partial class GuestImageCache : IGuestImageCache, IGuestIma
     private ResourceSlotIdentifier InsertImage(in ImageDescription description)
     {
         using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.ImageCreate);
-        var imageIdentifier = _slots.Insert(new CachedImage(_device, _scheduler, _backing, description));
+        var imageIdentifier = _slots.Insert(new CachedImage(_device, _scheduler, _backing, description, _backingPool));
         if (!ImageDescription.IsEmptyRange(description.Data))
         {
             AddToIndex(imageIdentifier);

@@ -45,7 +45,14 @@ public sealed partial class ScalarValueGraph
 
     public bool Equivalent(ScalarValue left, ScalarValue right) => ScalarValueEquivalence.Equivalent(Memory, left, right);
 
-    public ScalarValue? ResolveInvariantPhi(ScalarValue value) => ScalarValueEquivalence.ResolveInvariantPhi(Memory, value);
+    // The graph is complete once built, so a phi's invariant value never changes; the
+    // resource evaluator asks for it on every draw.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<ScalarValue, ScalarValue?> _invariantPhis = new();
+
+    public ScalarValue? ResolveInvariantPhi(ScalarValue value) =>
+        value.Kind != ScalarValueKind.Phi
+            ? value
+            : _invariantPhis.GetOrAdd(value, static (phi, memory) => ScalarValueEquivalence.ResolveInvariantPhi(memory, phi), Memory);
 
     public static ScalarValueGraph Build(Gen5ShaderProgram program, uint userDataBase, uint userDataCount,
         IReadOnlySet<uint>? fixedFunctionVertexLoads = null, uint waveSize = 64)

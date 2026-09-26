@@ -1203,6 +1203,12 @@ public static partial class Gen5SpirvTranslator
             }
 
             var m0 = LoadS(M0ScalarRegister);
+            _moveRelativeOffsets ??= Ir.Gen5MoveRelativeOffsets.Analyze(_request.Program);
+            if (_moveRelativeOffsets.TryGetValue(instruction.Pc, out var offsets))
+            {
+                return TryEmitBoundedMoveRelative(instruction, destination, m0, offsets, out error);
+            }
+
             uint sourceOffset;
             uint destinationOffset;
             if (instruction.Opcode == "VMovrelsd2B32")
@@ -1242,6 +1248,62 @@ public static partial class Gen5SpirvTranslator
             }
 
             StoreVDynamic(IAdd(UInt(destination), destinationOffset), value);
+            return true;
+        }
+
+        private IReadOnlyDictionary<uint, uint[]>? _moveRelativeOffsets;
+
+        // A relative move whose M0 values are known picks among those registers with
+        // constant register numbers, so the VGPR array is never indexed at run time and
+        // the driver can keep it in hardware registers instead of scratch memory.
+        private bool TryEmitBoundedMoveRelative(
+            Gen5ShaderInstruction instruction,
+            uint destination,
+            uint m0,
+            uint[] offsets,
+            out string error)
+        {
+            error = string.Empty;
+            uint value;
+            if (instruction.Opcode == "VMovreldB32")
+            {
+                value = GetRawSource(instruction, 0);
+            }
+            else
+            {
+                var source = instruction.Sources[0];
+                if (source.Kind != Gen5OperandKind.VectorRegister)
+                {
+                    error = $"{instruction.Opcode} source must be a vector register";
+                    return false;
+                }
+
+                value = LoadV((source.Value + offsets[0]) & (VectorRegisterCount - 1));
+                for (var index = 1; index < offsets.Length; index++)
+                {
+                    value = _module.AddInstruction(
+                        SpirvOp.Select,
+                        _uintType,
+                        _module.AddInstruction(SpirvOp.IEqual, _boolType, m0, UInt(offsets[index])),
+                        LoadV((source.Value + offsets[index]) & (VectorRegisterCount - 1)),
+                        value);
+                }
+            }
+
+            if (instruction.Opcode == "VMovrelsB32")
+            {
+                StoreV(destination, value);
+                return true;
+            }
+
+            var active = Load(_boolType, _exec);
+            foreach (var offset in offsets)
+            {
+                var register = (destination + offset) & (VectorRegisterCount - 1);
+                var selected = LogicalAnd(active, _module.AddInstruction(SpirvOp.IEqual, _boolType, m0, UInt(offset)));
+                StoreV(register, _module.AddInstruction(SpirvOp.Select, _uintType, selected, value, LoadV(register)), guardWithExec: false);
+            }
+
             return true;
         }
 

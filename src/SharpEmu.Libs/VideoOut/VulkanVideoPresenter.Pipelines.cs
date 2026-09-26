@@ -96,7 +96,7 @@ internal static unsafe partial class VulkanVideoPresenter
         {
             using var profile = ResourceMaterializationProfile.Measure(ResourceMaterializationProfile.Phase.CleanGuestRead);
             word = 0;
-            if (_bufferCache.HasGpuDirtyPages(address, sizeof(uint)) ||
+            if ((_bufferCache.MayHaveGpuDirtyPages(address, sizeof(uint)) && _bufferCache.HasGpuDirtyPages(address, sizeof(uint))) ||
                 _bufferCache.HasGpuDirtyBytes(address, sizeof(uint)) ||
                 _imageCache.HasGpuModifiedImageBytes(address, sizeof(uint)))
             {

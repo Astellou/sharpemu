@@ -62,6 +62,8 @@ public sealed unsafe partial class CachedImage : IDisposable
     private readonly GpuDeviceInfo _device;
     private readonly SubmissionScheduler _scheduler;
     private readonly IGuestBackedSpace _guestBacking;
+    private readonly ImageBackingPool? _pool;
+    private ImageBackingPool.Key _poolKey;
     private ulong _maybeCpuHash;
     private bool _cpuDirty;
     private bool _maybeCpuDirty;
@@ -82,11 +84,13 @@ public sealed unsafe partial class CachedImage : IDisposable
     public ulong LastAccessTick;
     public int RecencyEntryIndex;
 
-    public CachedImage(GpuDeviceInfo device, SubmissionScheduler scheduler, IGuestBackedSpace guestBacking, in ImageDescription description)
+    public CachedImage(GpuDeviceInfo device, SubmissionScheduler scheduler, IGuestBackedSpace guestBacking, in ImageDescription description,
+        ImageBackingPool? pool = null)
     {
         _device = device;
         _scheduler = scheduler;
         _guestBacking = guestBacking;
+        _pool = pool;
         Description = description;
         Description.Validate();
         _cpuDirty = !ImageDescription.IsEmptyRange(Description.Data) && Description.Metadata.Compression == DisplayCompression.Uncompressed;
@@ -128,6 +132,12 @@ public sealed unsafe partial class CachedImage : IDisposable
 
         Backing.Flags = create.Flags;
         Backing.Usage = create.Usage;
+
+        _poolKey = ImageBackingPool.KeyOf(create);
+        if (_pool is not null && _pool.TryTake(_poolKey, out Backing.Handle, out Backing.Memory, out Backing.AllocationSize))
+        {
+            return;
+        }
 
         var vk = device.Vk;
         if (vk.CreateImage(device.Device, &create, null, out Backing.Handle) != Result.Success)
@@ -524,8 +534,12 @@ public sealed unsafe partial class CachedImage : IDisposable
         Views.Clear();
         if (Backing.Exists)
         {
-            _device.Vk.DestroyImage(_device.Device, Backing.Handle, null);
-            _device.FreeMemory(Backing.Memory);
+            if (_pool is null || !_pool.TryReturn(_poolKey, Backing.Handle, Backing.Memory, Backing.AllocationSize))
+            {
+                _device.Vk.DestroyImage(_device.Device, Backing.Handle, null);
+                _device.FreeMemory(Backing.Memory);
+            }
+
             Backing.Handle = default;
             Backing.Memory = default;
         }

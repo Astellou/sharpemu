@@ -71,6 +71,47 @@ public sealed class RenderExecutorDrawTests : IDisposable
         Assert.Contains("create_graphics_pipeline colors=1 depth=False topology=TriangleList restart=False", _pipelines.Calls);
     }
 
+    private const ulong IndirectArguments = RecordingRenderHost.MemoryBase + 0x60_0000;
+
+    private void WriteIndirectArguments(params uint[] words)
+    {
+        var bytes = new byte[words.Length * 4];
+        for (var i = 0; i < words.Length; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(i * 4), words[i]);
+        }
+
+        _host.WriteGuest(IndirectArguments, bytes);
+    }
+
+    [Fact]
+    public void IndirectIndexedDraw_LetsTheGpuReadTheArguments()
+    {
+        _pipelines.Graphics = Programs(vertexBuffers: [new VertexInputBuffer(VertexBase, 16, 4)]);
+        var arguments = Indexed(40, source: DrawOffsetSource.IndirectArguments) with { IndirectArgumentsAddress = IndirectArguments };
+        _executor.DrawIndexed(7, Banks(), arguments);
+
+        AssertOrder(
+            "obtain 100500000 50 written=False",
+            "obtain 100600000 14 written=False",
+            "begin_rendering",
+            "bind_pipeline Graphics A1",
+            "draw_indexed_indirect",
+            "reset_bindings");
+        Assert.DoesNotContain(_host.Calls, c => c.StartsWith("draw_indexed ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void IndirectIndexedStrip_ReadsTheArgumentsOnTheCpu()
+    {
+        WriteIndirectArguments(6, 2, 4, 3, 1);
+        var arguments = Indexed(40, source: DrawOffsetSource.IndirectArguments) with { IndirectArgumentsAddress = IndirectArguments };
+        _executor.DrawIndexed(7, Banks(PrimitiveTriangleStrip), arguments);
+
+        AssertOrder("obtain 100500008 C written=False", "draw_indexed 6 2 0 3 1", "reset_bindings");
+        Assert.DoesNotContain(_host.Calls, c => c.StartsWith("draw_indexed_indirect", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void AutoDraw_RecordsThePhasesAndTheVertexOffsets()
     {

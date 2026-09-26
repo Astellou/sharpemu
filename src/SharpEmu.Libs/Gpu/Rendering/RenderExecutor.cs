@@ -60,7 +60,8 @@ public sealed partial class RenderExecutor
 
     private readonly record struct DrawCall(string Name, RecordedOperation Operation, uint Count, uint InstanceCount, uint FirstInstance);
 
-    private readonly record struct DrawEmission(bool Indexed, int VertexOffset, uint FirstVertex, uint FirstInstance);
+    // IndirectArgumentsAddress: the GPU reads the indexed draw's counts from guest memory there.
+    private readonly record struct DrawEmission(bool Indexed, int VertexOffset, uint FirstVertex, uint FirstInstance, ulong IndirectArgumentsAddress = 0);
 
     private readonly record struct IndexSource(bool Enabled, ulong Address, byte[]? HostData, ulong Size, IndexType Type);
 
@@ -86,6 +87,91 @@ public sealed partial class RenderExecutor
         ((ReadOnlySpan<ColorTargetState>)state.Colors)[..(int)state.ColorCount];
 
     public void DrawIndexed(ulong submitId, RegisterBanks banks, in DrawIndexedArguments arguments)
+    {
+        if (arguments.IndirectArgumentsAddress != 0 && !CanDrawIndirectOnGpu(banks, in arguments))
+        {
+            DrawIndexedWithCpuArguments(submitId, banks, in arguments);
+            return;
+        }
+
+        DrawIndexedCore(submitId, banks, in arguments);
+    }
+
+    // The GPU reads the arguments of an indirect draw unless the draw is emulated from
+    // its counts: strips (metadata clear quads), legacy primitives, 8-bit indices and
+    // restart indices converted on the CPU.
+    private static bool CanDrawIndirectOnGpu(RegisterBanks banks, in DrawIndexedArguments arguments)
+    {
+        switch ((GuestPrimitiveType)banks.UserConfig.PrimitiveType)
+        {
+            case GuestPrimitiveType.PointList:
+            case GuestPrimitiveType.LineList:
+            case GuestPrimitiveType.LineStrip:
+            case GuestPrimitiveType.TriangleList:
+            case GuestPrimitiveType.TriangleFan:
+            case GuestPrimitiveType.Polygon:
+            case GuestPrimitiveType.RectangleList:
+                break;
+            default:
+                return false;
+        }
+
+        var index32 = (GuestIndexType)arguments.IndexTypeAndSize == GuestIndexType.Index32;
+        if (!index32 && (GuestIndexType)arguments.IndexTypeAndSize != GuestIndexType.Index16)
+        {
+            return false;
+        }
+
+        if ((banks.UserConfig.PrimitiveResetControl & 0x1) != 0)
+        {
+            var indexMask = index32 ? uint.MaxValue : 0xFFFFu;
+            if ((banks.Context.PrimitiveResetIndex & indexMask) != indexMask)
+            {
+                return false;
+            }
+        }
+
+        return (ulong)arguments.IndexCount * (index32 ? 4ul : 2ul) <= MaxIndirectIndexBufferBytes;
+    }
+
+    private const ulong MaxIndirectIndexBufferBytes = 64ul << 20;
+
+    // Reads the indirect arguments now and draws from them, as the interpreter would have.
+    private void DrawIndexedWithCpuArguments(ulong submitId, RegisterBanks banks, in DrawIndexedArguments arguments)
+    {
+        Span<byte> bytes = stackalloc byte[(int)IndexedIndirectArgumentsSize];
+        if (!_host.TryReadGuest(arguments.IndirectArgumentsAddress, bytes))
+        {
+            throw _host.Fatal($"The indirect draw arguments are unreadable: address=0x{arguments.IndirectArgumentsAddress:X16}.");
+        }
+
+        var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(bytes);
+        var elementSize = (GuestIndexType)arguments.IndexTypeAndSize switch
+        {
+            GuestIndexType.Index16 => 2ul,
+            GuestIndexType.Index32 => 4ul,
+            _ => 1ul,
+        };
+        var resolved = arguments with
+        {
+            IndexCount = arguments.UnboundedIndexBuffer ? words[0] : Math.Min(words[0], arguments.IndexCount),
+            InstanceCount = words[1],
+            IndexAddress = arguments.IndexAddress + (words[2] * elementSize),
+            BaseVertex = unchecked((int)words[3]),
+            FirstInstance = words[4],
+            IndirectArgumentsAddress = 0,
+            UnboundedIndexBuffer = false,
+        };
+        if (resolved.IndexCount == 0 || resolved.InstanceCount == 0)
+        {
+            _host.ResetBindings();
+            return;
+        }
+
+        DrawIndexedCore(submitId, banks, in resolved);
+    }
+
+    private void DrawIndexedCore(ulong submitId, RegisterBanks banks, in DrawIndexedArguments arguments)
     {
         using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.DrawExecutor);
         if (!_host.IsRecording)
@@ -184,6 +270,13 @@ public sealed partial class RenderExecutor
             return;
         }
 
+        if (arguments.IndirectArgumentsAddress != 0 && state.ColorCount == 0 && !state.Depth.HasTarget)
+        {
+            // A targetless draw may be retained and replayed later; it needs its counts.
+            DrawIndexedWithCpuArguments(submitId, banks, in arguments);
+            return;
+        }
+
         ResolveShaderPrograms(banks, ref state);
         if (!ApplyProgramAdaptations(banks, in draw, ref state, new TargetlessDrawArguments(submitId, true, arguments, default)))
         {
@@ -200,7 +293,8 @@ public sealed partial class RenderExecutor
             true,
             vertexOffset,
             0,
-            indirect ? arguments.FirstInstance : ResolveInstanceOffset(state.Programs.VertexInput));
+            indirect ? arguments.FirstInstance : ResolveInstanceOffset(state.Programs.VertexInput),
+            arguments.IndirectArgumentsAddress);
         RecordDraw(submitId, banks, in draw, ref state, topology, in emission, in indexSource, primitiveRestart, setBindDebug: true, setAutoDebug: false);
         _host.ResetBindings();
     }

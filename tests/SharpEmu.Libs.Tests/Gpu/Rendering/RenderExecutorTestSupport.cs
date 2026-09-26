@@ -322,6 +322,9 @@ internal sealed class RecordingRenderHost : IRenderHost
     public void DrawIndexed(uint indexCount, uint instanceCount, uint firstIndex, int vertexOffset, uint firstInstance) =>
         Calls.Add($"draw_indexed {indexCount} {instanceCount} {firstIndex} {vertexOffset} {firstInstance}");
 
+    public void DrawIndexedIndirect(BufferBinding arguments) =>
+        Calls.Add($"draw_indexed_indirect {arguments.Handle:X}:{arguments.Offset:X}");
+
     public void Dispatch(uint groupsX, uint groupsY, uint groupsZ) => Calls.Add($"dispatch {groupsX} {groupsY} {groupsZ}");
 
     public bool TryDispatchIndirect(ulong argumentsAddress) => false;

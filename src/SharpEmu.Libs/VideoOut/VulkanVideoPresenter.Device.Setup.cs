@@ -644,19 +644,76 @@ internal static unsafe partial class VulkanVideoPresenter
                 $"mode={graphicsSubgroupMode} compute_subgroups=unchanged");
         }
 
+        // A second queue family for buffer readbacks (see VulkanAsyncReadback): a transfer-only
+        // family first, then a compute family. SHARPEMU_ASYNC_READBACK=0 keeps one queue.
+        private uint? _readbackQueueFamilyIndex;
+        private Queue _readbackQueue;
+
+        private uint? SelectReadbackQueueFamily()
+        {
+            if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_ASYNC_READBACK"), "0", StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            uint count = 0;
+            _vk.GetPhysicalDeviceQueueFamilyProperties(_physicalDevice, &count, null);
+            var families = new QueueFamilyProperties[count];
+            fixed (QueueFamilyProperties* pointer = families)
+            {
+                _vk.GetPhysicalDeviceQueueFamilyProperties(_physicalDevice, &count, pointer);
+            }
+
+            uint? compute = null;
+            for (uint index = 0; index < count; index++)
+            {
+                var flags = families[index].QueueFlags;
+                if (index == _queueFamilyIndex || families[index].QueueCount == 0)
+                {
+                    continue;
+                }
+
+                if ((flags & QueueFlags.TransferBit) != 0 && (flags & (QueueFlags.GraphicsBit | QueueFlags.ComputeBit)) == 0)
+                {
+                    return index;
+                }
+
+                if ((flags & QueueFlags.ComputeBit) != 0 && (flags & QueueFlags.GraphicsBit) == 0)
+                {
+                    compute ??= index;
+                }
+            }
+
+            return compute;
+        }
+
         private bool _supportsFragmentShaderBarycentric;
         private const string FragmentShaderBarycentricExtensionName = "VK_KHR_fragment_shader_barycentric";
 
         private void CreateDevice()
         {
             var priority = 1.0f;
-            var queueInfo = new DeviceQueueCreateInfo
+            var queueInfos = stackalloc DeviceQueueCreateInfo[2];
+            queueInfos[0] = new DeviceQueueCreateInfo
             {
                 SType = StructureType.DeviceQueueCreateInfo,
                 QueueFamilyIndex = _queueFamilyIndex,
                 QueueCount = 1,
                 PQueuePriorities = &priority,
             };
+            var queueInfoCount = 1u;
+            _readbackQueueFamilyIndex = SelectReadbackQueueFamily();
+            if (_readbackQueueFamilyIndex is { } readbackFamily)
+            {
+                queueInfos[1] = new DeviceQueueCreateInfo
+                {
+                    SType = StructureType.DeviceQueueCreateInfo,
+                    QueueFamilyIndex = readbackFamily,
+                    QueueCount = 1,
+                    PQueuePriorities = &priority,
+                };
+                queueInfoCount = 2;
+            }
             _vk.GetPhysicalDeviceFeatures(_physicalDevice, out var supportedFeatures);
             _supportsIndependentBlend = supportedFeatures.IndependentBlend;
             _supportsDepthBiasClamp = supportedFeatures.DepthBiasClamp;
@@ -961,8 +1018,8 @@ internal static unsafe partial class VulkanVideoPresenter
                 {
                     SType = StructureType.DeviceCreateInfo,
                     PNext = &features2,
-                    QueueCreateInfoCount = 1,
-                    PQueueCreateInfos = &queueInfo,
+                    QueueCreateInfoCount = queueInfoCount,
+                    PQueueCreateInfos = queueInfos,
                     EnabledExtensionCount = extensionCount,
                     PpEnabledExtensionNames = extensions,
                 };
@@ -985,6 +1042,12 @@ internal static unsafe partial class VulkanVideoPresenter
 
             _vk.GetDeviceQueue(_device, _queueFamilyIndex, 0, out _queue);
             _deviceInfo = new GpuDeviceInfo(_vk, _physicalDevice, _device);
+            if (_readbackQueueFamilyIndex is { } readbackQueueFamily)
+            {
+                _vk.GetDeviceQueue(_device, readbackQueueFamily, 0, out _readbackQueue);
+                _deviceInfo.SharedQueueFamilies = [_queueFamilyIndex, readbackQueueFamily];
+                Console.Error.WriteLine($"[LOADER][INFO] Vulkan async readback queue: family={readbackQueueFamily} (main family={_queueFamilyIndex})");
+            }
             CreateScheduler();
             CreateBufferCache();
             CreateImageCache();

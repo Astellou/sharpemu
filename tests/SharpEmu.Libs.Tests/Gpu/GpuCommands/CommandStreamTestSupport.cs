@@ -169,7 +169,13 @@ internal sealed class RecordingCommandStreamHost : ICommandStreamHost
     }
 
     public void DispatchDirect(ulong submitId, uint groupsX, uint groupsY, uint groupsZ, uint dispatchInitiator, ulong indirectArgumentsAddress = 0) =>
-        Calls.Add($"dispatch {submitId} {groupsX} {groupsY} {groupsZ} {dispatchInitiator:X}");
+        Calls.Add(indirectArgumentsAddress == 0
+            ? $"dispatch {submitId} {groupsX} {groupsY} {groupsZ} {dispatchInitiator:X}"
+            : $"dispatch {submitId} {groupsX} {groupsY} {groupsZ} {dispatchInitiator:X} @{indirectArgumentsAddress:X}");
+
+    public bool ResolvesIndirectDispatchOnGpu { get; set; }
+
+    public bool ResolvesIndirectDrawOnGpu { get; set; }
 
     public void OnQueueReset(int queueId) => Calls.Add($"queue_reset {queueId}");
 

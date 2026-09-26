@@ -1054,6 +1054,13 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
 
     public bool IsBackedRange(ulong address, ulong size)
     {
+        // A backed range confirmed from the view snapshot needs no lock; a miss (partly
+        // unbacked, or a view being remapped) takes the locked path.
+        if (_backedSpace is { } backed && !_disposed && backed.IsBackedWithoutLock(address, size))
+        {
+            return true;
+        }
+
         _gate.EnterReadLock();
         try
         {
@@ -1776,6 +1783,15 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
 
     public bool TryRead(ulong virtualAddress, Span<byte> destination)
     {
+        // Backed guest memory is the shared backing itself, and the backing's view table
+        // is readable without a lock; only other memory needs _gate to find its region.
+        // Descriptor evaluation alone reads guest words ~40 at a time per draw here.
+        if (!destination.IsEmpty && _backedSpace is { } backed && !_disposed &&
+            backed.TryReadSingleView(virtualAddress, destination))
+        {
+            return true;
+        }
+
         var requiresExclusiveAccess = false;
         _gate.EnterReadLock();
         try
@@ -1840,6 +1856,85 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         finally
         {
             _gate.ExitWriteLock();
+        }
+    }
+
+    public bool TryScanCString(ulong address, byte needle, bool findLast, ulong maxLength, out ulong match)
+    {
+        match = 0;
+        _gate.EnterReadLock();
+        try
+        {
+            // Scan page by page in place, with the same region and protection
+            // checks TryRead applies before its copy. Anything TryRead would
+            // handle specially (backed views, lazy commit, protection changes)
+            // is left to the caller's copying path.
+            ulong offset = 0;
+            while (offset < maxLength)
+            {
+                var current = address + offset;
+                if (current < address)
+                {
+                    return false;
+                }
+
+                var length = Math.Min(PageSize - (current & (PageSize - 1)), maxLength - offset);
+                var region = FindRegion(current, length);
+                if (region is null ||
+                    region.IsReservedOnly ||
+                    IsBackedSpan(region, current, length) ||
+                    !TryResolveRegionOffset(current, length, region, out var regionOffset))
+                {
+                    return false;
+                }
+
+                var hostAddress = region.VirtualAddress + regionOffset;
+                if (!CanReadWithoutProtectionChange(hostAddress, length, region))
+                {
+                    return false;
+                }
+
+                var bytes = new ReadOnlySpan<byte>((void*)hostAddress, (int)length);
+                if (!findLast)
+                {
+                    // One pass that stops at the needle or the terminator,
+                    // whichever comes first.
+                    var stop = bytes.IndexOfAny(needle, (byte)0);
+                    if (stop >= 0)
+                    {
+                        match = bytes[stop] == needle ? current + (ulong)stop : 0;
+                        return true;
+                    }
+
+                    offset += length;
+                    continue;
+                }
+
+                var nulIndex = bytes.IndexOf((byte)0);
+                var searched = nulIndex >= 0 ? bytes[..(nulIndex + 1)] : bytes;
+                var found = findLast ? searched.LastIndexOf(needle) : searched.IndexOf(needle);
+                if (found >= 0)
+                {
+                    match = current + (ulong)found;
+                    if (!findLast)
+                    {
+                        return true;
+                    }
+                }
+
+                if (nulIndex >= 0)
+                {
+                    return true;
+                }
+
+                offset += length;
+            }
+
+            return true;
+        }
+        finally
+        {
+            _gate.ExitReadLock();
         }
     }
 

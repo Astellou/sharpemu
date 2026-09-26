@@ -33,6 +33,10 @@ public sealed unsafe class GpuDeviceInfo : IImageFormatSupport
 
     public Vk Vk { get; }
 
+    // Queue families that may access every buffer; set before the first buffer is
+    // created when a second queue family (the async readback queue) reads them.
+    public uint[]? SharedQueueFamilies { get; set; }
+
     public PhysicalDevice PhysicalDevice { get; }
 
     public Device Device { get; }

@@ -53,6 +53,10 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 
 		public bool IsNoBlockLeaf { get; }
 
+		// Argument-register-only exports that never block or touch the guest
+		// stack; DispatchImport runs them without the full import bookkeeping.
+		public bool IsTrivialLeaf { get; }
+
 		public bool SuppressStrlenTrace { get; }
 
 		public bool IsLoopGuardBoundary { get; }
@@ -74,6 +78,7 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			Export = export;
 			IsLeaf = isLeaf;
 			IsNoBlockLeaf = isNoBlockLeaf;
+			IsTrivialLeaf = export is not null && IsTrivialLeafImport(nid);
 			SuppressStrlenTrace = suppressStrlenTrace;
 			IsLoopGuardBoundary = isLoopGuardBoundary;
 			NidHash = nidHash;

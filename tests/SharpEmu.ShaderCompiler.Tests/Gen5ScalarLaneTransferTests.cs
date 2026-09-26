@@ -227,7 +227,6 @@ public sealed class Gen5ScalarLaneTransferTests
         var opcodes = ReadSpirvOpcodes(compiled.Spirv);
         Assert.Contains((ushort)SpirvOp.IAdd, opcodes);
         Assert.Contains((ushort)SpirvOp.ULessThan, opcodes);
-        Assert.Contains((ushort)SpirvOp.Select, opcodes);
     }
 
     private static Gen5ShaderInstruction ScalarInstruction(

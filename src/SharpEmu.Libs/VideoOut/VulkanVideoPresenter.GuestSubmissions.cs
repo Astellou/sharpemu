@@ -14,7 +14,13 @@ internal static unsafe partial class VulkanVideoPresenter
     {
         // This partial owns guest GPU submission execution and lifetime.
 
-        private const int MaxInFlightGuestSubmissions = 8;
+        // Batched submissions each carry up to a frame's worth of work, so a cap of
+        // 8 made draw preparation wait on the GPU once per frame; 32 keeps the CPU
+        // ahead. SHARPEMU_MAX_INFLIGHT_SUBMISSIONS overrides it.
+        private static readonly int MaxInFlightGuestSubmissions =
+            int.TryParse(Environment.GetEnvironmentVariable("SHARPEMU_MAX_INFLIGHT_SUBMISSIONS"), out var inFlight) && inFlight > 0
+                ? inFlight
+                : 32;
         // Scheduler ticks: the last submitted tick and the highest tick known retired.
         private ulong _submitTimeline;
         private ulong _completedTimeline;

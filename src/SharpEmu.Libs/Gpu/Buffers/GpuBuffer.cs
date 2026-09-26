@@ -43,14 +43,23 @@ public unsafe class GpuBuffer : IDisposable
         Size = size;
 
         var vk = device.Vk;
-        var bufferInfo = new BufferCreateInfo
+        var sharedFamilies = device.SharedQueueFamilies;
+        fixed (uint* families = sharedFamilies)
         {
-            SType = StructureType.BufferCreateInfo,
-            Size = size,
-            Usage = flags,
-            SharingMode = SharingMode.Exclusive,
-        };
-        RequireSuccess(vk.CreateBuffer(device.Device, &bufferInfo, null, out _handle), "vkCreateBuffer");
+            // Buffers carry no layout, so concurrent sharing lets the readback queue copy
+            // them without queue-family ownership transfers at no cost to other queues.
+            var bufferInfo = new BufferCreateInfo
+            {
+                SType = StructureType.BufferCreateInfo,
+                Size = size,
+                Usage = flags,
+                SharingMode = sharedFamilies is { Length: > 1 } ? SharingMode.Concurrent : SharingMode.Exclusive,
+                QueueFamilyIndexCount = sharedFamilies is { Length: > 1 } ? (uint)sharedFamilies.Length : 0,
+                PQueueFamilyIndices = sharedFamilies is { Length: > 1 } ? families : null,
+            };
+            RequireSuccess(vk.CreateBuffer(device.Device, &bufferInfo, null, out _handle), "vkCreateBuffer");
+        }
+
         vk.GetBufferMemoryRequirements(device.Device, _handle, out var requirements);
         var withAddress = (flags & BufferUsageFlags.ShaderDeviceAddressBit) != 0;
         var flagsInfo = new MemoryAllocateFlagsInfo
@@ -128,6 +137,20 @@ public unsafe class GpuBuffer : IDisposable
 
     public void AddStreamScore(int score) => StreamScore += score;
 
+    // The highest scheduler tick whose command buffer may write this buffer on the GPU.
+    // A readback of it only has to wait for that tick, not for all queued work.
+    public ulong LastGpuWriteTick { get; private set; }
+
+    // Called by every path that records a GPU write into this buffer.
+    public void NoteGpuWrite()
+    {
+        var tick = _scheduler.CurrentTick;
+        if (tick > LastGpuWriteTick)
+        {
+            LastGpuWriteTick = tick;
+        }
+    }
+
     public void Write(ulong offset, ReadOnlySpan<byte> source)
     {
         if (_mapped == null || offset > Size || (ulong)source.Length > Size - offset)
@@ -189,6 +212,7 @@ public unsafe class GpuBuffer : IDisposable
         }
 
         command.EndRendering();
+        NoteGpuWrite();
         var vk = _device.Vk;
         var native = new CommandBuffer(command.Handle);
         var before = stackalloc BufferMemoryBarrier2[2];
@@ -216,6 +240,7 @@ public unsafe class GpuBuffer : IDisposable
 
         var command = _scheduler.Current;
         command.EndRendering();
+        NoteGpuWrite();
         var vk = _device.Vk;
         var native = new CommandBuffer(command.Handle);
         var before = CreateBarrier(offset, size, MemoryAccess, AccessFlags.TransferWriteBit);

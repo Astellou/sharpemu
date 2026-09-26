@@ -24,10 +24,10 @@ public sealed class CommandStreamQueueTests
     private static uint[] WaitEqual(ulong address, uint reference) =>
         StreamRunner.Packet(PacketOpcode.WaitRegisterMemory, 0x13u, StreamRunner.Low(address), StreamRunner.High(address), reference, 0xFFFF_FFFFu, 0);
 
-    private static (RecordingCommandStreamHost Host, CommandStreamQueue Queue) NewQueue()
+    private static (RecordingCommandStreamHost Host, CommandStreamQueue Queue) NewQueue(int frameRunAhead = 0)
     {
         var host = new RecordingCommandStreamHost();
-        return (host, new CommandStreamQueue(host));
+        return (host, new CommandStreamQueue(host) { FrameRunAhead = frameRunAhead });
     }
 
     private static void Enqueue(RecordingCommandStreamHost host, CommandStreamQueue queue, ulong address, ulong submissionId, params uint[][] packets)
@@ -57,6 +57,42 @@ public sealed class CommandStreamQueueTests
         Assert.Equal(1UL, queue.GetInterpreter(0).SubmitId);
         Assert.Equal(SliceResult.NoWork, queue.ProcessOne());
         Assert.Equal(IdleOutcome.Completed, queue.WaitForIdle());
+    }
+
+    private static uint[] ReleaseMemoryInterrupt(ulong label, uint value) =>
+        StreamRunner.Packet(
+            PacketOpcode.ReleaseMemory,
+            0x28u | (5u << 8),
+            (2u << 24) | (1u << 29),
+            StreamRunner.Low(label), StreamRunner.High(label),
+            value, 0,
+            0);
+
+    // Release-memory packets do not submit on their own; the slice end does, so the
+    // interrupt they queue always reaches the GPU once the slice is over.
+    [Fact]
+    public void ReleaseMemoryInterrupt_IsSubmittedAtTheEndOfTheSlice()
+    {
+        var (host, queue) = NewQueue();
+        Enqueue(host, queue, Graphics, 1, ReleaseMemoryInterrupt(Label, 5), CreateInstanceCountPacket(2), ReleaseMemoryInterrupt(Label, 6));
+
+        Assert.Equal(SliceResult.Completed, queue.ProcessOne());
+
+        Assert.Equal(new[] { "begin 0 1", "eop Interrupt32", "eop Interrupt32", "gc", "flush" }, host.Calls);
+    }
+
+    // A slice that blocks after a release still submits it, so a wait that depends on
+    // the guest reacting to that interrupt cannot hold the interrupt back.
+    [Fact]
+    public void ReleaseMemoryInterrupt_IsSubmittedWhenTheSliceBlocks()
+    {
+        var (host, queue) = NewQueue();
+        Enqueue(host, queue, Graphics, 1, ReleaseMemoryInterrupt(Label, 5), WaitEqual(Label + 8, 1));
+
+        Assert.Equal(SliceResult.Progressed, queue.ProcessOne());
+
+        var release = host.Calls.IndexOf("eop Interrupt32");
+        Assert.True(release >= 0 && host.Calls.IndexOf("flush") > release, string.Join(", ", host.Calls));
     }
 
     // A video-out export flip captures after the draws submitted before it, never ahead of them.
@@ -334,5 +370,25 @@ public sealed class CommandStreamQueueTests
         Enqueue(host, queue, Graphics, 2, CreateInstanceCountPacket(2));
         Assert.Equal(SliceResult.Completed, queue.ProcessOne());
         Assert.Equal(2UL, queue.GetInterpreter(0).SubmitId);
+    }
+
+    [Fact]
+    public async Task Done_WithRunAheadWaitsOnlyForThePreviousFrame()
+    {
+        var (host, queue) = NewQueue(frameRunAhead: 1);
+        Enqueue(host, queue, Graphics, 1, CreateInstanceCountPacket(1));
+
+        // Frame 1 ends with its submission still queued.
+        Assert.Equal(IdleOutcome.Completed, await Task.Run(queue.Done).WaitAsync(TimeSpan.FromSeconds(2)));
+        Enqueue(host, queue, Graphics, 2, CreateInstanceCountPacket(2));
+
+        // Frame 2 ends only once frame 1 has been processed; its own work may stay queued.
+        var done = Task.Run(queue.Done);
+        await Task.WhenAny(done, Task.Delay(100));
+        Assert.False(done.IsCompleted);
+        Assert.Equal(SliceResult.Completed, queue.ProcessOne());
+        Assert.Equal(IdleOutcome.Completed, await done.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(2, queue.FrameNumber);
+        Assert.True(queue.HasPending);
     }
 }

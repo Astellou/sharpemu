@@ -232,8 +232,9 @@ public static partial class Gen5SpirvTranslator
                     }
                 }
 
-                DeclareModule();
                 var blocks = BuildBasicBlocks(_request.Program.Instructions);
+                _functionScopeState = StructuredForwardBlocks && blocks.Count != 0 && AreBranchesForwardOnly(blocks);
+                DeclareModule();
                 if (blocks.Count == 0)
                 {
                     error = "shader contains no executable blocks";
@@ -245,6 +246,10 @@ public static partial class Gen5SpirvTranslator
                 var main = _module.BeginFunction(_voidType, functionType);
                 _module.AddName(main, "main");
                 _module.AddLabel();
+                if (_functionScopeState)
+                {
+                    DeclareRegisterFiles();
+                }
                 if (_stage == Gen5SpirvStage.Pixel &&
                     Environment.GetEnvironmentVariable(
                         "SHARPEMU_FORCE_TITLE_EARLY_COLOR") == "1" &&
@@ -286,6 +291,39 @@ public static partial class Gen5SpirvTranslator
                     caseLabels[index] = _module.AllocateId();
                 }
 
+                if (_functionScopeState)
+                {
+                    // Every branch goes forward, so each invocation visits its blocks in
+                    // program order. Emitting them in order, each guarded by "this is the next
+                    // block", runs exactly what the dispatcher loop would. The driver then sees
+                    // straight-line code with ifs and can keep only the live guest registers in
+                    // hardware registers, where the loop keeps nearly all of them live.
+                    for (var index = 0; index < blocks.Count; index++)
+                    {
+                        var isNext = _module.AddInstruction(
+                            SpirvOp.LogicalAnd,
+                            _boolType,
+                            Load(_boolType, _programActive),
+                            _module.AddInstruction(SpirvOp.IEqual, _boolType, Load(_uintType, _programCounter), UInt((uint)index)));
+                        var blockBody = _module.AllocateId();
+                        var blockMerge = _module.AllocateId();
+                        _module.AddStatement(SpirvOp.SelectionMerge, blockMerge, 0);
+                        _module.AddStatement(SpirvOp.BranchConditional, isNext, blockBody, blockMerge);
+                        _module.AddLabel(blockBody);
+                        if (!TryEmitBlock(blocks, index, out error))
+                        {
+                            error = $"block=0x{blocks[index].StartPc:X}: {error}";
+                            return false;
+                        }
+
+                        _module.AddStatement(SpirvOp.Branch, blockMerge);
+                        _module.AddLabel(blockMerge);
+                    }
+
+                    _module.AddStatement(SpirvOp.Branch, loopMerge);
+                }
+                else
+                {
                 _module.AddStatement(SpirvOp.Branch, loopHeader);
                 _module.AddLabel(loopHeader);
                 // Check before the first block can write from an inactive invocation.
@@ -347,6 +385,8 @@ public static partial class Gen5SpirvTranslator
                     active,
                     loopHeader,
                     loopMerge);
+                }
+
                 _module.AddLabel(loopMerge);
                 if (_stage == Gen5SpirvStage.Pixel &&
                     Environment.GetEnvironmentVariable(
@@ -494,74 +534,24 @@ public static partial class Gen5SpirvTranslator
 
             var scalarArrayType = _module.TypeArray(_uintType, ScalarRegisterCount);
             var vectorArrayType = _module.TypeArray(_uintType, VectorRegisterCount);
-            var privateScalarArrayPointer =
-                _module.TypePointer(SpirvStorageClass.Private, scalarArrayType);
-            var privateVectorArrayPointer =
-                _module.TypePointer(SpirvStorageClass.Private, vectorArrayType);
-            _scalarRegisters = _module.AddGlobalVariable(
-                privateScalarArrayPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantNull(scalarArrayType));
-            _vectorRegisters = _module.AddGlobalVariable(
-                privateVectorArrayPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantNull(vectorArrayType));
-            _scc = _module.AddGlobalVariable(
-                _privateBoolPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantBool(false));
-            _vcc = _module.AddGlobalVariable(
-                _privateBoolPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantBool(false));
-            _exec = _module.AddGlobalVariable(
-                _privateBoolPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantBool(true));
-            _reachedPixelExport = _module.AddGlobalVariable(
-                _privateBoolPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantBool(false));
-            if (_usesPixelValidMask)
+            // The register files are variables of main, declared when main begins (see
+            // DeclareRegisterFiles). As Private globals, a file the driver fully promotes to
+            // registers stays behind as an unused .bss global, and AMD's driver crashes
+            // linking two stages that both carry one.
+            _scalarArrayType = scalarArrayType;
+            _vectorArrayType = vectorArrayType;
+            var registerStorage = _functionScopeState ? SpirvStorageClass.Function : SpirvStorageClass.Private;
+            _functionUintPointer = _module.TypePointer(registerStorage, _uintType);
+            _functionVec2Pointer = _module.TypePointer(registerStorage, _vec2Type);
+            // The per-invocation state (SCC, VCC, EXEC, the block dispatcher's counters) also
+            // lives in main: an unused Private global in a fragment shader crashes AMD's
+            // driver when it links the stages (seen with the dispatcher guard of a shader
+            // that no longer needs the dispatcher).
+            _functionBoolPointer = _module.TypePointer(registerStorage, _boolType);
+            if (!_functionScopeState)
             {
-                _pixelValidMaskActive = _module.AddGlobalVariable(
-                    _privateBoolPointer,
-                    SpirvStorageClass.Private,
-                    _module.ConstantBool(true));
+                DeclareRegisterFiles();
             }
-            _programCounter = _module.AddGlobalVariable(
-                _privateUintPointer,
-                SpirvStorageClass.Private,
-                _module.Constant(_uintType, 0));
-            _programActive = _module.AddGlobalVariable(
-                _privateBoolPointer,
-                SpirvStorageClass.Private,
-                _module.ConstantBool(true));
-            if (_maxDispatcherSteps > 0)
-            {
-                _iterationGuard = _module.AddGlobalVariable(
-                    _privateUintPointer,
-                    SpirvStorageClass.Private,
-                    _module.Constant(_uintType, 0));
-                _interfaces.Add(_iterationGuard);
-                _module.AddName(_iterationGuard, "pcGuard");
-            }
-
-            _interfaces.Add(_scalarRegisters);
-            _interfaces.Add(_vectorRegisters);
-            _interfaces.Add(_scc);
-            _interfaces.Add(_vcc);
-            _interfaces.Add(_exec);
-            _interfaces.Add(_reachedPixelExport);
-            if (_pixelValidMaskActive != 0)
-            {
-                _interfaces.Add(_pixelValidMaskActive);
-                _module.AddName(_pixelValidMaskActive, "pixelValidMaskActive");
-            }
-            _interfaces.Add(_programCounter);
-            _interfaces.Add(_programActive);
-            _module.AddName(_scalarRegisters, "sgpr");
-            _module.AddName(_vectorRegisters, "vgpr");
 
             {
                 DeclareLayoutBindings();
@@ -1264,7 +1254,10 @@ public static partial class Gen5SpirvTranslator
                     }
                 }
 
-                if (!TryEmitInstruction(instruction, out error))
+                _execKnownFull = IsExecKnownFull(instruction.Pc);
+                var emitted = TryEmitInstruction(instruction, out error);
+                _execKnownFull = false;
+                if (!emitted)
                 {
                     error = $"pc=0x{instruction.Pc:X} {instruction.Opcode}: {error}";
                     return false;
@@ -1349,6 +1342,40 @@ public static partial class Gen5SpirvTranslator
             else
             {
                 Store(_programCounter, UInt(fallthrough));
+            }
+
+            return true;
+        }
+
+        // SHARPEMU_STRUCTURED_FORWARD_BLOCKS=0 always emits the block dispatcher loop.
+        private static readonly bool StructuredForwardBlocks = !string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_STRUCTURED_FORWARD_BLOCKS"), "0", StringComparison.Ordinal);
+
+        // True when every branch of every block goes to a later block or leaves the program.
+        private bool AreBranchesForwardOnly(IReadOnlyList<ShaderBlock> blocks)
+        {
+            for (var index = 0; index < blocks.Count; index++)
+            {
+                var terminator = _request.Program.Instructions[blocks[index].EndIndex - 1];
+                if (terminator.Opcode != "SBranch" && !terminator.Opcode.StartsWith("SCbranch", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!TryGetBranchTargetPc(terminator, out var targetPc))
+                {
+                    return false;
+                }
+
+                if (IsExitBranchTarget(_request.Program.Instructions, targetPc))
+                {
+                    continue;
+                }
+
+                if (!TryFindBlock(blocks, targetPc, out var target) || target <= index)
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -5980,10 +6007,73 @@ public static partial class Gen5SpirvTranslator
                 UInt(0),
                 dwordAddress);
 
+        private uint _scalarArrayType;
+        private uint _vectorArrayType;
+        private uint _functionUintPointer;
+        private uint _functionVec2Pointer;
+        private uint _functionBoolPointer;
+
+        // True when main has no dispatcher loop: the register files and state then live in
+        // main (see DeclareModule). A shader that keeps the dispatcher keeps them as Private
+        // globals, which the driver leaves in memory instead of promoting 600-odd registers
+        // across the loop (that promotion makes pipeline compiles take minutes).
+        private bool _functionScopeState;
+
+        // Declares the register files and the per-invocation state: in main's first block
+        // (Function variables must open it) or as Private globals.
+        private void DeclareRegisterFiles()
+        {
+            uint Variable(uint valueType, uint initializer)
+            {
+                if (_functionScopeState)
+                {
+                    return _module.AddFunctionVariable(_module.TypePointer(SpirvStorageClass.Function, valueType), initializer);
+                }
+
+                var variable = _module.AddGlobalVariable(
+                    _module.TypePointer(SpirvStorageClass.Private, valueType),
+                    SpirvStorageClass.Private,
+                    initializer);
+                _interfaces.Add(variable);
+                return variable;
+            }
+
+            _scalarRegisters = Variable(_scalarArrayType, _module.ConstantNull(_scalarArrayType));
+            _vectorRegisters = Variable(_vectorArrayType, _module.ConstantNull(_vectorArrayType));
+            if (_functionScopeState)
+            {
+                // A Private one is declared on first use instead; see PackedHalfRegisters.
+                var packedArrayType = _module.TypeArray(_vec2Type, VectorRegisterCount);
+                _packedHalfRegisters = Variable(packedArrayType, _module.ConstantNull(packedArrayType));
+                _module.AddName(_packedHalfRegisters, "vgprPackedHalf");
+            }
+
+            _scc = Variable(_boolType, _module.ConstantBool(false));
+            _vcc = Variable(_boolType, _module.ConstantBool(false));
+            _exec = Variable(_boolType, _module.ConstantBool(true));
+            _reachedPixelExport = Variable(_boolType, _module.ConstantBool(false));
+            if (_usesPixelValidMask)
+            {
+                _pixelValidMaskActive = Variable(_boolType, _module.ConstantBool(true));
+                _module.AddName(_pixelValidMaskActive, "pixelValidMaskActive");
+            }
+
+            _programCounter = Variable(_uintType, _module.Constant(_uintType, 0));
+            _programActive = Variable(_boolType, _module.ConstantBool(true));
+            if (_maxDispatcherSteps > 0)
+            {
+                _iterationGuard = Variable(_uintType, _module.Constant(_uintType, 0));
+                _module.AddName(_iterationGuard, "pcGuard");
+            }
+
+            _module.AddName(_scalarRegisters, "sgpr");
+            _module.AddName(_vectorRegisters, "vgpr");
+        }
+
         private uint ScalarPointer(uint register) =>
             _module.AddInstruction(
                 SpirvOp.AccessChain,
-                _privateUintPointer,
+                _functionUintPointer,
                 _scalarRegisters,
                 UInt(register));
 
@@ -5997,7 +6087,7 @@ public static partial class Gen5SpirvTranslator
         private uint VectorPointer(uint register) =>
             _module.AddInstruction(
                 SpirvOp.AccessChain,
-                _privateUintPointer,
+                _functionUintPointer,
                 _vectorRegisters,
                 UInt(register));
 
@@ -6009,7 +6099,7 @@ public static partial class Gen5SpirvTranslator
         private uint DynamicVectorPointer(uint registerIndex) =>
             _module.AddInstruction(
                 SpirvOp.AccessChain,
-                _privateUintPointer,
+                _functionUintPointer,
                 _vectorRegisters,
                 BitwiseAnd(registerIndex, UInt(VectorRegisterCount - 1)));
 
@@ -6019,6 +6109,12 @@ public static partial class Gen5SpirvTranslator
         private void StoreVDynamic(uint registerIndex, uint value)
         {
             var pointer = DynamicVectorPointer(registerIndex);
+            if (_execKnownFull)
+            {
+                Store(pointer, value);
+                return;
+            }
+
             value = _module.AddInstruction(
                 SpirvOp.Select,
                 _uintType,
@@ -6031,13 +6127,13 @@ public static partial class Gen5SpirvTranslator
         private uint PackedHalfPointer(uint register) =>
             _module.AddInstruction(
                 SpirvOp.AccessChain,
-                _privateVec2Pointer,
+                _functionVec2Pointer,
                 PackedHalfRegisters(),
                 UInt(register));
 
-        // Declared on first use. AMD's compiler keeps an unused 4 KiB private array as a
-        // named .bss global: two stages then fail to link, and the driver copies the
-        // NOBITS section as file data and reads past the end of the ELF.
+        // Declared on first use when Private. AMD's compiler keeps an unused 4 KiB private
+        // array as a named .bss global: two stages then fail to link, and the driver copies
+        // the NOBITS section as file data and reads past the end of the ELF.
         private uint PackedHalfRegisters()
         {
             if (_packedHalfRegisters != 0)
@@ -6072,9 +6168,30 @@ public static partial class Gen5SpirvTranslator
             }
         }
 
+        // SHARPEMU_EXEC_GUARD_ELISION=0 guards every vector register write with EXEC again.
+        private static readonly bool ExecGuardElision = !string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_EXEC_GUARD_ELISION"), "0", StringComparison.Ordinal);
+
+        private IReadOnlySet<uint>? _execFullPcs;
+
+        // Set while an instruction that starts with every EXEC lane set is emitted: its vector
+        // register writes need no EXEC guard, so the old values need not stay live until them.
+        private bool _execKnownFull;
+
+        private bool IsExecKnownFull(uint pc)
+        {
+            if (!ExecGuardElision)
+            {
+                return false;
+            }
+
+            _execFullPcs ??= Ir.Gen5ExecFullAnalysis.Analyze(_request.Program, wave32: _waveLaneCount == 32);
+            return _execFullPcs.Contains(pc);
+        }
+
         private void StoreV(uint register, uint value, bool guardWithExec = true)
         {
-            if (guardWithExec)
+            if (guardWithExec && !_execKnownFull)
             {
                 var active = Load(_boolType, _exec);
                 var oldValue = LoadV(register);
@@ -6091,6 +6208,12 @@ public static partial class Gen5SpirvTranslator
 
         private void StorePackedHalf(uint register, uint value)
         {
+            if (_execKnownFull)
+            {
+                Store(PackedHalfPointer(register), value);
+                return;
+            }
+
             var active = Load(_boolType, _exec);
             if (Environment.GetEnvironmentVariable(
                     "SHARPEMU_FORCE_PACKED_STORE_EXEC_VALUES") == "1" &&

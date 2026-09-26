@@ -114,7 +114,7 @@ public sealed partial class DirectExecutionBackend
 
 			ulong rip = ReadCtxU64(contextRecord, 248);
 			ulong rsp = ReadCtxU64(contextRecord, 152);
-			if (TryRecoverGuestInt41(exceptionCode, contextRecord, rip))
+			if (MayBeGuestInt41(exceptionRecord) && TryRecoverGuestInt41(exceptionCode, contextRecord, rip))
 			{
 				return -1;
 			}
@@ -602,6 +602,16 @@ public sealed partial class DirectExecutionBackend
 		// Grow-down stack: hand out near the top with alignment headroom.
 		return (ulong)(_workerAbortStack + (nint)WorkerAbortStackSize - 0x100) & ~0xFUL;
 	}
+
+	// On Windows an INT n the guest may not execute raises a general-protection fault,
+	// reported as an access violation whose fault address is all ones; a page fault
+	// carries the data address instead. GPU-tracked and lazily committed pages fault
+	// thousands of times per frame, so skip the opcode probe (a VirtualQuery and a
+	// read of the faulting instruction) for them.
+	private static unsafe bool MayBeGuestInt41(EXCEPTION_RECORD* exceptionRecord) =>
+		!OperatingSystem.IsWindows() ||
+		exceptionRecord->NumberParameters < 2 ||
+		exceptionRecord->ExceptionInformation[1] == ulong.MaxValue;
 
 	private unsafe bool TryRecoverGuestInt41(uint exceptionCode, void* contextRecord, ulong rip)
 	{

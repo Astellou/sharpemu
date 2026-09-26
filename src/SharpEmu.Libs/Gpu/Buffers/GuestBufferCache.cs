@@ -126,10 +126,9 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
     // A CPU write fault: true when the range is tracked and any GPU data reached guest memory.
     bool IGuestBufferStore.MarkCpuWrite(ulong address, ulong size)
     {
-        var completed = true;
-        var tracked = _tracker.InvalidateRegion(address, size,
-            () => completed &= ReadMemoryOrAwaitShutdown(address, size, isWrite: true,
-                GuestMemoryProfile.ReadbackSource.CpuWriteInvalidation));
+        var tracked = _tracker.InvalidateRegion(address, size, out var needsGpuFlush);
+        var completed = !needsGpuFlush || ReadMemoryOrAwaitShutdown(address, size, isWrite: true,
+            GuestMemoryProfile.ReadbackSource.CpuWriteInvalidation);
         if (GuestGpuMemoryHook.Traces(address, size))
             GuestGpuMemoryHook.Trace(address, size, $"buffer-write tracked={tracked} completed={completed}");
         return tracked && completed;
@@ -139,7 +138,12 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
         TrySynchronizeCpuRead(address, size, GuestMemoryProfile.ReadbackSource.CpuReadSynchronization);
 
     public bool TrySynchronizeCpuRead(ulong address, ulong size, GuestMemoryProfile.ReadbackSource source) =>
-        !_tracker.HasGpuDirtyPages(address, size) || ReadMemoryOrAwaitShutdown(address, size, isWrite: false, source);
+        !_tracker.MayHaveGpuDirtyPages(address, size) ||
+        !_tracker.HasGpuDirtyPages(address, size) ||
+        ReadMemoryOrAwaitShutdown(address, size, isWrite: false, source);
+
+    // Lock-free on the GPU queue thread; see GuestPageTracker.MayHaveGpuDirtyPages.
+    public bool MayHaveGpuDirtyPages(ulong address, ulong size) => _tracker.MayHaveGpuDirtyPages(address, size);
 
     // A CPU read fault: GPU-dirty pages download through the worker first.
     public bool DownloadToCpu(ulong address, ulong size)
@@ -235,6 +239,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
         _ = SynchronizeBuffer(buffer, guestAddress, size, isWritten, isTexelBuffer, preserveCpuWriteHotPages: false);
         if (isWritten)
         {
+            buffer.NoteGpuWrite();
             _gpuModifiedRanges.Add(guestAddress, size);
         }
 
@@ -700,27 +705,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
             return;
         }
 
-        var buffer = _registry.GetBuffer(FindBuffer(guestAddress, size));
-
-        // Widen nearby CPU reads so they share one GPU drain.
-        const ulong windowSize = 512 * 1024;
-        var bufferEnd = buffer.CpuAddress + buffer.Size;
-        var windowBegin = Math.Max(guestAddress & ~(windowSize - 1), buffer.CpuAddress);
-        var windowEnd = Math.Min(Math.Max(windowBegin + windowSize, guestAddress + size), bufferEnd);
-
-        var copies = new List<DownloadPiece>();
-        _tracker.ForEachDownloadRange(
-            windowBegin,
-            windowEnd - windowBegin,
-            clear: false,
-            (address, bytes) => _tracker.ValidateGpuDirtyPages(_gpuModifiedRanges, address, bytes, "memory invalidation"),
-            (address, bytes) =>
-            {
-                foreach (var range in _gpuModifiedRanges.GetOverlappingRanges(address, bytes))
-                {
-                    copies.Add(new DownloadPiece(buffer, buffer.Offset(range.Address), range.Address, range.Size));
-                }
-            });
+        var copies = CollectReadbackWindow(guestAddress, size, out var windowBegin, out var windowEnd);
         if (copies.Count != 0)
         {
             DownloadBufferMemory(copies);
@@ -739,6 +724,32 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
             GuestMemoryProfile.RecordBufferReadback(windowBegin, windowEnd - windowBegin, isWrite, downloadedBytes,
                 System.Diagnostics.Stopwatch.GetTimestamp() - readbackStarted, source);
         }
+    }
+
+    // The GPU-modified ranges to download for a read of the range, widened to a window so
+    // nearby CPU reads share one GPU drain.
+    private List<DownloadPiece> CollectReadbackWindow(ulong guestAddress, ulong size, out ulong windowBegin, out ulong windowEnd)
+    {
+        var buffer = _registry.GetBuffer(FindBuffer(guestAddress, size));
+        const ulong windowSize = 512 * 1024;
+        var bufferEnd = buffer.CpuAddress + buffer.Size;
+        windowBegin = Math.Max(guestAddress & ~(windowSize - 1), buffer.CpuAddress);
+        windowEnd = Math.Min(Math.Max(windowBegin + windowSize, guestAddress + size), bufferEnd);
+
+        var copies = new List<DownloadPiece>();
+        _tracker.ForEachDownloadRange(
+            windowBegin,
+            windowEnd - windowBegin,
+            clear: false,
+            (address, bytes) => _tracker.ValidateGpuDirtyPages(_gpuModifiedRanges, address, bytes, "memory invalidation"),
+            (address, bytes) =>
+            {
+                foreach (var range in _gpuModifiedRanges.GetOverlappingRanges(address, bytes))
+                {
+                    copies.Add(new DownloadPiece(buffer, buffer.Offset(range.Address), range.Address, range.Size));
+                }
+            });
+        return copies;
     }
 
     private void CollectDirtyPieces(GpuBuffer buffer, List<DownloadPiece> copies, string operation)
@@ -847,9 +858,24 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
         }
     }
 
+    // Set when a second queue can copy readbacks; null keeps every readback on the main queue.
+    internal VulkanAsyncReadback? AsyncReadback { get; set; }
+
+    private const ulong AsyncReadbackLimit = 64UL << 20;
+
     // Packs pieces into the download ring, waits for the copy, then writes each through the backing alias.
     private void DownloadBufferMemory(List<DownloadPiece> copies)
     {
+        if (TryDownloadAsync(copies))
+        {
+            foreach (var copy in copies)
+            {
+                _gpuModifiedRanges.Remove(copy.Address, copy.Size);
+            }
+
+            return;
+        }
+
         var batch = new List<PlannedDownload>();
         var planner = new BufferDownloadBatchPlanner(_download.Size);
         foreach (var piece in copies)
@@ -882,6 +908,58 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
         {
             _gpuModifiedRanges.Remove(copy.Address, copy.Size);
         }
+    }
+
+    // Copies the pieces on the readback queue after only the tick that last wrote their
+    // buffers, instead of appending the copy to the main queue and draining all of it.
+    private bool TryDownloadAsync(List<DownloadPiece> copies)
+    {
+        if (AsyncReadback is not { } readback || copies.Count == 0)
+        {
+            return false;
+        }
+
+        var waitTick = 0UL;
+        var total = 0UL;
+        foreach (var copy in copies)
+        {
+            var written = copy.Buffer.LastGpuWriteTick;
+            // A GPU-modified range with no recorded writer: keep the conservative path.
+            if (written == 0)
+            {
+                return false;
+            }
+
+            waitTick = Math.Max(waitTick, written);
+            total += copy.Size;
+        }
+
+        if (total > AsyncReadbackLimit)
+        {
+            return false;
+        }
+
+        // The last writer is still in the buffer being recorded; submit it (without
+        // waiting) so the readback queue has a signal to wait for.
+        if (waitTick >= _scheduler.CurrentTick)
+        {
+            _scheduler.Flush();
+        }
+
+        var pieces = new ReadbackPiece[copies.Count];
+        for (var index = 0; index < pieces.Length; index++)
+        {
+            pieces[index] = new ReadbackPiece(copies[index].Buffer, copies[index].SourceOffset, copies[index].Size);
+        }
+
+        readback.Read(pieces, waitTick, (index, bytes) =>
+        {
+            if (!_backing.TryWriteBacking(copies[index].Address, bytes))
+            {
+                throw SubmissionScheduler.Fatal($"Could not write the required direct backing: addr=0x{copies[index].Address:X16} size=0x{(ulong)bytes.Length:X16}");
+            }
+        });
+        return true;
     }
 
     private void FlushDownloads(List<PlannedDownload> batch, ulong packedSize)
@@ -1011,6 +1089,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
             preserveCpuWriteHotPages);
         if (source != null)
         {
+            buffer.NoteGpuWrite();
             var command = _scheduler.Current;
             command.EndRendering();
             var native = new CommandBuffer(command.Handle);
@@ -1054,7 +1133,13 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
 
         if (isTexelBuffer && !isWritten)
         {
-            return RequireImageCache().TrySynchronizeBufferFromImage(buffer, guestAddress, size);
+            var copiedFromImage = RequireImageCache().TrySynchronizeBufferFromImage(buffer, guestAddress, size);
+            if (copiedFromImage)
+            {
+                buffer.NoteGpuWrite();
+            }
+
+            return copiedFromImage;
         }
 
         return false;

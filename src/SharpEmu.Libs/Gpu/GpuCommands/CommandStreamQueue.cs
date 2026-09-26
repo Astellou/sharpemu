@@ -43,6 +43,11 @@ public sealed class CommandStreamQueue
     private ulong _submitId;
     private ulong _lastCompletedGpuTick;
     private int _doneCount;
+    // Submissions ever accepted and ever finished (or dropped), for the frame run-ahead.
+    private ulong _enqueuedTotal;
+    private ulong _finishedTotal;
+    // _enqueuedTotal at each of the last frame boundaries, oldest first.
+    private readonly Queue<ulong> _frameMarks = new();
     private IdleOutcome _outcome = IdleOutcome.Completed;
     private Thread? _processingThread;
 
@@ -191,28 +196,72 @@ public sealed class CommandStreamQueue
 
         _queues[submission.QueueId].AddLast(submission);
         _submissionCount++;
+        _enqueuedTotal++;
         if (submission.Kind != CommandSubmissionKind.FlipPreparation)
             SubmissionFlowProfile.Record(SubmissionFlowProfile.EventKind.Enqueued, submission.QueueId,
                 submission.SubmissionId, submission.Address, submission.DwordCount, _submissionCount);
         Monitor.PulseAll(_gate);
     }
 
-    // Marks the frame boundary; from another thread it first waits for the queue to drain.
+    // How many earlier frames may still be waiting for the GPU worker when the guest
+    // reaches a frame boundary. 0 drains the queue at every boundary.
+    // SHARPEMU_FRAME_RUNAHEAD=0 selects that. Two frames hang Astro Bot at startup,
+    // so the setting stops at one.
+    public static readonly int DefaultFrameRunAhead = ParseFrameRunAhead();
+
+    public int FrameRunAhead { get; init; } = DefaultFrameRunAhead;
+
+    private static int ParseFrameRunAhead() =>
+        int.TryParse(Environment.GetEnvironmentVariable("SHARPEMU_FRAME_RUNAHEAD"), out var frames) && frames >= 0
+            ? Math.Min(frames, 1)
+            : 1;
+
+    // Marks the frame boundary. From another thread it first waits until at most
+    // FrameRunAhead earlier frames are still unprocessed, so the guest can build the next
+    // frame while the worker records this one without running away from it.
     public IdleOutcome Done()
     {
         var outcome = IdleOutcome.Completed;
         if (_processingThread != Thread.CurrentThread)
         {
-            outcome = WaitForIdle();
+            outcome = FrameRunAhead == 0 ? WaitForIdle() : WaitForFrameRunAhead();
         }
 
         lock (_gate)
         {
             _graphicsDone = true;
             _doneCount++;
+            if (FrameRunAhead != 0)
+            {
+                _frameMarks.Enqueue(_enqueuedTotal);
+                while (_frameMarks.Count > FrameRunAhead)
+                {
+                    _frameMarks.Dequeue();
+                }
+            }
         }
 
         return outcome;
+    }
+
+    // Returns once the frame FrameRunAhead boundaries back has been processed.
+    private IdleOutcome WaitForFrameRunAhead()
+    {
+        lock (_gate)
+        {
+            if (_frameMarks.Count < FrameRunAhead)
+            {
+                return _outcome;
+            }
+
+            var mark = _frameMarks.Peek();
+            while (_outcome == IdleOutcome.Completed && _finishedTotal < mark)
+            {
+                Monitor.Wait(_gate);
+            }
+
+            return _outcome;
+        }
     }
 
     // Returns once nothing is pending; a cancelled or failed queue reports that instead.
@@ -397,6 +446,7 @@ public sealed class CommandStreamQueue
                 }
 
                 result = SliceResult.Completed;
+                _finishedTotal++;
             }
 
             _processing = false;
@@ -526,6 +576,7 @@ public sealed class CommandStreamQueue
                 if (queue.First is { } head && head.Value.Blocked)
                 {
                     _submissionCount -= queue.Count;
+                    _finishedTotal += (ulong)queue.Count;
                     queue.Clear();
                     _outcome = IdleOutcome.Cancelled;
                 }
@@ -630,5 +681,6 @@ public sealed class CommandStreamQueue
         }
 
         _submissionCount = 0;
+        _finishedTotal = _enqueuedTotal;
     }
 }

@@ -16,7 +16,7 @@ public sealed class RuntimeValueEvaluator
     private readonly IReadOnlyList<byte> _cleanFlatSlots;
     private readonly RuntimeValueEvaluator? _cleanEvaluator;
     private readonly ScalarValue? _activeMask;
-    private readonly Dictionary<ScalarValue, ulong> _cache;
+    private readonly ScalarValueCache _cache;
     private readonly List<ScalarValue> _visiting;
 
     public RuntimeValueEvaluator(
@@ -25,7 +25,7 @@ public sealed class RuntimeValueEvaluator
         IReadOnlyList<byte>? cleanFlatSlots = null,
         RuntimeValueEvaluator? cleanEvaluator = null,
         ScalarValue? activeMask = null)
-        : this(plan, inputs, cleanFlatSlots, cleanEvaluator, activeMask, [], [])
+        : this(plan, inputs, cleanFlatSlots, cleanEvaluator, activeMask, new ScalarValueCache(), [])
     {
     }
 
@@ -46,7 +46,7 @@ public sealed class RuntimeValueEvaluator
         IReadOnlyList<byte>? cleanFlatSlots,
         RuntimeValueEvaluator? cleanEvaluator,
         ScalarValue? activeMask,
-        Dictionary<ScalarValue, ulong> cache,
+        ScalarValueCache cache,
         List<ScalarValue> visiting)
     {
         _cache = cache;

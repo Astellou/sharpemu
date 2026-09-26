@@ -60,10 +60,19 @@ public static class ShaderIdentity
             return declaredHash;
         }
 
-        var hash = new XxHash3();
+        // Shaders without a declared hash are rehashed on every draw, so the hasher and
+        // the code buffer are reused per thread instead of allocated per call.
+        var hash = _hasher ??= new XxHash3();
+        hash.Reset();
         foreach (var (address, sizeBytes) in ranges)
         {
-            var code = new byte[sizeBytes];
+            var buffer = _codeBuffer;
+            if (buffer is null || buffer.Length < sizeBytes)
+            {
+                buffer = _codeBuffer = new byte[Math.Max(sizeBytes, 4096u)];
+            }
+
+            var code = buffer.AsSpan(0, (int)sizeBytes);
             if (!memory.TryRead(address, code))
             {
                 throw Scheduling.SubmissionScheduler.Fatal($"The shader code is unreadable: label={label} shader=0x{address:X16} size=0x{sizeBytes:X8}.");
@@ -74,4 +83,10 @@ public static class ShaderIdentity
 
         return hash.GetCurrentHashAsUInt64();
     }
+
+    [ThreadStatic]
+    private static XxHash3? _hasher;
+
+    [ThreadStatic]
+    private static byte[]? _codeBuffer;
 }
