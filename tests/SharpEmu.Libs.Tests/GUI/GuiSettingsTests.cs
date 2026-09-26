@@ -93,6 +93,8 @@ public sealed class GuiSettingsTests
 
         Assert.Equal("Info", settings.LogLevel);
         Assert.Equal("en", settings.Language);
+        Assert.Equal("PS5", settings.ConsoleType);
+        Assert.Equal("EnglishUS", settings.ConsoleLanguage);
         Assert.Equal("1525606762248540221", settings.DiscordClientId);
         Assert.Empty(settings.GameFolders);
         Assert.Empty(settings.ExcludedGames);
@@ -126,6 +128,20 @@ public sealed class GuiSettingsTests
         Assert.Equal("Auto", settings.HdrMode);
         Assert.Equal(0, settings.DisplayIndex);
         Assert.Equal(1000, settings.RefreshRate);
+    }
+
+    [Fact]
+    public void NormalizeFromJson_ConsoleValuesNormalizeAndPreserveValidLanguage()
+    {
+        var invalid = GuiSettings.NormalizeFromJson(
+            """{ "ConsoleType": "ps6", "ConsoleLanguage": "klingon" }""");
+        var turkish = GuiSettings.NormalizeFromJson(
+            """{ "ConsoleType": "ps5", "ConsoleLanguage": "turkish" }""");
+
+        Assert.Equal("PS5", invalid.ConsoleType);
+        Assert.Equal("EnglishUS", invalid.ConsoleLanguage);
+        Assert.Equal("PS5", turkish.ConsoleType);
+        Assert.Equal("Turkish", turkish.ConsoleLanguage);
     }
 
     [Theory]

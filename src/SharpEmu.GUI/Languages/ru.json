@@ -69,6 +69,11 @@
   "Options.Section.Display": "ЭКРАН",
   "Options.Graphics": "Графика",
 
+  "Options.Console.Type.Label": "Консоль",
+  "Options.Console.Type.Desc": "Модель консоли, сообщаемая играм.",
+  "Options.Console.Language.Label": "Язык консоли",
+  "Options.Console.Language.Desc": "Системный язык, сообщаемый играм.",
+
   "Options.WindowMode.Label": "Режим окна",
   "Options.WindowMode.Desc": "Обычное окно, безрамочный режим рабочего стола или эксклюзивный полноэкранный режим.",
   "Options.WindowMode.Windowed": "Оконный",

@@ -48,6 +48,44 @@ public partial class MainWindow : Window
     [
         LocalizedChoice.FromKey("Native", "Options.CpuEngine.Native"),
     ];
+    private readonly LocalizedChoice[] _consoleTypeChoices =
+    [
+        LocalizedChoice.Literal("PS5", "PlayStation 5"),
+    ];
+    private readonly LocalizedChoice[] _consoleLanguageChoices =
+    [
+        LocalizedChoice.Literal("Japanese", "日本語"),
+        LocalizedChoice.Literal("EnglishUS", "English (United States)"),
+        LocalizedChoice.Literal("French", "Français"),
+        LocalizedChoice.Literal("SpanishSpain", "Español (España)"),
+        LocalizedChoice.Literal("German", "Deutsch"),
+        LocalizedChoice.Literal("Italian", "Italiano"),
+        LocalizedChoice.Literal("Dutch", "Nederlands"),
+        LocalizedChoice.Literal("PortuguesePortugal", "Português (Portugal)"),
+        LocalizedChoice.Literal("Russian", "Русский"),
+        LocalizedChoice.Literal("Korean", "한국어"),
+        LocalizedChoice.Literal("ChineseTraditional", "繁體中文"),
+        LocalizedChoice.Literal("ChineseSimplified", "简体中文"),
+        LocalizedChoice.Literal("Finnish", "Suomi"),
+        LocalizedChoice.Literal("Swedish", "Svenska"),
+        LocalizedChoice.Literal("Danish", "Dansk"),
+        LocalizedChoice.Literal("Norwegian", "Norsk"),
+        LocalizedChoice.Literal("Polish", "Polski"),
+        LocalizedChoice.Literal("PortugueseBrazil", "Português (Brasil)"),
+        LocalizedChoice.Literal("EnglishUK", "English (United Kingdom)"),
+        LocalizedChoice.Literal("Turkish", "Türkçe"),
+        LocalizedChoice.Literal("SpanishLatinAmerica", "Español (Latinoamérica)"),
+        LocalizedChoice.Literal("Arabic", "العربية"),
+        LocalizedChoice.Literal("FrenchCanada", "Français (Canada)"),
+        LocalizedChoice.Literal("Czech", "Čeština"),
+        LocalizedChoice.Literal("Hungarian", "Magyar"),
+        LocalizedChoice.Literal("Greek", "Ελληνικά"),
+        LocalizedChoice.Literal("Romanian", "Română"),
+        LocalizedChoice.Literal("Thai", "ไทย"),
+        LocalizedChoice.Literal("Vietnamese", "Tiếng Việt"),
+        LocalizedChoice.Literal("Indonesian", "Bahasa Indonesia"),
+        LocalizedChoice.Literal("Ukrainian", "Українська"),
+    ];
     private readonly LocalizedChoice[] _logLevelChoices =
     [
         LocalizedChoice.FromKey("Trace", "Options.LogLevel.Trace"),
@@ -161,6 +199,8 @@ public partial class MainWindow : Window
         string EbootPath,
         string DisplayName,
         string? TitleId,
+        string ConsoleType,
+        string ConsoleLanguage,
         EffectiveLaunchSettings Settings,
         SharpEmuRuntimeOptions RuntimeOptions);
 
@@ -275,6 +315,10 @@ public partial class MainWindow : Window
         };
         AutoUpdateToggle.IsCheckedChanged += (_, _) =>
             _settings.CheckForUpdatesOnStartup = AutoUpdateToggle.IsChecked == true;
+        ConsoleTypeBox.SelectionChanged += (_, _) =>
+            _settings.ConsoleType = SelectedComboText(ConsoleTypeBox, "PS5");
+        ConsoleLanguageBox.SelectionChanged += (_, _) =>
+            _settings.ConsoleLanguage = SelectedComboText(ConsoleLanguageBox, "EnglishUS");
         WindowModeBox.SelectionChanged += (_, _) => _settings.WindowMode = SelectedComboText(WindowModeBox, "Windowed");
         DisplayBox.SelectionChanged += (_, _) => OnHostDisplayChanged();
         ResolutionBox.SelectionChanged += (_, _) => OnHostResolutionChanged();
@@ -1200,6 +1244,8 @@ public partial class MainWindow : Window
     private void InitializeLocalizedChoiceBoxes()
     {
         CpuEngineBox.ItemsSource = _cpuEngineChoices;
+        ConsoleTypeBox.ItemsSource = _consoleTypeChoices;
+        ConsoleLanguageBox.ItemsSource = _consoleLanguageChoices;
         LogLevelBox.ItemsSource = _logLevelChoices;
         WindowModeBox.ItemsSource = _windowModeChoices;
         ScalingModeBox.ItemsSource = _scalingModeChoices;
@@ -1212,6 +1258,8 @@ public partial class MainWindow : Window
     private void RefreshLocalizedChoices()
     {
         RefreshChoices(_cpuEngineChoices);
+        RefreshChoices(_consoleTypeChoices);
+        RefreshChoices(_consoleLanguageChoices);
         RefreshChoices(_logLevelChoices);
         RefreshChoices(_windowModeChoices);
         RefreshChoices(_scalingModeChoices);
@@ -1232,6 +1280,10 @@ public partial class MainWindow : Window
     private void ApplySettingsToControls()
     {
         CpuEngineBox.SelectedIndex = 0;
+        ConsoleTypeBox.SelectedIndex = 0;
+        ConsoleLanguageBox.SelectedIndex = ChoiceIndex(
+            _settings.ConsoleLanguage,
+            _consoleLanguageChoices.Select(choice => choice.Value).ToArray());
         LogLevelBox.SelectedIndex = _settings.LogLevel.ToLowerInvariant() switch
         {
             "trace" => 0,
@@ -2545,6 +2597,8 @@ public partial class MainWindow : Window
             Path.GetFullPath(ebootPath),
             displayName,
             _runningGameTitleId,
+            _settings.ConsoleType,
+            _settings.ConsoleLanguage,
             effective,
             runtimeOptions);
 
@@ -2711,6 +2765,8 @@ public partial class MainWindow : Window
         {
             "--cpu-engine=native",
             $"--log-level={launch.Settings.LogLevel}",
+            $"--console={launch.ConsoleType.ToLowerInvariant()}",
+            $"--console-language={launch.ConsoleLanguage}",
         };
         if (launch.RuntimeOptions.StrictDynlibResolution)
         {

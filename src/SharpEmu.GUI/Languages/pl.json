@@ -73,6 +73,11 @@
   "Options.Section.Display": "WYŚWIETLANIE",
   "Options.Graphics": "Grafika",
 
+  "Options.Console.Type.Label": "Konsola",
+  "Options.Console.Type.Desc": "Model konsoli zgłaszany grom.",
+  "Options.Console.Language.Label": "Język konsoli",
+  "Options.Console.Language.Desc": "Język systemu zgłaszany grom.",
+
   "Options.WindowMode.Label": "Tryb okna",
   "Options.WindowMode.Desc": "Zwykłe okno, bezramkowe na pulpicie lub pełny ekran wyłączny.",
   "Options.WindowMode.Windowed": "W oknie",

@@ -1000,7 +1000,7 @@ internal static partial class Program
 
     private static void PrintUsage()
     {
-        Log.Info("Usage: SharpEmu.CLI [--strict] [--trace-imports[=N]] [--cpu-engine=<native>] [--log-level=<level>] [--log-file[=<path>]] [--window-mode=<windowed|borderless|exclusive>] [--resolution=<WIDTHxHEIGHT>] [--display=<N>] [--refresh-rate=<HZ>] [--scaling=<fit|cover|stretch|integer>] [--vsync=<on|off>] [--hdr=<auto|on|off>] [--overlay=<on|off>] [--overlay-mode=<full|minimal|titlebar>] [--overlay-corner=<topleft|topright|bottomright|bottomleft>] [--debug-server[=host:port]] <path-to-eboot.bin>");
+        Log.Info("Usage: SharpEmu.CLI [--strict] [--trace-imports[=N]] [--cpu-engine=<native>] [--console=<ps5>] [--console-language=<language>] [--log-level=<level>] [--log-file[=<path>]] [--window-mode=<windowed|borderless|exclusive>] [--resolution=<WIDTHxHEIGHT>] [--display=<N>] [--refresh-rate=<HZ>] [--scaling=<fit|cover|stretch|integer>] [--vsync=<on|off>] [--hdr=<auto|on|off>] [--overlay=<on|off>] [--overlay-mode=<full|minimal|titlebar>] [--overlay-corner=<topleft|topright|bottomright|bottomleft>] [--debug-server[=host:port]] <path-to-eboot.bin>");
         Log.Info(@"Example: SharpEmu.CLI --cpu-engine=native --trace-imports=64 --log-level=debug --log-file ""E:\Games\...\eboot.bin""");
         Log.Info("Debug server: --debug-server starts a live debug listener (default 127.0.0.1:5714); connect with SharpEmu.DebugClient.");
     }
@@ -1062,6 +1062,7 @@ internal static partial class Program
         var strictDynlibResolution = false;
         var importTraceLimit = 0;
         var cpuEngine = CpuExecutionEngine.NativeOnly;
+        var systemLanguage = 1;
         HostWindowMode? windowModeOverride = null;
         HostScalingMode? scalingModeOverride = null;
         int? windowWidthOverride = null;
@@ -1080,6 +1081,26 @@ internal static partial class Program
         for (var i = 0; i < args.Length; i++)
         {
             var argument = args[i];
+            if (TrySplitOption(argument, "--console", out var consoleText))
+            {
+                if (!string.Equals(consoleText, "ps5", StringComparison.OrdinalIgnoreCase))
+                {
+                    ebootPath = string.Empty;
+                    runtimeOptions = default;
+                    return false;
+                }
+                continue;
+            }
+            if (TrySplitOption(argument, "--console-language", out var consoleLanguageText))
+            {
+                if (!TryParseSystemLanguage(consoleLanguageText, out systemLanguage))
+                {
+                    ebootPath = string.Empty;
+                    runtimeOptions = default;
+                    return false;
+                }
+                continue;
+            }
             if (TrySplitOption(argument, "--window-mode", out var windowModeText))
             {
                 if (!TryParseWindowMode(windowModeText, out var windowMode))
@@ -1351,6 +1372,7 @@ internal static partial class Program
         runtimeOptions = new SharpEmuRuntimeOptions
         {
             CpuEngine = cpuEngine,
+            SystemLanguage = systemLanguage,
             StrictDynlibResolution = strictDynlibResolution,
             ImportTraceLimit = importTraceLimit,
         };
@@ -1443,6 +1465,46 @@ internal static partial class Program
             _ => (HostWindowMode)(-1),
         };
         return Enum.IsDefined(mode);
+    }
+
+    private static bool TryParseSystemLanguage(string value, out int language)
+    {
+        language = value.ToLowerInvariant() switch
+        {
+            "japanese" => 0,
+            "englishus" => 1,
+            "french" => 2,
+            "spanishspain" => 3,
+            "german" => 4,
+            "italian" => 5,
+            "dutch" => 6,
+            "portugueseportugal" => 7,
+            "russian" => 8,
+            "korean" => 9,
+            "chinesetraditional" => 10,
+            "chinesesimplified" => 11,
+            "finnish" => 12,
+            "swedish" => 13,
+            "danish" => 14,
+            "norwegian" => 15,
+            "polish" => 16,
+            "portuguesebrazil" => 17,
+            "englishuk" => 18,
+            "turkish" => 19,
+            "spanishlatinamerica" => 20,
+            "arabic" => 21,
+            "frenchcanada" => 22,
+            "czech" => 23,
+            "hungarian" => 24,
+            "greek" => 25,
+            "romanian" => 26,
+            "thai" => 27,
+            "vietnamese" => 28,
+            "indonesian" => 29,
+            "ukrainian" => 30,
+            _ => -1,
+        };
+        return language >= 0;
     }
 
     private static bool TryParseScalingMode(string value, out HostScalingMode mode)

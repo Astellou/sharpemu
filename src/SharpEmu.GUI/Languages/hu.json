@@ -206,6 +206,11 @@
   "Updater.Status.ChecksumFailed": "A letöltött frissítés nem ment át az SHA-256-ellenőrzésen.",
   "Updater.Status.Unsupported": "Az automatikus frissítéshez Windows, Linux vagy macOS x64 build szükséges.",
   "Options.Graphics": "Grafika",
+
+  "Options.Console.Type.Label": "Konzol",
+  "Options.Console.Type.Desc": "A játékoknak jelentett konzolmodell.",
+  "Options.Console.Language.Label": "Konzol nyelve",
+  "Options.Console.Language.Desc": "A játékoknak jelentett rendszer nyelve.",
   "Options.Section.Rendering": "RENDERELÉS",
   "Options.Section.Display": "KIJELZŐ",
   "Options.WindowMode.Label": "Ablakmód",

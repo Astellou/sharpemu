@@ -54,6 +54,10 @@ public sealed class GuiSettings
     /// <summary>UI language, matching a file code under Languages/ (e.g. "en", "tr").</summary>
     public string Language { get; set; } = "en";
 
+    public string ConsoleType { get; set; } = "PS5";
+
+    public string ConsoleLanguage { get; set; } = "EnglishUS";
+
     /// <summary>Default text-entry profile exposed to games.</summary>
     public string DefaultProfile { get; set; } = "Sharp";
 
@@ -144,6 +148,40 @@ public sealed class GuiSettings
             legacyProfile is { Length: 2 } ? legacyProfile[1] : settings.DefaultProfile);
         settings.DiscordClientId ??= "1525606762248540221";
         settings.LibraryLayout = NormalizeChoice(settings.LibraryLayout, "Carousel", "Grid");
+        settings.ConsoleType = NormalizeChoice(settings.ConsoleType, "PS5");
+        settings.ConsoleLanguage = NormalizeChoice(
+            settings.ConsoleLanguage,
+            "EnglishUS",
+            "Japanese",
+            "French",
+            "SpanishSpain",
+            "German",
+            "Italian",
+            "Dutch",
+            "PortuguesePortugal",
+            "Russian",
+            "Korean",
+            "ChineseTraditional",
+            "ChineseSimplified",
+            "Finnish",
+            "Swedish",
+            "Danish",
+            "Norwegian",
+            "Polish",
+            "PortugueseBrazil",
+            "EnglishUK",
+            "Turkish",
+            "SpanishLatinAmerica",
+            "Arabic",
+            "FrenchCanada",
+            "Czech",
+            "Hungarian",
+            "Greek",
+            "Romanian",
+            "Thai",
+            "Vietnamese",
+            "Indonesian",
+            "Ukrainian");
         settings.WindowMode = NormalizeChoice(settings.WindowMode, "Windowed", "Borderless", "Exclusive");
         settings.Resolution = NormalizeResolution(settings.Resolution);
         settings.ScalingMode = NormalizeChoice(settings.ScalingMode, "Fit", "Cover", "Stretch", "Integer");

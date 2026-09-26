@@ -59,6 +59,11 @@
   "Options.Section.Display": "Ekran",
   "Options.Graphics": "Qrafika",
 
+  "Options.Console.Type.Label": "Konsol",
+  "Options.Console.Type.Desc": "Oyunlara bildirilən konsol modeli.",
+  "Options.Console.Language.Label": "Konsol dili",
+  "Options.Console.Language.Desc": "Oyunlara bildirilən sistem dili.",
+
   "Options.RenderResolution.Label": "Daxili təsvir ölçüsü",
   "Options.RenderResolution.Desc": "Ekrandan kənar təsvir hədəflərini ilkin ölçüdən aşağı ölçüdə yaradıb göstərərkən böyüdün. Aşağı dəyərlər təsvir keyfiyyətini azaldaraq GPU yükünü yüngülləşdirir; növbəti işə salınmada qüvvəyə minir.",
   "Options.RenderResolution.Native": "100% (ilkin)",

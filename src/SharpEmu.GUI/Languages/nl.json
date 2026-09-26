@@ -205,6 +205,11 @@
   "Updater.Status.ChecksumFailed": "De gedownloade update is niet door de SHA-256-verificatie gekomen.",
   "Updater.Status.Unsupported": "Automatisch updaten vereist een x64-build voor Windows, Linux of macOS.",
   "Options.Graphics": "Grafisch",
+
+  "Options.Console.Type.Label": "Console",
+  "Options.Console.Type.Desc": "Consolemodel dat aan games wordt gemeld.",
+  "Options.Console.Language.Label": "Consoletaal",
+  "Options.Console.Language.Desc": "Systeemtaal die aan games wordt gemeld.",
   "Options.Section.Rendering": "RENDERING",
   "Options.Section.Display": "BEELDSCHERM",
   "Options.WindowMode.Label": "Venstermodus",

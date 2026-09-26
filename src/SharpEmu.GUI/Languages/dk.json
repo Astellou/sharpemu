@@ -205,6 +205,11 @@
   "Updater.Status.ChecksumFailed": "Den downloadede opdatering bestod ikke SHA-256-verifikationen.",
   "Updater.Status.Unsupported": "Automatisk opdatering kræver et x64-build til Windows, Linux eller macOS.",
   "Options.Graphics": "Grafik",
+
+  "Options.Console.Type.Label": "Konsol",
+  "Options.Console.Type.Desc": "Konsolmodel der rapporteres til spil.",
+  "Options.Console.Language.Label": "Konsolsprog",
+  "Options.Console.Language.Desc": "Systemsprog der rapporteres til spil.",
   "Options.Section.Rendering": "GENGIVELSE",
   "Options.Section.Display": "SKÆRM",
   "Options.WindowMode.Label": "Vinduestilstand",

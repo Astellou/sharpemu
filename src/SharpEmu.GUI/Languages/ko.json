@@ -205,6 +205,11 @@
   "Updater.Status.ChecksumFailed": "다운로드한 업데이트가 SHA-256 검증에 실패했습니다.",
   "Updater.Status.Unsupported": "자동 업데이트에는 Windows, Linux 또는 macOS x64 빌드가 필요합니다.",
   "Options.Graphics": "그래픽",
+
+  "Options.Console.Type.Label": "콘솔",
+  "Options.Console.Type.Desc": "게임에 보고할 콘솔 모델입니다.",
+  "Options.Console.Language.Label": "콘솔 언어",
+  "Options.Console.Language.Desc": "게임에 보고할 시스템 언어입니다.",
   "Options.Section.Rendering": "렌더링",
   "Options.Section.Display": "디스플레이",
   "Options.WindowMode.Label": "창 모드",
