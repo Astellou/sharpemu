@@ -688,6 +688,7 @@ internal static unsafe partial class VulkanVideoPresenter
         }
 
         private bool _supportsFragmentShaderBarycentric;
+        private bool _supportsPerVertexPixelInputs;
         private const string FragmentShaderBarycentricExtensionName = "VK_KHR_fragment_shader_barycentric";
 
         private void CreateDevice()
@@ -798,6 +799,10 @@ internal static unsafe partial class VulkanVideoPresenter
                 _vk.GetPhysicalDeviceFeatures2(_physicalDevice, &barycentricQuery);
                 _supportsFragmentShaderBarycentric = barycentricFeatures.FragmentShaderBarycentric;
             }
+
+            // MoltenVK exposes the barycentric builtins, but SPIRV-Cross rejects PerVertexKHR inputs.
+            _supportsPerVertexPixelInputs = _supportsFragmentShaderBarycentric &&
+                !IsDeviceExtensionAvailable(PortabilitySubsetExtensionName);
 
             var depthClipEnableFeatures = new PhysicalDeviceDepthClipEnableFeaturesEXT
             {
