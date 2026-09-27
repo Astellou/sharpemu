@@ -536,6 +536,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
 
     public void RunGarbageCollector()
     {
+        using var foreignRead = _device.Slabs.BeginForeignRead();
         ProcessPendingFaultBuffer();
         if (!_retirementPolicy.TryBeginCollection(_registry.RegisteredBytes, out var retirement))
         {
@@ -604,6 +605,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
                 _scheduler.Finish();
             }
 
+            using var foreignRead = _device.Slabs.BeginForeignRead();
             var copies = new List<DownloadPiece>();
             var dirtyBuffers = new List<ResourceSlotIdentifier>();
             foreach (var bufferIdentifier in _registry.SnapshotRegisteredIdentifiers())
@@ -699,6 +701,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
     private void ReadMemoryOnGpu(ulong guestAddress, ulong size, bool isWrite, GuestMemoryProfile.ReadbackSource source)
     {
         using var readbackScope = GuestMemoryProfile.Measure(GuestMemoryProfile.Operation.BufferReadback);
+        using var foreignRead = _device.Slabs.BeginForeignRead();
         var readbackStarted = GuestMemoryProfile.ReadbackDetailsEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         if (isWrite && !IsRegionRegistered(guestAddress, size))
         {
@@ -1051,7 +1054,7 @@ public sealed unsafe class GuestBufferCache : IGuestBufferStore, IDisposable
 
         var bufferIdentifier = _registry.AllocateBuffer(new GpuBuffer(
             _device, _scheduler, GpuBufferUsage.DeviceLocal, overlap.Begin,
-            GpuBuffer.AllFlags | BufferUsageFlags.ShaderDeviceAddressBit, overlap.End - overlap.Begin), overlap.Begin, overlap.End - overlap.Begin);
+            GpuBuffer.AllFlags | BufferUsageFlags.ShaderDeviceAddressBit, overlap.End - overlap.Begin, allowSlab: true), overlap.Begin, overlap.End - overlap.Begin);
         foreach (var oldId in overlapping)
         {
             MergeOverlappingBuffer(bufferIdentifier, oldId, !overlap.HasStreamLeap);

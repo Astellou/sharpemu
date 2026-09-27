@@ -116,6 +116,10 @@ public static partial class Gen5SpirvTranslator
         private uint _programCounter;
         private uint _programActive;
         private uint _iterationGuard;
+        // One-lane waves only have lane 0 of each VGPR. Other lanes that the program spills
+        // SGPRs into with V_WRITELANE and reads back with V_READLANE live here, keyed by
+        // (VGPR, lane).
+        private readonly Dictionary<(uint Register, uint Lane), uint> _laneSpillSlots = new();
         private uint _globalBuffers;
         private uint _gfx10BufferFormatTable;
         private uint _storageBlockPointer;
@@ -233,7 +237,7 @@ public static partial class Gen5SpirvTranslator
                 }
 
                 var blocks = BuildBasicBlocks(_request.Program.Instructions);
-                _functionScopeState = StructuredForwardBlocks && blocks.Count != 0 && AreBranchesForwardOnly(blocks);
+                _functionScopeState = StructuredForwardBlocks && blocks.Count != 0 && TryBuildLoopRegions(blocks, out _loopLatchByHeader);
                 DeclareModule();
                 if (blocks.Count == 0)
                 {
@@ -293,31 +297,15 @@ public static partial class Gen5SpirvTranslator
 
                 if (_functionScopeState)
                 {
-                    // Every branch goes forward, so each invocation visits its blocks in
-                    // program order. Emitting them in order, each guarded by "this is the next
-                    // block", runs exactly what the dispatcher loop would. The driver then sees
-                    // straight-line code with ifs and can keep only the live guest registers in
-                    // hardware registers, where the loop keeps nearly all of them live.
-                    for (var index = 0; index < blocks.Count; index++)
+                    // Each invocation visits its blocks in program order, except for the back
+                    // edges of natural loops. Emitting the blocks in order, each guarded by "this
+                    // is the next block", and every loop as a structured SPIR-V loop runs exactly
+                    // what the dispatcher loop would. The driver then sees ifs and loops and can
+                    // keep only the live guest registers in hardware registers, where the
+                    // dispatcher keeps nearly all of them live and pays a switch per block.
+                    if (!TryEmitStructuredRange(blocks, 0, blocks.Count - 1, -1, out error))
                     {
-                        var isNext = _module.AddInstruction(
-                            SpirvOp.LogicalAnd,
-                            _boolType,
-                            Load(_boolType, _programActive),
-                            _module.AddInstruction(SpirvOp.IEqual, _boolType, Load(_uintType, _programCounter), UInt((uint)index)));
-                        var blockBody = _module.AllocateId();
-                        var blockMerge = _module.AllocateId();
-                        _module.AddStatement(SpirvOp.SelectionMerge, blockMerge, 0);
-                        _module.AddStatement(SpirvOp.BranchConditional, isNext, blockBody, blockMerge);
-                        _module.AddLabel(blockBody);
-                        if (!TryEmitBlock(blocks, index, out error))
-                        {
-                            error = $"block=0x{blocks[index].StartPc:X}: {error}";
-                            return false;
-                        }
-
-                        _module.AddStatement(SpirvOp.Branch, blockMerge);
-                        _module.AddLabel(blockMerge);
+                        return false;
                     }
 
                     _module.AddStatement(SpirvOp.Branch, loopMerge);
@@ -1016,6 +1004,29 @@ public static partial class Gen5SpirvTranslator
                 StoreS64(106, _module.Constant64(_ulongType, 0));
                 StoreS64(126, _module.Constant64(_ulongType, 1));
             }
+
+            // Primitive (NGG) vertex programs rebuild EXEC from the merged wave info in s3:
+            // vertex count in bits 0-7, primitive count in bits 8-15. Left at zero, EXEC
+            // becomes all 64 lanes, and a waterfall loop then waits forever for lanes that
+            // do not exist to clear their bits (Astro Bot intro_next froze the GPU this way).
+            if (_stage == Gen5SpirvStage.Vertex && _request.UserDataBase > 3)
+            {
+                uint laneCount;
+                if (_subgroupInvocationIdInput == 0)
+                {
+                    laneCount = UInt(1);
+                }
+                else
+                {
+                    var lanes = BooleanToWaveMask(_module.ConstantBool(true));
+                    laneCount = IAdd(
+                        _module.AddInstruction(SpirvOp.BitCount, _uintType, Narrow(lanes)),
+                        _module.AddInstruction(SpirvOp.BitCount, _uintType, Narrow(ShiftRightLogical64(lanes, _module.Constant64(_ulongType, 32)))));
+                }
+
+                StoreS(3, BitwiseOr(laneCount, ShiftLeftLogical(laneCount, UInt(8))));
+            }
+
             Store(_programCounter, UInt(0));
             Store(_programActive, _module.ConstantBool(true));
 
@@ -1351,9 +1362,14 @@ public static partial class Gen5SpirvTranslator
         private static readonly bool StructuredForwardBlocks = !string.Equals(
             Environment.GetEnvironmentVariable("SHARPEMU_STRUCTURED_FORWARD_BLOCKS"), "0", StringComparison.Ordinal);
 
-        // True when every branch of every block goes to a later block or leaves the program.
-        private bool AreBranchesForwardOnly(IReadOnlyList<ShaderBlock> blocks)
+        // The natural loops of the program: each block targeted by a backward branch heads a
+        // loop that ends at the last block branching back to it. Loops must nest; a program
+        // whose loops overlap keeps the block dispatcher.
+        private Dictionary<int, int> _loopLatchByHeader = [];
+
+        private bool TryBuildLoopRegions(IReadOnlyList<ShaderBlock> blocks, out Dictionary<int, int> latchByHeader)
         {
+            latchByHeader = [];
             for (var index = 0; index < blocks.Count; index++)
             {
                 var terminator = _request.Program.Instructions[blocks[index].EndIndex - 1];
@@ -1372,12 +1388,110 @@ public static partial class Gen5SpirvTranslator
                     continue;
                 }
 
-                if (!TryFindBlock(blocks, targetPc, out var target) || target <= index)
+                if (!TryFindBlock(blocks, targetPc, out var target))
                 {
                     return false;
                 }
+
+                if (target <= index)
+                {
+                    latchByHeader[target] = latchByHeader.TryGetValue(target, out var latch) ? Math.Max(latch, index) : index;
+                }
             }
 
+            foreach (var (outerHeader, outerLatch) in latchByHeader)
+            {
+                foreach (var (innerHeader, innerLatch) in latchByHeader)
+                {
+                    if (outerHeader < innerHeader && innerHeader <= outerLatch && innerLatch > outerLatch)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        // Emits blocks first..last in order; a nested loop header opens a structured loop.
+        private bool TryEmitStructuredRange(IReadOnlyList<ShaderBlock> blocks, int first, int last, int enclosingHeader, out string error)
+        {
+            error = string.Empty;
+            for (var index = first; index <= last;)
+            {
+                if (index != enclosingHeader && _loopLatchByHeader.TryGetValue(index, out var latch))
+                {
+                    if (!TryEmitStructuredLoop(blocks, index, latch, out error))
+                    {
+                        return false;
+                    }
+
+                    index = latch + 1;
+                    continue;
+                }
+
+                var isNext = _module.AddInstruction(
+                    SpirvOp.LogicalAnd,
+                    _boolType,
+                    Load(_boolType, _programActive),
+                    _module.AddInstruction(SpirvOp.IEqual, _boolType, Load(_uintType, _programCounter), UInt((uint)index)));
+                var blockBody = _module.AllocateId();
+                var blockMerge = _module.AllocateId();
+                _module.AddStatement(SpirvOp.SelectionMerge, blockMerge, 0);
+                _module.AddStatement(SpirvOp.BranchConditional, isNext, blockBody, blockMerge);
+                _module.AddLabel(blockBody);
+                if (!TryEmitBlock(blocks, index, out error))
+                {
+                    error = $"block=0x{blocks[index].StartPc:X}: {error}";
+                    return false;
+                }
+
+                _module.AddStatement(SpirvOp.Branch, blockMerge);
+                _module.AddLabel(blockMerge);
+                index++;
+            }
+
+            return true;
+        }
+
+        // One natural loop: the body runs its blocks in order and repeats while the next block
+        // is the header. An exit leaves the program counter past the loop (or at an outer
+        // header), so the guards after the loop pick up where the invocation continues.
+        private bool TryEmitStructuredLoop(IReadOnlyList<ShaderBlock> blocks, int header, int latch, out string error)
+        {
+            var loopHeader = _module.AllocateId();
+            var loopBody = _module.AllocateId();
+            var loopContinue = _module.AllocateId();
+            var loopMerge = _module.AllocateId();
+            _module.AddStatement(SpirvOp.Branch, loopHeader);
+            _module.AddLabel(loopHeader);
+            _module.AddStatement(SpirvOp.LoopMerge, loopMerge, loopContinue, 0);
+            _module.AddStatement(SpirvOp.Branch, loopBody);
+            _module.AddLabel(loopBody);
+            if (!TryEmitStructuredRange(blocks, header, latch, header, out error))
+            {
+                return false;
+            }
+
+            _module.AddStatement(SpirvOp.Branch, loopContinue);
+            _module.AddLabel(loopContinue);
+            var again = _module.AddInstruction(
+                SpirvOp.LogicalAnd,
+                _boolType,
+                Load(_boolType, _programActive),
+                _module.AddInstruction(SpirvOp.IEqual, _boolType, Load(_uintType, _programCounter), UInt((uint)header)));
+            if (_maxDispatcherSteps > 0)
+            {
+                // The dispatcher's safety valve, counted per loop iteration: a mistranslated
+                // exit ends the invocation instead of wedging the GPU queue.
+                var steps = IAdd(Load(_uintType, _iterationGuard), UInt(1));
+                Store(_iterationGuard, steps);
+                var withinLimit = _module.AddInstruction(SpirvOp.ULessThan, _boolType, steps, UInt((uint)_maxDispatcherSteps));
+                again = _module.AddInstruction(SpirvOp.LogicalAnd, _boolType, again, withinLimit);
+            }
+
+            _module.AddStatement(SpirvOp.BranchConditional, again, loopHeader, loopMerge);
+            _module.AddLabel(loopMerge);
             return true;
         }
 
@@ -6418,6 +6532,89 @@ public static partial class Gen5SpirvTranslator
 
             _module.AddName(_scalarRegisters, "sgpr");
             _module.AddName(_vectorRegisters, "vgpr");
+
+            foreach (var slot in FindLaneSpillSlots())
+            {
+                var variable = Variable(_uintType, _module.Constant(_uintType, 0));
+                _module.AddName(variable, $"v{slot.Register}_lane{slot.Lane}");
+                _laneSpillSlots.Add(slot, variable);
+            }
+        }
+
+        // Without subgroup operations each invocation is a one-lane wave, so a V_WRITELANE to
+        // lane N > 0 used to be dropped and V_READLANE returned lane 0. Compilers spill SGPRs
+        // (EXEC included) to VGPR lanes like this; restoring the wrong EXEC made waterfall
+        // loops spin until the dispatcher guard. Only VGPRs that are also read back get slots.
+        private List<(uint Register, uint Lane)> FindLaneSpillSlots()
+        {
+            var slots = new List<(uint Register, uint Lane)>();
+            if (UsesSubgroupOperations())
+            {
+                return slots;
+            }
+
+            var readRegisters = _request.Program.Instructions
+                .Where(static instruction => instruction.Opcode == "VReadlaneB32" &&
+                    instruction.Sources.Count > 0 &&
+                    instruction.Sources[0].Kind == Gen5OperandKind.VectorRegister)
+                .Select(static instruction => instruction.Sources[0].Value)
+                .ToHashSet();
+            foreach (var instruction in _request.Program.Instructions)
+            {
+                if (instruction.Opcode == "VWritelaneB32" &&
+                    TryGetVectorDestination(instruction, out var register) &&
+                    readRegisters.Contains(register) &&
+                    TryGetConstantLane(instruction, out var lane) &&
+                    lane != 0 &&
+                    !slots.Contains((register, lane)))
+                {
+                    slots.Add((register, lane));
+                }
+            }
+
+            return slots;
+        }
+
+        // The lane select operand (source 1) of V_READLANE/V_WRITELANE when it is a constant.
+        private bool TryGetConstantLane(Gen5ShaderInstruction instruction, out uint lane)
+        {
+            lane = 0;
+            if (instruction.Sources.Count < 2)
+            {
+                return false;
+            }
+
+            var operand = instruction.Sources[1];
+            uint value;
+            if (operand.Kind == Gen5OperandKind.LiteralConstant)
+            {
+                value = operand.Value;
+            }
+            else if (operand.Kind != Gen5OperandKind.EncodedConstant ||
+                     !TryDecodeInlineConstant(operand.Value, out value))
+            {
+                return false;
+            }
+
+            lane = value & (_waveLaneCount - 1);
+            return true;
+        }
+
+        // Folds the spill slots of register into value: selected lane == slot lane reads the slot.
+        private uint SelectLaneSpillSlot(uint register, uint selectedLane, uint value)
+        {
+            foreach (var ((slotRegister, slotLane), variable) in _laneSpillSlots)
+            {
+                if (slotRegister != register)
+                {
+                    continue;
+                }
+
+                var isSlotLane = _module.AddInstruction(SpirvOp.IEqual, _boolType, selectedLane, UInt(slotLane));
+                value = _module.AddInstruction(SpirvOp.Select, _uintType, isSlotLane, Load(_uintType, variable), value);
+            }
+
+            return value;
         }
 
         private uint ScalarPointer(uint register) =>

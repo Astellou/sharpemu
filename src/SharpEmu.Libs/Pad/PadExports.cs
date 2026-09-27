@@ -23,6 +23,7 @@ public static class PadExports
     private const int PrimaryPadHandle = 1;
     private const int ControllerInformationSize = 0x1C;
     private const int PadDataSize = 0x78;
+    private const float StandardGravity = 9.80665f;
 
     // Real firmware hands out small non-negative handles; 0 is valid. Some titles
     // (Monster Truck Championship) read pad state with handle 0, and rejecting it
@@ -37,7 +38,9 @@ public static class PadExports
     private static PadState _cachedInputState;
 
     private static bool _initialized;
-    private static int _motionSensorEnabled;
+    // Motion data is reported until a title turns it off: Astro Bot reads it for
+    // shake/tilt without ever importing scePadSetMotionSensorState.
+    private static int _motionSensorEnabled = 1;
     private static int _controlsAnnouncementLogged;
 
     [SysAbiExport(
@@ -167,6 +170,34 @@ public static class PadExports
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libScePad")]
     public static int PadSetTiltCorrectionState(CpuContext ctx)
+    {
+        var handle = unchecked((int)ctx[CpuRegister.Rdi]);
+        return IsPrimaryPadHandle(handle)
+            ? ctx.SetReturn(0)
+            : ctx.SetReturn(OrbisPadErrorInvalidHandle);
+    }
+
+    [SysAbiExport(
+        Nid = "r44mAxdSG+U",
+        ExportName = "scePadSetAngularVelocityDeadbandState",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libScePad")]
+    public static int PadSetAngularVelocityDeadbandState(CpuContext ctx)
+    {
+        var handle = unchecked((int)ctx[CpuRegister.Rdi]);
+        return IsPrimaryPadHandle(handle)
+            ? ctx.SetReturn(0)
+            : ctx.SetReturn(OrbisPadErrorInvalidHandle);
+    }
+
+    // Orientation is not tracked yet (ScePadData reports the identity quaternion),
+    // so there is nothing to reset; titles recalibrate through this on pause/resume.
+    [SysAbiExport(
+        Nid = "rIZnR6eSpvk",
+        ExportName = "scePadResetOrientation",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libScePad")]
+    public static int PadResetOrientation(CpuContext ctx)
     {
         var handle = unchecked((int)ctx[CpuRegister.Rdi]);
         return IsPrimaryPadHandle(handle)
@@ -667,9 +698,10 @@ public static class PadExports
         BinaryPrimitives.WriteSingleLittleEndian(data[0x18..], 1.0f);
         if (Volatile.Read(ref _motionSensorEnabled) != 0 && input.Motion.Available)
         {
-            BinaryPrimitives.WriteSingleLittleEndian(data[0x1C..], input.Motion.AccelerationX);
-            BinaryPrimitives.WriteSingleLittleEndian(data[0x20..], input.Motion.AccelerationY);
-            BinaryPrimitives.WriteSingleLittleEndian(data[0x24..], input.Motion.AccelerationZ);
+            // Host acceleration is m/s^2 (SDL); ScePadData.acceleration is in G.
+            BinaryPrimitives.WriteSingleLittleEndian(data[0x1C..], input.Motion.AccelerationX / StandardGravity);
+            BinaryPrimitives.WriteSingleLittleEndian(data[0x20..], input.Motion.AccelerationY / StandardGravity);
+            BinaryPrimitives.WriteSingleLittleEndian(data[0x24..], input.Motion.AccelerationZ / StandardGravity);
             BinaryPrimitives.WriteSingleLittleEndian(data[0x28..], input.Motion.AngularVelocityX);
             BinaryPrimitives.WriteSingleLittleEndian(data[0x2C..], input.Motion.AngularVelocityY);
             BinaryPrimitives.WriteSingleLittleEndian(data[0x30..], input.Motion.AngularVelocityZ);

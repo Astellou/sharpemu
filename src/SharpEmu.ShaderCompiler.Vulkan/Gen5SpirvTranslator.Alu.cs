@@ -118,6 +118,21 @@ public static partial class Gen5SpirvTranslator
                     var oldValue = LoadV(destination);
                     var sourceValue = GetRawSource(instruction, 0);
                     var selectedLane = BitwiseAnd(GetRawSource(instruction, 1), UInt(_waveLaneCount - 1));
+                    if (_laneSpillSlots.Count != 0)
+                    {
+                        foreach (var ((slotRegister, slotLane), variable) in _laneSpillSlots)
+                        {
+                            if (slotRegister != destination)
+                            {
+                                continue;
+                            }
+
+                            var isSlotLane = _module.AddInstruction(SpirvOp.IEqual, _boolType, selectedLane, UInt(slotLane));
+                            Store(variable, _module.AddInstruction(
+                                SpirvOp.Select, _uintType, isSlotLane, sourceValue, Load(_uintType, variable)));
+                        }
+                    }
+
                     var isTargetLane = _module.AddInstruction(
                         SpirvOp.IEqual,
                         _boolType,
@@ -421,6 +436,18 @@ public static partial class Gen5SpirvTranslator
                             GetFloat16Source(instruction, 1),
                             GetFloat16Source(instruction, 2)));
                     break;
+                case "VMin3F16":
+                    result = EmitFloat16Result(
+                        instruction,
+                        destination,
+                        EmitPackedF16MinMax(
+                            EmitPackedF16MinMax(
+                                GetFloat16Source(instruction, 0),
+                                GetFloat16Source(instruction, 1),
+                                isMax: false),
+                            GetFloat16Source(instruction, 2),
+                            isMax: false));
+                    break;
                 case "VMacF32":
                 case "VFmacF32":
                 {
@@ -492,6 +519,31 @@ public static partial class Gen5SpirvTranslator
                         SpirvOp.Select,
                         _uintType,
                         nonzero,
+                        position,
+                        UInt(uint.MaxValue));
+                    break;
+                }
+                case "VFfbhI32":
+                {
+                    // First bit that differs from the sign bit, counted from bit 31; ~0 for 0 and -1.
+                    var source = GetRawSource(instruction, 0);
+                    var msb = Bitcast(
+                        _uintType,
+                        Ext(74, _intType, Bitcast(_intType, source)));
+                    var position = _module.AddInstruction(
+                        SpirvOp.ISub,
+                        _uintType,
+                        UInt(31),
+                        msb);
+                    var found = _module.AddInstruction(
+                        SpirvOp.INotEqual,
+                        _boolType,
+                        msb,
+                        UInt(uint.MaxValue));
+                    result = _module.AddInstruction(
+                        SpirvOp.Select,
+                        _uintType,
+                        found,
                         position,
                         UInt(uint.MaxValue));
                     break;
@@ -4195,7 +4247,13 @@ public static partial class Gen5SpirvTranslator
             }
             else
             {
-                // Fallback: no subgroup ops, read current lane's value.
+                // Fallback: no subgroup ops, read current lane's value, or the
+                // spill slot that V_WRITELANE filled for the selected lane.
+                if (instruction.Sources[0].Kind == Gen5OperandKind.VectorRegister)
+                {
+                    sourceValue = SelectLaneSpillSlot(instruction.Sources[0].Value, selectedLane, sourceValue);
+                }
+
                 StoreS(destination, sourceValue);
             }
 

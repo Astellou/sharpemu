@@ -226,6 +226,22 @@ public static class ScalarValueEquivalence
             return true;
         }
 
+        // A loop re-reads loop-invariant registers through phis that only merge the
+        // entry value with themselves; compare the value they carry. Otherwise every
+        // descriptor load inside a loop looks new, and a shader that reloads the same
+        // three samplers 104 times exceeds the sampler table (Astro Bot 0xD97F248195E22298).
+        left = ResolveInvariant(memory, left);
+        right = ResolveInvariant(memory, right);
+        if (left.IsUndefined || right.IsUndefined)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
         if (left.Kind != right.Kind || left.Type != right.Type || left.Operation != right.Operation ||
             left.Operands.Length != right.Operands.Length)
         {
@@ -279,6 +295,48 @@ public static class ScalarValueEquivalence
         }
 
         return true;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ScalarValue, StrongBox> ResolvedPhis = new();
+
+    [System.ThreadStatic]
+    private static HashSet<ScalarValue>? _resolvingPhis;
+
+    private sealed class StrongBox(ScalarValue value)
+    {
+        public readonly ScalarValue Value = value;
+    }
+
+    // The invariant value of a phi, or the phi itself when it merges different values
+    // (or while that phi is already being resolved further up the stack).
+    private static ScalarValue ResolveInvariant(MemoryAccessTable memory, ScalarValue value)
+    {
+        if (value.Kind != ScalarValueKind.Phi)
+        {
+            return value;
+        }
+
+        if (ResolvedPhis.TryGetValue(value, out var cached))
+        {
+            return cached.Value;
+        }
+
+        var resolving = _resolvingPhis ??= [];
+        if (!resolving.Add(value))
+        {
+            return value;
+        }
+
+        try
+        {
+            var resolved = ResolveInvariantPhi(memory, value) ?? value;
+            ResolvedPhis.AddOrUpdate(value, new StrongBox(resolved));
+            return resolved;
+        }
+        finally
+        {
+            resolving.Remove(value);
+        }
     }
 
     // A phi whose non-phi operands are all equivalent resolves to that value; a phi that

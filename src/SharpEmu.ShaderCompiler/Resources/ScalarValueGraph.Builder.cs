@@ -186,6 +186,8 @@ public sealed partial class ScalarValueGraph
                 return merged;
             }
 
+            _uniformJoin = pending ? null : FindUniformJoin(block, visited);
+
             for (var register = 0; register < ScalarRegisterCount; register++)
             {
                 merged.Scalars[register] = MergeSlot(block, register, visited, pending, state => state.Scalars[register]);
@@ -233,6 +235,90 @@ public sealed partial class ScalarValueGraph
             return merged;
         }
 
+        // The join of an if or if/else on SCC: every lane of the wave took the same side, so
+        // a value merged there is a select on the branch condition rather than an opaque phi.
+        // Shaders pick descriptors this way (a sampler reloaded when a constant-buffer flag is
+        // set); as a select the host can still evaluate it per draw.
+        private (ScalarValue Taken, int TakenPredecessor)? _uniformJoin;
+
+        private (ScalarValue Taken, int TakenPredecessor)? FindUniformJoin(int block, List<(int Block, RegisterState State)> visited)
+        {
+            var controlFlow = _graph.ControlFlow;
+            var predecessors = controlFlow.Predecessors[block];
+            if (visited.Count != 2 || predecessors.Count != 2 || visited.Any(entry => entry.Block < 0) ||
+                controlFlow.LoopHeaders.Contains(block))
+            {
+                return null;
+            }
+
+            int SinglePredecessor(int candidate) =>
+                controlFlow.Predecessors[candidate].Count == 1 && controlFlow.Successors[candidate].Count == 1 &&
+                controlFlow.Successors[candidate][0] == block
+                    ? controlFlow.Predecessors[candidate][0]
+                    : -1;
+
+            var first = predecessors[0];
+            var second = predecessors[1];
+            int branch;
+            if (SinglePredecessor(first) == second)
+            {
+                branch = second;
+            }
+            else if (SinglePredecessor(second) == first)
+            {
+                branch = first;
+            }
+            else if (SinglePredecessor(first) is var head && head >= 0 && head == SinglePredecessor(second))
+            {
+                branch = head;
+            }
+            else
+            {
+                return null;
+            }
+
+            if (branch == block || _exit[branch] is not { } branchExit ||
+                !TryGetTerminator(branch, out var terminator) ||
+                terminator.Opcode is not ("SCbranchScc0" or "SCbranchScc1") ||
+                !_blockByPc.TryGetValue(BranchTarget(terminator), out var targetBlock))
+            {
+                return null;
+            }
+
+            // The predecessor reached through the taken edge: the join itself (triangle) is
+            // entered from the branch block, otherwise it is the arm that starts at the target.
+            var takenPredecessor = targetBlock == block ? branch : targetBlock;
+            if (takenPredecessor != first && takenPredecessor != second)
+            {
+                return null;
+            }
+
+            var taken = terminator.Opcode == "SCbranchScc1"
+                ? branchExit.Scc
+                : Unary(ScalarOperation.LogicalNot, branchExit.Scc);
+            // A constant condition only comes from the modelled initial SCC, which the hardware
+            // leaves undefined; keep that join an opaque phi.
+            return taken.IsUndefined || taken.IsConstant ? null : (taken, takenPredecessor);
+        }
+
+        private bool TryGetTerminator(int block, out Gen5ShaderInstruction terminator)
+        {
+            var range = _graph.ControlFlow.Blocks[block];
+            terminator = null!;
+            foreach (var instruction in _program.Instructions)
+            {
+                if (instruction.Pc >= range.StartPc && instruction.Pc < range.EndPc)
+                {
+                    terminator = instruction;
+                }
+            }
+
+            return terminator is not null;
+        }
+
+        private static uint BranchTarget(Gen5ShaderInstruction branch) =>
+            (uint)(branch.Pc + 4 + (short)(branch.Words[0] & 0xFFFF) * 4);
+
         // Equal incoming values pass through; differing or still unknown ones meet in a
         // phi owned by this block and register. Any undefined input stays undefined.
         private ScalarValue MergeSlot(
@@ -258,6 +344,13 @@ public sealed partial class ScalarValueGraph
             if (same && !pending)
             {
                 return first;
+            }
+
+            if (_uniformJoin is { } join)
+            {
+                var taken = read(visited.First(entry => entry.Block == join.TakenPredecessor).State);
+                var other = read(visited.First(entry => entry.Block != join.TakenPredecessor).State);
+                return _graph.Select(join.Taken, taken, other);
             }
 
             if (!_phis.TryGetValue((block, slot), out var phi))

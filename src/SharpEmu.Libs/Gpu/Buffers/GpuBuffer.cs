@@ -9,7 +9,8 @@ using VkBuffer = Silk.NET.Vulkan.Buffer;
 
 namespace SharpEmu.Libs.Gpu.Buffers;
 
-// One Vulkan buffer with its own dedicated allocation, mapped when host-visible.
+// One Vulkan buffer, mapped when host-visible. Small buffers share slab chunks (GpuMemorySlabs);
+// larger ones get a dedicated allocation.
 public unsafe class GpuBuffer : IDisposable
 {
     public const BufferUsageFlags ReadFlags =
@@ -28,8 +29,12 @@ public unsafe class GpuBuffer : IDisposable
     private readonly ulong _deviceAddress;
     private VkBuffer _handle;
     private DeviceMemory _memory;
+    private readonly ulong _memoryOffset;
+    private readonly GpuMemorySlabs.Block? _slab;
 
-    public GpuBuffer(GpuDeviceInfo device, SubmissionScheduler scheduler, GpuBufferUsage usage, ulong cpuAddress, BufferUsageFlags flags, ulong size)
+    // allowSlab: the caller records on the scheduler's current command buffer, which clears a recycled slab block.
+    public GpuBuffer(GpuDeviceInfo device, SubmissionScheduler scheduler, GpuBufferUsage usage, ulong cpuAddress, BufferUsageFlags flags, ulong size,
+        bool allowSlab = false)
     {
         if (size == 0)
         {
@@ -76,23 +81,43 @@ public unsafe class GpuBuffer : IDisposable
 
         // The best-scored type first; a full heap falls through to the next candidate.
         var result = Result.ErrorOutOfDeviceMemory;
-        foreach (var candidate in RankMemoryTypes(device, requirements.MemoryTypeBits, usage))
+        var candidates = RankMemoryTypes(device, requirements.MemoryTypeBits, usage).ToArray();
+        if (allowSlab && GpuMemorySlabs.Fits(requirements))
         {
-            allocateInfo.MemoryTypeIndex = candidate;
-            result = device.AllocateMemory(allocateInfo, out _memory);
-            if (result == Result.Success)
+            foreach (var candidate in candidates)
             {
-                break;
+                if (device.Slabs.TryAllocate(candidate, withAddress, requirements, out var block))
+                {
+                    _slab = block;
+                    _memory = block.Memory;
+                    _memoryOffset = block.Offset;
+                    _mapped = block.Mapped;
+                    allocateInfo.MemoryTypeIndex = candidate;
+                    result = Result.Success;
+                    break;
+                }
+            }
+        }
+
+        if (_slab is null)
+        {
+            foreach (var candidate in candidates)
+            {
+                allocateInfo.MemoryTypeIndex = candidate;
+                result = device.AllocateMemory(allocateInfo, out _memory);
+                if (result == Result.Success)
+                {
+                    break;
+                }
             }
         }
 
         RequireSuccess(result, $"vkAllocateMemory({usage}, 0x{size:X} bytes)");
-        RequireSuccess(vk.BindBufferMemory(device.Device, _handle, _memory, 0), "vkBindBufferMemory");
-        _allocationSize = requirements.Size;
-
+        RequireSuccess(vk.BindBufferMemory(device.Device, _handle, _memory, _memoryOffset), "vkBindBufferMemory");
+        _allocationSize = _slab?.Size ?? requirements.Size;
         var properties = device.GetMemoryTypeFlags(allocateInfo.MemoryTypeIndex);
         IsCoherent = (properties & MemoryPropertyFlags.HostCoherentBit) != 0;
-        if ((properties & MemoryPropertyFlags.HostVisibleBit) != 0)
+        if (_slab is null && (properties & MemoryPropertyFlags.HostVisibleBit) != 0)
         {
             void* pointer;
             RequireSuccess(vk.MapMemory(device.Device, _memory, 0, Vk.WholeSize, 0, &pointer), "vkMapMemory");
@@ -107,6 +132,12 @@ public unsafe class GpuBuffer : IDisposable
             {
                 throw SubmissionScheduler.Fatal("The buffer device address is unavailable.");
             }
+        }
+
+        // A dedicated allocation arrives zeroed; keep that for a block another buffer used.
+        if (_slab is { Recycled: true } && (Size & ~3UL) != 0)
+        {
+            Fill(0, Size & ~3UL, 0);
         }
     }
 
@@ -262,7 +293,15 @@ public unsafe class GpuBuffer : IDisposable
         }
 
         _device.Vk.DestroyBuffer(_device.Device, _handle, null);
-        _device.FreeMemory(_memory);
+        if (_slab is { } slab)
+        {
+            _device.Slabs.Release(slab);
+        }
+        else
+        {
+            _device.FreeMemory(_memory);
+        }
+
         _handle = default;
         _memory = default;
     }
@@ -305,7 +344,7 @@ public unsafe class GpuBuffer : IDisposable
         {
             SType = StructureType.MappedMemoryRange,
             Memory = _memory,
-            Offset = begin,
+            Offset = _memoryOffset + begin,
             Size = end - begin,
         };
     }

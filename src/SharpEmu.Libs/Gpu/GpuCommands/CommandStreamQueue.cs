@@ -43,9 +43,10 @@ public sealed class CommandStreamQueue
     private ulong _submitId;
     private ulong _lastCompletedGpuTick;
     private int _doneCount;
-    // Submissions ever accepted and ever finished (or dropped), for the frame run-ahead.
+    // Submissions ever accepted, for the frame run-ahead.
     private ulong _enqueuedTotal;
-    private ulong _finishedTotal;
+    // Sequence of the submission being processed; ulong.MaxValue when none is.
+    private ulong _runningSequence = ulong.MaxValue;
     // _enqueuedTotal at each of the last frame boundaries, oldest first.
     private readonly Queue<ulong> _frameMarks = new();
     private IdleOutcome _outcome = IdleOutcome.Completed;
@@ -194,9 +195,9 @@ public sealed class CommandStreamQueue
             throw _host.Fatal($"The command stream no longer accepts submissions: queue={submission.QueueId} address=0x{submission.Address:X16}.");
         }
 
+        submission.Sequence = _enqueuedTotal++;
         _queues[submission.QueueId].AddLast(submission);
         _submissionCount++;
-        _enqueuedTotal++;
         if (submission.Kind != CommandSubmissionKind.FlipPreparation)
             SubmissionFlowProfile.Record(SubmissionFlowProfile.EventKind.Enqueued, submission.QueueId,
                 submission.SubmissionId, submission.Address, submission.DwordCount, _submissionCount);
@@ -254,14 +255,32 @@ public sealed class CommandStreamQueue
                 return _outcome;
             }
 
+            // Queues finish out of order: a compute queue can retire later frames while the
+            // graphics queue is still on this one. Counting finished submissions let the guest
+            // run ahead and reset label slots the lagging queues still waited on (Astro Bot's
+            // space sublevel deadlocked ~4 min after intro_next). Wait for the oldest instead.
             var mark = _frameMarks.Peek();
-            while (_outcome == IdleOutcome.Completed && _finishedTotal < mark)
+            while (_outcome == IdleOutcome.Completed && OldestUnfinishedLocked() < mark)
             {
                 Monitor.Wait(_gate);
             }
 
             return _outcome;
         }
+    }
+
+    private ulong OldestUnfinishedLocked()
+    {
+        var oldest = _runningSequence;
+        foreach (var queue in _queues)
+        {
+            if (queue.First is { } head && head.Value.Sequence < oldest)
+            {
+                oldest = head.Value.Sequence;
+            }
+        }
+
+        return oldest;
     }
 
     // Returns once nothing is pending; a cancelled or failed queue reports that instead.
@@ -338,6 +357,7 @@ public sealed class CommandStreamQueue
         _stopping = true;
         DropAllLocked();
         _processing = false;
+        _runningSequence = ulong.MaxValue;
         Monitor.PulseAll(_gate);
     }
 
@@ -396,6 +416,7 @@ public sealed class CommandStreamQueue
             _submissionCount--;
             _nextQueue = (selected + 1) % QueueCount;
             _processing = true;
+            _runningSequence = submission.Sequence;
             _processingThread = Thread.CurrentThread;
             if (!submission.Started && submission.Kind != CommandSubmissionKind.FlipPreparation)
                 SubmissionFlowProfile.Record(SubmissionFlowProfile.EventKind.ProcessingStarted, submission.QueueId,
@@ -446,10 +467,10 @@ public sealed class CommandStreamQueue
                 }
 
                 result = SliceResult.Completed;
-                _finishedTotal++;
             }
 
             _processing = false;
+            _runningSequence = ulong.MaxValue;
             Monitor.PulseAll(_gate);
             return result;
         }
@@ -576,7 +597,6 @@ public sealed class CommandStreamQueue
                 if (queue.First is { } head && head.Value.Blocked)
                 {
                     _submissionCount -= queue.Count;
-                    _finishedTotal += (ulong)queue.Count;
                     queue.Clear();
                     _outcome = IdleOutcome.Cancelled;
                 }
@@ -681,6 +701,5 @@ public sealed class CommandStreamQueue
         }
 
         _submissionCount = 0;
-        _finishedTotal = _enqueuedTotal;
     }
 }

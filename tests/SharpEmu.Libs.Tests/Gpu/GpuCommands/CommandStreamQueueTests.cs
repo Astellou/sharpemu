@@ -391,4 +391,25 @@ public sealed class CommandStreamQueueTests
         Assert.Equal(2, queue.FrameNumber);
         Assert.True(queue.HasPending);
     }
+
+    [Fact]
+    public async Task Done_WithRunAheadWaitsForThePreviousFrameEvenWhenALaterFrameFinishesFirst()
+    {
+        var (host, queue) = NewQueue(frameRunAhead: 1);
+        host.WriteDword(Label, 0);
+        Enqueue(host, queue, Graphics, 1, WaitEqual(Label, 1));
+        Assert.Equal(IdleOutcome.Completed, await Task.Run(queue.Done).WaitAsync(TimeSpan.FromSeconds(2)));
+        EnqueueCompute(host, queue, 0x20, Compute, 2, CreateInstanceCountPacket(5));
+
+        // Frame 2's compute work retires while frame 1's graphics work is still blocked.
+        var done = Task.Run(queue.Done);
+        Assert.Equal(SliceResult.BlockedWithoutProgress, queue.ProcessOne());
+        Assert.Equal(SliceResult.Completed, queue.ProcessOne());
+        await Task.WhenAny(done, Task.Delay(100));
+        Assert.False(done.IsCompleted);
+
+        host.WriteDword(Label, 1);
+        Assert.Equal(SliceResult.Completed, queue.ProcessOne());
+        Assert.Equal(IdleOutcome.Completed, await done.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
 }

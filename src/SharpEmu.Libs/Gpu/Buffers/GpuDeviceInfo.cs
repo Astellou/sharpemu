@@ -29,7 +29,11 @@ public sealed unsafe class GpuDeviceInfo : IImageFormatSupport
         MaxStorageBufferRange = properties.Limits.MaxStorageBufferRange;
         MaxMemoryAllocationCount = properties.Limits.MaxMemoryAllocationCount;
         MaxComputeWorkGroupCount = (properties.Limits.MaxComputeWorkGroupCount[0], properties.Limits.MaxComputeWorkGroupCount[1], properties.Limits.MaxComputeWorkGroupCount[2]);
+        Slabs = new GpuMemorySlabs(this);
     }
+
+    // Shared chunks the small buffers are carved from; freed at device teardown.
+    internal GpuMemorySlabs Slabs { get; }
 
     public Vk Vk { get; }
 
