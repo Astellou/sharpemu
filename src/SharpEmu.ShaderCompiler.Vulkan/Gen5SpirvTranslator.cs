@@ -2198,6 +2198,35 @@ public static partial class Gen5SpirvTranslator
                         GetRawSource(instruction, 1));
                     return true;
                 }
+                case "DsWriteB8":
+                case "DsWriteB16":
+                {
+                    if (instruction.Sources.Count < 2)
+                    {
+                        error = "missing LDS sub-dword write source";
+                        return false;
+                    }
+
+                    // The low byte or half of the data replaces those bits of the LDS word; the
+                    // AND then OR keep a neighbor lane's write to the word's other bits.
+                    var address = GetRawSource(instruction, 0);
+                    var byteAddress = control.SingleOffsetBytes == 0
+                        ? address
+                        : IAdd(address, UInt(control.SingleOffsetBytes));
+                    var width = instruction.Opcode == "DsWriteB8" ? 0xFFu : 0xFFFFu;
+                    var shift = ShiftLeftLogical(BitwiseAnd(byteAddress, UInt(3)), UInt(3));
+                    var mask = ShiftLeftLogical(UInt(width), shift);
+                    var data = ShiftLeftLogical(BitwiseAnd(GetRawSource(instruction, 1), UInt(width)), shift);
+                    var pointer = LdsPointer(address, control.SingleOffsetBytes);
+                    EmitConditional(Load(_boolType, _exec), () =>
+                    {
+                        _module.AddInstruction(
+                            SpirvOp.AtomicAnd, _uintType, pointer, UInt(2), UInt(0x108),
+                            _module.AddInstruction(SpirvOp.Not, _uintType, mask));
+                        _module.AddInstruction(SpirvOp.AtomicOr, _uintType, pointer, UInt(2), UInt(0x108), data);
+                    });
+                    return true;
+                }
                 case "DsWriteB64":
                 {
                     if (instruction.Sources.Count < 3)

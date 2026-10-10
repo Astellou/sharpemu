@@ -926,7 +926,10 @@ public static partial class Gen5ShaderTranslator
             0x43 => "VMovrelsB32",
             0x44 => "VMovrelsdB32",
             0x48 => "VMovrelsd2B32",
+            0x50 => "VCvtF16U16",
+            0x51 => "VCvtF16I16",
             0x52 => "VCvtU16F16",
+            0x53 => "VCvtI16F16",
             0x54 => "VRcpF16",
             0x55 => "VSqrtF16",
             0x56 => "VRsqF16",
@@ -1327,14 +1330,18 @@ public static partial class Gen5ShaderTranslator
             0x36D => "VAdd3U32",
             0x36F => "VLshlOrU32",
             0x178 => "VXor3B32",
-            // VOP1 opcode 0x52 is available through VOP3 as opcode 0x1D2.
+            // VOP1 opcodes 0x50-0x53 are available through VOP3 as opcodes 0x1D0-0x1D3.
+            0x1D0 => "VCvtF16U16",
+            0x1D1 => "VCvtF16I16",
             0x1D2 => "VCvtU16F16",
+            0x1D3 => "VCvtI16F16",
             0x371 => "VAndOrB32",
             0x372 => "VOr3U32",
             0x377 => "VPermlane16B32",
             0x378 => "VPermlanex16B32",
             // GFX10 16-bit integer ALU, VOP3-only.
             0x304 => "VSubNcU16",
+            0x305 => "VMulLoU16",
             0x307 => "VLshrrevB16",
             0x308 => "VAshrrevI16",
             0x309 => "VMaxU16",
@@ -1343,6 +1350,9 @@ public static partial class Gen5ShaderTranslator
             0x30C => "VMinI16",
             0x30D => "VAddNcI16",
             0x30E => "VSubNcI16",
+            0x311 => "VPackB32F16",
+            0x312 => "VCvtPknormI16F16",
+            0x313 => "VCvtPknormU16F16",
             0x314 => "VLshlrevB16",
             // VOP3-encoded 64-bit VOPC (opcode < 0x100): V_CMP_*_U64 / V_CMPX_*_U64.
             0x0E0 => "VCmpFU64",
@@ -1405,8 +1415,20 @@ public static partial class Gen5ShaderTranslator
         // loudly at emission rather than being silently mis-emitted.
         name = opcode switch
         {
+            0x00 => "VPkMadI16",
+            0x01 => "VPkMulLoU16",
             0x02 => "VPkAddI16",
             0x03 => "VPkSubI16",
+            0x04 => "VPkLshlrevB16",
+            0x05 => "VPkLshrrevB16",
+            0x06 => "VPkAshrrevI16",
+            0x07 => "VPkMaxI16",
+            0x08 => "VPkMinI16",
+            0x09 => "VPkMadU16",
+            0x0A => "VPkAddU16",
+            0x0B => "VPkSubU16",
+            0x0C => "VPkMaxU16",
+            0x0D => "VPkMinU16",
             0x0E => "VPkFmaF16",
             0x0F => "VPkAddF16",
             0x10 => "VPkMulF16",
@@ -1449,6 +1471,8 @@ public static partial class Gen5ShaderTranslator
             0x10 => "DsCmpstB32",
             0x12 => "DsMinF32",
             0x13 => "DsMaxF32",
+            0x1E => "DsWriteB8",
+            0x1F => "DsWriteB16",
             0x20 => "DsAddRtnU32",
             0x21 => "DsSubRtnU32",
             0x23 => "DsIncRtnU32",
@@ -2502,7 +2526,7 @@ public static partial class Gen5ShaderTranslator
                 {
                     "DsAppend" or "DsConsume" or "DsReadAddtidB32" => [Gen5Operand.Scalar(124)],
                     "DsWriteAddtidB32" => [Gen5Operand.Scalar(124), Gen5Operand.Vector(vectorData0)],
-                    "DsWriteB32" => [
+                    "DsWriteB32" or "DsWriteB8" or "DsWriteB16" => [
                         Gen5Operand.Vector(vectorAddress),
                         Gen5Operand.Vector(vectorData0),
                     ],

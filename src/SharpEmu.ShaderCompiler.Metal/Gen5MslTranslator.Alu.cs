@@ -256,6 +256,10 @@ public static partial class Gen5MslTranslator
                 "VCvtF32I32" => FloatResult(instruction, $"(float)as_type<int>({RawSource(instruction, 0)})"),
                 "VCvtF32U32" => FloatResult(instruction, $"(float)({RawSource(instruction, 0)})"),
                 "VCvtU32F32" => $"(uint)({F(instruction, 0)})",
+                "VCvtF16U16" => Float16Result(instruction, destination, $"(float)(({RawSource(instruction, 0)}) & 0xFFFFu)"),
+                "VCvtF16I16" => Float16Result(instruction, destination, $"(float)short(({RawSource(instruction, 0)}) & 0xFFFFu)"),
+                "VCvtI16F16" =>
+                    $"((uint)as_type<ushort>((short)clamp(trunc(isnan({F16(instruction, 0)}) ? 0.0f : {F16(instruction, 0)}), -32768.0f, 32767.0f)))",
                 "VCvtU16F16" =>
                     $"(uint)clamp(trunc(isnan({F16(instruction, 0)}) ? 0.0f : {F16(instruction, 0)}), 0.0f, 65535.0f)",
                 "VCvtI32F32" => AsUInt($"(int)({F(instruction, 0)})"),

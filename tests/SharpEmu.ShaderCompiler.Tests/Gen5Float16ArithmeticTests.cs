@@ -51,6 +51,11 @@ public sealed class Gen5Float16ArithmeticTests
     }
 
     [Theory]
+    // Lords of the Fallen: v_cvt_f16_i16.
+    [InlineData(0x50u, "VCvtF16U16")]
+    [InlineData(0x51u, "VCvtF16I16")]
+    [InlineData(0x52u, "VCvtU16F16")]
+    [InlineData(0x53u, "VCvtI16F16")]
     [InlineData(0x54u, "VRcpF16")]
     [InlineData(0x55u, "VSqrtF16")]
     [InlineData(0x57u, "VLogF16")]
@@ -136,6 +141,28 @@ public sealed class Gen5Float16ArithmeticTests
         Assert.True(
             Gen5SpirvTranslator.TryCompileProgram(request, out _, out var error),
             error);
+    }
+
+    // Lords of the Fallen: v_pk_add_u16. The 16-bit lanes wrap, so the unsigned forms
+    // share the signed ones' bit-level arithmetic.
+    [Theory]
+    [InlineData(0x02u, "VPkAddI16")]
+    [InlineData(0x03u, "VPkSubI16")]
+    [InlineData(0x0Au, "VPkAddU16")]
+    [InlineData(0x0Bu, "VPkSubU16")]
+    public void PackedInt16AddSubDecodesAndCompiles(uint opcode, string name)
+    {
+        // v0 = op(v1, v2) with op_sel_hi on both sources.
+        var program = Decode(
+        [
+            (0x33u << 26) | (opcode << 16) | 0u,
+            257u | (258u << 9) | (3u << 27),
+            SEndpgm,
+        ]);
+
+        Assert.Equal(name, program.Instructions[0].Opcode);
+        var request = ResourceTestProgram.Request(program, userDataCount: 0);
+        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out _, out var error), error);
     }
 
     private static Gen5ShaderProgram Decode(IReadOnlyList<uint> words)
