@@ -396,6 +396,26 @@ public static partial class Gen5MslTranslator
                 2 => "z",
                 _ => "w",
             };
+            if (opcode == "ImageGather4L")
+            {
+                // A Metal gather reads the base level only. A sample taken exactly at a texel
+                // center returns that texel unfiltered, so sampling the four footprint texels at
+                // the level the LOD selects reproduces the gather and keeps the sampler addressing.
+                var lod = ImageFloatAddress(image, addressCursor + 2);
+                var levels = Temp("int", $"(int){texture}.get_num_mip_levels()");
+                var level = Temp("uint", $"(uint)clamp((int)floor({lod} + 0.5f), 0, {levels} - 1)");
+                var size = Temp("float2", $"float2({texture}.get_width({level}), {texture}.get_height({level}))");
+                var firstTexel = Temp("float2", $"floor({coordinates} * {size} - 0.5f)");
+                string Texel(string center) => Temp(
+                    $"vec<{kind}, 4>",
+                    $"{texture}.sample({samplerName}, ({firstTexel} + float2({center})) / {size}, level((float){level}))");
+                var texels = new[] { Texel("0.5f, 1.5f"), Texel("1.5f, 1.5f"), Texel("1.5f, 0.5f"), Texel("0.5f, 0.5f") };
+                sampled = Temp(
+                    $"vec<{kind}, 4>",
+                    $"{VectorLiteral(kind)}({string.Join(", ", texels.Select(texel => $"{texel}.{componentName}"))})");
+                return true;
+            }
+
             sampled = Temp(
                 $"vec<{kind}, 4>",
                 $"{texture}.gather({samplerName}, {coordinates}, {offset}, component::{componentName})");

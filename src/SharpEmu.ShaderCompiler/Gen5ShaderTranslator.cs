@@ -1483,6 +1483,7 @@ public static partial class Gen5ShaderTranslator
             0x77 => "DsRead2B64",
             0xB0 => "DsWriteAddtidB32",
             0xB1 => "DsReadAddtidB32",
+            0xB2 => "DsPermuteB32",
             0xB3 => "DsBpermuteB32",
             0xDE => "DsWriteB96",
             0xDF => "DsWriteB128",
@@ -1806,6 +1807,7 @@ public static partial class Gen5ShaderTranslator
             0x3E => "ImageSampleCBClO",
             0x3F => "ImageSampleCLzO",
             0x40 => "ImageGather4",
+            0x44 => "ImageGather4L",
             0x47 => "ImageGather4Lz",
             0x48 => "ImageGather4C",
             0x4E => "ImageGather4CBCl",
@@ -2535,7 +2537,7 @@ public static partial class Gen5ShaderTranslator
                         Gen5Operand.Vector(vectorData1),
                     ],
                     "DsSwizzleB32" => [Gen5Operand.Vector(vectorData0)],
-                    "DsBpermuteB32" => [
+                    "DsPermuteB32" or "DsBpermuteB32" => [
                         Gen5Operand.Vector(vectorAddress),
                         Gen5Operand.Vector(vectorData0),
                     ],
@@ -2576,7 +2578,7 @@ public static partial class Gen5ShaderTranslator
                         Gen5Operand.Vector(vectorDestination),
                     ],
                     "DsReadB32" or "DsReadI8" or "DsReadAddtidB32" or
-                    "DsSwizzleB32" or "DsBpermuteB32" => [
+                    "DsSwizzleB32" or "DsPermuteB32" or "DsBpermuteB32" => [
                         Gen5Operand.Vector(vectorDestination),
                     ],
                     "DsReadB64" or "DsRead2B32" or "DsRead2St64B32" => [

@@ -77,6 +77,26 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         return Program([.. instructions]);
     }
 
+    // An explicit-LOD gather of the first channel at (0.5, 0.5), its four texels stored to dwords 0..3.
+    private static Gen5ShaderProgram GatherAtLodProgram(float lod)
+    {
+        var instructions = new List<Gen5ShaderInstruction>();
+        uint pc = 0;
+        instructions.AddRange(ImageWords(ref pc, FirstImageRegister, FirstImageAddress, Format32Float, lastLevel: 1));
+        instructions.AddRange(SamplerWords(ref pc, SamplerRegister));
+        instructions.Add(MoveVector(pc, 0, 0x3F00_0000)); pc += 8;
+        instructions.Add(MoveVector(pc, 1, 0x3F00_0000)); pc += 8;
+        instructions.Add(MoveVector(pc, 2, BitConverter.SingleToUInt32Bits(lod))); pc += 8;
+        instructions.Add(Image(pc, "ImageGather4L", FirstImageRegister, SamplerRegister, dmask: 1)); pc += 8;
+        for (uint texel = 0; texel < 4; texel++)
+        {
+            instructions.Add(BufferAccess(pc, "BufferStoreDword", ResultRegister, (int)texel * 4, 1, vectorData: 4 + texel)); pc += 8;
+        }
+
+        instructions.Add(EndProgram(pc));
+        return Program([.. instructions]);
+    }
+
     // Each lane writes its index into texel (0, 0) of the mip its index selects.
     private static Gen5ShaderProgram StoreLaneIntoMipProgram()
     {
@@ -255,6 +275,43 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         Assert.Equal(BitConverter.SingleToUInt32Bits(0.75f), run.ResultWord(1));
         run.Harness.AssertNoValidationMessages();
         output.WriteLine($"Verified sampled class arrays on {vulkan.DeviceName}; validation={vulkan.ValidationEnabled}.");
+    }
+
+    // A 4x4 base level holding 4y + x and a 2x2 level holding 100 + 2y + x. The gather
+    // returns the footprint in (x0, y1), (x1, y1), (x1, y0), (x0, y0) order from the level
+    // nearest the LOD, clamped to the image; a linear sampler must not blend the texels.
+    [Theory]
+    [InlineData(0.0f, 9f, 10f, 6f, 5f)]
+    [InlineData(0.4f, 9f, 10f, 6f, 5f)]
+    [InlineData(0.6f, 102f, 103f, 101f, 100f)]
+    [InlineData(1.0f, 102f, 103f, 101f, 100f)]
+    [InlineData(7.0f, 102f, 103f, 101f, 100f)]
+    public void ExplicitLodGather_ReadsTheFootprintOfTheSelectedLevel(float lod, float x0y1, float x1y1, float x1y0, float x0y0)
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan))
+        {
+            return;
+        }
+
+        using var run = new Run(vulkan, GatherAtLodProgram(lod), UserData(), 1);
+        var image = run.Harness.CreateImage(Describe(0, Format.R32Sfloat, GuestPixelFormat.Bits32Float, 4, 4, 2));
+        var texels = Enumerable.Range(0, 16).Select(index => (float)index)
+            .Concat(Enumerable.Range(0, 4).Select(index => 100f + index)).ToArray();
+        run.Harness.UploadImage(image, MemoryMarshal.AsBytes<float>(texels), ImageTestHarness.WholeImageCopies(image.Description, 0));
+        var sampler = run.Runner.CreateSampler(Filter.Linear);
+        var views = new Dictionary<int, DescriptorImageInfo[]> { [run.ResourceAt(FirstImageAddress)] = [SampledView(image, 2)] };
+        run.Dispatch(run.BindImages(views, [sampler]), command =>
+            image.Transition(ImageLayout.ShaderReadOnlyOptimal, AccessFlags.ShaderReadBit, null, command));
+
+        float[] expected = [x0y1, x1y1, x1y0, x0y0];
+        for (var texel = 0; texel < 4; texel++)
+        {
+            Assert.Equal(BitConverter.SingleToUInt32Bits(expected[texel]), run.ResultWord(texel));
+        }
+
+        run.Harness.AssertNoValidationMessages();
+        output.WriteLine($"Verified explicit-LOD gather at LOD {lod} on {vulkan.DeviceName}; validation={vulkan.ValidationEnabled}.");
     }
 
     [Fact]

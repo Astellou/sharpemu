@@ -72,5 +72,44 @@ public static partial class Gen5MslTranslator
             StoreVector(instruction.Destinations[0].Value, $"{sourceActive} ? {value} : 0u");
             return true;
         }
+
+        // DS_PERMUTE_B32 is the forward form of DS_BPERMUTE_B32: every active lane sends its
+        // DATA0 to the lane its address names, within its 32-lane half-wave. A lane nobody
+        // sends to reads 0, and when several lanes target one lane the highest sender wins.
+        // SIMD shuffles only pull, so each lane pulls every sender's target and value in
+        // ascending lane order and keeps the last one aimed at it.
+        private bool TryEmitDataSharePermute(Gen5ShaderInstruction instruction,
+            Gen5DataShareControl control, out string error)
+        {
+            error = string.Empty;
+            if (instruction.Sources.Count != 2 || instruction.Destinations.Count != 1)
+            {
+                error = "invalid data-share permute operands";
+                return false;
+            }
+            if (IsSingleLaneStage)
+            {
+                error = "data-share permute requires subgroup lane access";
+                return false;
+            }
+
+            var lane = Temp("uint", "sharpemu_lane");
+            var address = Temp("uint", $"{RawSource(instruction, 0)} + {control.SingleOffsetBytes}u");
+            var target = Temp("uint", $"({address} >> 2u) & 31u");
+            var data = Temp("uint", RawSource(instruction, 1));
+            var activeSenders = Temp("uint", "sharpemu_ballot(exec)");
+            var result = Temp("uint", "0u");
+            var sender = Temp("uint", "0u");
+            // Every lane takes part in both shuffles; an inactive sender is read as this lane.
+            Line($"for (; {sender} < 32u; ++{sender}) {{");
+            Line($"    bool sharpemu_sender_active = (({activeSenders} >> {sender}) & 1u) != 0u;");
+            Line($"    ushort sharpemu_sender_lane = (ushort)(sharpemu_sender_active ? (({lane} & ~31u) | {sender}) : {lane});");
+            Line($"    uint sharpemu_sender_target = simd_shuffle({target}, sharpemu_sender_lane);");
+            Line($"    uint sharpemu_sender_value = simd_shuffle({data}, sharpemu_sender_lane);");
+            Line($"    {result} = sharpemu_sender_active && sharpemu_sender_target == ({lane} & 31u) ? sharpemu_sender_value : {result};");
+            Line("}");
+            StoreVector(instruction.Destinations[0].Value, result);
+            return true;
+        }
     }
 }

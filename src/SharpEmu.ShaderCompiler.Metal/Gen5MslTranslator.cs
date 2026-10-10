@@ -135,7 +135,7 @@ public static partial class Gen5MslTranslator
                 foreach (var instruction in _request.Program.Instructions)
                 {
                     _usesLds |= instruction.Control is Gen5DataShareControl { Gds: false } &&
-                        instruction.Opcode is not ("DsSwizzleB32" or "DsBpermuteB32");
+                        instruction.Opcode is not ("DsSwizzleB32" or "DsPermuteB32" or "DsBpermuteB32");
                     _usesFormatLoads |= IsFormatBufferLoad(instruction.Opcode) ||
                         instruction.Opcode.StartsWith("TBufferStoreFormat", StringComparison.Ordinal);
                     if (instruction.Control is Gen5InterpolationControl interpolationControl)
@@ -1338,6 +1338,8 @@ public static partial class Gen5MslTranslator
                     return TryEmitDataShareSwizzle(instruction, control, out error);
                 case "DsBpermuteB32":
                     return TryEmitDataShareBpermute(instruction, control, out error);
+                case "DsPermuteB32":
+                    return TryEmitDataSharePermute(instruction, control, out error);
                 case "DsAppend":
                 case "DsConsume":
                 {

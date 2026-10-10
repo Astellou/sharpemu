@@ -2162,6 +2162,8 @@ public static partial class Gen5SpirvTranslator
                     return TryEmitDataShareSwizzle(instruction, control, out error);
                 case "DsBpermuteB32":
                     return TryEmitDataShareBpermute(instruction, control, out error);
+                case "DsPermuteB32":
+                    return TryEmitDataSharePermute(instruction, control, out error);
             }
 
             if (_lds == 0 || _ldsElementPointer == 0)
@@ -5434,6 +5436,21 @@ public static partial class Gen5SpirvTranslator
                     goto GatherComplete;
                 }
 
+                if (instruction.Opcode == "ImageGather4L")
+                {
+                    if (resource.Dimension != SpirvImageDim.Dim2D)
+                    {
+                        error = "unsupported explicit-LOD image gather dimension";
+                        return false;
+                    }
+
+                    sampled = EmitExplicitLodGather(image, resource, imageObject, coordinates,
+                        LoadImageFloatAddress(image, addressCursor + (int)coordinateComponentCount));
+                    sampled = UnpackImageGather(resource, image.Dmask, sampled);
+                    writeAllComponents = true;
+                    goto GatherComplete;
+                }
+
                 var operands = new List<uint>
                 {
                     imageObject,
@@ -5656,6 +5673,75 @@ public static partial class Gen5SpirvTranslator
                 values[1],
                 values[1],
                 values[0]);
+        }
+
+        // IMAGE_GATHER4_L gathers from the mip level an explicit LOD selects, while a Vulkan
+        // gather reads the base level unless VK_AMD_texture_gather_bias_lod is present. A
+        // sample taken exactly at a texel center returns that texel unfiltered, so sampling
+        // the four footprint texels at the chosen level reproduces the gather and still
+        // leaves addressing to the sampler. Returns the footprint in gather order.
+        private uint EmitExplicitLodGather(
+            Gen5ImageControl image,
+            SpirvImageResource resource,
+            uint sampledImage,
+            uint coordinates,
+            uint lod)
+        {
+            const uint GlslFloor = 8;
+            const uint GlslSClamp = 45;
+            var imageValue = _module.AddInstruction(SpirvOp.Image, resource.ImageType, sampledImage);
+            var levels = _module.AddInstruction(SpirvOp.ImageQueryLevels, _intType, imageValue);
+            // A gather reads one level, the nearest one, as a point mip filter would pick.
+            var nearestLevel = _module.AddInstruction(SpirvOp.ConvertFToS, _intType,
+                Ext(GlslFloor, _floatType, _module.AddInstruction(SpirvOp.FAdd, _floatType, lod, Float(0.5f))));
+            var level = Ext(GlslSClamp, _intType, nearestLevel, _module.Constant(_intType, 0),
+                _module.AddInstruction(SpirvOp.ISub, _intType, levels, _module.Constant(_intType, 1)));
+            var vec2Int = _module.TypeVector(_intType, 2);
+            var size = _module.AddInstruction(SpirvOp.ImageQuerySizeLod,
+                resource.Arrayed ? _module.TypeVector(_intType, 3) : vec2Int, imageValue, level);
+            if (resource.Arrayed)
+            {
+                size = _module.AddInstruction(SpirvOp.VectorShuffle, vec2Int, size, size, 0u, 1u);
+            }
+
+            var sizeFloat = _module.AddInstruction(SpirvOp.ConvertSToF, _vec2Type, size);
+            var position = resource.Arrayed
+                ? _module.AddInstruction(SpirvOp.VectorShuffle, _vec2Type, coordinates, coordinates, 0u, 1u)
+                : coordinates;
+            var halfTexel = _module.AddInstruction(SpirvOp.CompositeConstruct, _vec2Type, Float(0.5f), Float(0.5f));
+            var firstTexel = Ext(GlslFloor, _vec2Type, _module.AddInstruction(SpirvOp.FSub, _vec2Type,
+                _module.AddInstruction(SpirvOp.FMul, _vec2Type, position, sizeFloat), halfTexel));
+            var levelFloat = _module.AddInstruction(SpirvOp.ConvertSToF, _floatType, level);
+
+            uint component = 0;
+            if (resource.ConversionFormat == GuestImageFormat.Invalid)
+            {
+                while (component < 3 && (image.Dmask & (1u << (int)component)) == 0)
+                {
+                    component++;
+                }
+            }
+
+            ReadOnlySpan<(float X, float Y)> footprint = [(0.5f, 1.5f), (1.5f, 1.5f), (1.5f, 0.5f), (0.5f, 0.5f)];
+            var values = new uint[footprint.Length];
+            for (var index = 0; index < footprint.Length; index++)
+            {
+                var center = _module.AddInstruction(SpirvOp.FDiv, _vec2Type,
+                    _module.AddInstruction(SpirvOp.FAdd, _vec2Type, firstTexel,
+                        _module.AddInstruction(SpirvOp.CompositeConstruct, _vec2Type, Float(footprint[index].X), Float(footprint[index].Y))),
+                    sizeFloat);
+                var sampleCoordinate = resource.Arrayed
+                    ? _module.AddInstruction(SpirvOp.CompositeConstruct, _vec3Type,
+                        _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, center, 0u),
+                        _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, center, 1u),
+                        _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, coordinates, 2u))
+                    : center;
+                var texel = _module.AddInstruction(SpirvOp.ImageSampleExplicitLod, resource.VectorType,
+                    sampledImage, sampleCoordinate, 2u, levelFloat);
+                values[index] = _module.AddInstruction(SpirvOp.CompositeExtract, resource.ComponentType, texel, component);
+            }
+
+            return _module.AddInstruction(SpirvOp.CompositeConstruct, resource.VectorType, values);
         }
 
         private static bool TryGetPackedImageConversion(
@@ -8033,7 +8119,7 @@ public static partial class Gen5SpirvTranslator
         private bool UsesLds() =>
             _request.Program.Instructions.Any(static instruction =>
                 instruction.Control is Gen5DataShareControl { Gds: false } &&
-                instruction.Opcode is not ("DsSwizzleB32" or "DsBpermuteB32")) ||
+                instruction.Opcode is not ("DsSwizzleB32" or "DsPermuteB32" or "DsBpermuteB32")) ||
             _request.Memory.Entries.Any(static memory =>
                 memory.AddressSpace is FlatAddressSpace.Shared or FlatAddressSpace.SharedOrPrivate);
 
@@ -8041,7 +8127,7 @@ public static partial class Gen5SpirvTranslator
             _request.Program.Instructions.Any(instruction =>
                 instruction.Control is Gen5DppControl or Gen5Dpp8Control ||
                 instruction.Opcode is "VPermlane16B32" or "VPermlanex16B32" or "VReadlaneB32" or
-                    "DsAppend" or "DsConsume" or "DsSwizzleB32" or "DsBpermuteB32");
+                    "DsAppend" or "DsConsume" or "DsSwizzleB32" or "DsPermuteB32" or "DsBpermuteB32");
 
         private bool UsesSubgroupBroadcast() =>
             _request.Program.Instructions.Any(instruction =>

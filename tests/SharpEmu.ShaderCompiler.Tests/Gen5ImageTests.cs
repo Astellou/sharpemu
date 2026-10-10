@@ -3,6 +3,7 @@
 
 using System.Buffers.Binary;
 using SharpEmu.ShaderCompiler;
+using SharpEmu.ShaderCompiler.Metal;
 using SharpEmu.ShaderCompiler.Vulkan;
 using SharpEmu.ShaderCompiler.Resources;
 using SharpEmu.ShaderCompiler.Tests.Resources;
@@ -145,6 +146,26 @@ public sealed class Gen5ImageTests
     }
 
     [Fact]
+    public void ImageGatherExplicitLodSamplesTheFootprintAtTheSelectedLevel()
+    {
+        // A Vulkan gather cannot take a level, so IMAGE_GATHER4_L samples its four
+        // footprint texels at their centers on the level its LOD selects.
+        var instructions = ReadSpirvInstructions(
+            CompileImageOperation("ImageGather4L", dimension: 1, dmask: 1, unifiedFormat: 22u));
+
+        Assert.DoesNotContain(instructions, item => item.Opcode == SpirvOp.ImageGather);
+        Assert.Equal(4, instructions.Count(item => item.Opcode == SpirvOp.ImageSampleExplicitLod));
+        Assert.Contains(instructions, item => item.Opcode == SpirvOp.ImageQueryLevels);
+        Assert.Contains(instructions, item => item.Opcode == SpirvOp.ImageQuerySizeLod);
+
+        var request = ImageOperationRequest("ImageGather4L", dimension: 1, dmask: 1, unifiedFormat: 22u);
+        Assert.True(Gen5MslTranslator.TryCompileProgram(request, out var metal, out var metalError), metalError);
+        Assert.DoesNotContain(".gather(", metal.Source, StringComparison.Ordinal);
+        Assert.Contains("get_num_mip_levels()", metal.Source, StringComparison.Ordinal);
+        Assert.Equal(4, metal.Source.Split(".sample(").Length - 1);
+    }
+
+    [Fact]
     public void ImageGatherCompareLzUsesNativeDepthGather()
     {
         var instructions = ReadSpirvInstructions(
@@ -225,6 +246,23 @@ public sealed class Gen5ImageTests
         uint? descriptorType = null,
         bool arrayed = false)
     {
+        var request = ImageOperationRequest(opcode, dimension, dmask, dstSelect, unifiedFormat, samplerWord0, samplerWord2,
+            descriptorType, arrayed);
+        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
+        return shader.Spirv;
+    }
+
+    private static ShaderCompileRequest ImageOperationRequest(
+        string opcode,
+        uint dimension,
+        uint dmask = 0xF,
+        uint dstSelect = Gen5ShaderTranslator.IdentityImageDstSelect,
+        uint unifiedFormat = 71u,
+        uint samplerWord0 = 0u,
+        uint samplerWord2 = 0u,
+        uint? descriptorType = null,
+        bool arrayed = false)
+    {
         var coordinateCount = dimension == 2 || arrayed ? 3 : 2;
         var addressCount = coordinateCount +
             (opcode.Contains("SampleC", StringComparison.Ordinal) ? 1 : 0);
@@ -282,9 +320,7 @@ public sealed class Gen5ImageTests
         var layout = BindingLayout.Allocate(resources.Info,
             BindingLayout.CollectUserDataRegisters(program, 0, 20), false,
             ShaderCompileRequest.RequiresFlattenedTable(plan, resources), false);
-        var request = new ShaderCompileRequest(plan, resources, layout);
-        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
-        return shader.Spirv;
+        return new ShaderCompileRequest(plan, resources, layout);
     }
 
     private static int[] GetStoredVgprRegisters(byte[] spirv)
