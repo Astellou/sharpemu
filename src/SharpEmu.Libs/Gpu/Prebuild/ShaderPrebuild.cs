@@ -64,7 +64,9 @@ internal static class ShaderPrebuild
         };
         return ShaderProgramCache.TryCompilePrewarm(
             record, header.CodeCapture, compiler, sharedInt64Atomics: false, execGuardElision: false, signedZeroInfNanPreserve: false,
-            out _, out _, out error, hostWave64Supported, defaultSpecialization: true);
+            // A prebuild only translates, so a Nanite shader is checked whatever the GPU;
+            // the first dispatch refuses it on a device without 64-bit image atomics.
+            out _, out _, out error, hostWave64Supported, defaultSpecialization: true, imageInt64Atomics: true);
     }
 
     // Draws compile a graphics stage only with the descriptors and pipeline state they

@@ -37,6 +37,12 @@ public static partial class Gen5MslTranslator
             return false;
         }
 
+        if (request.UsesImageInt64Atomics)
+        {
+            error = "64-bit image atomics are not supported by the Metal backend";
+            return false;
+        }
+
         if (request.Stage == ShaderStage.Pixel && !ValidatePixelOutputs(request.PixelOutputs, out error))
         {
             return false;

@@ -632,6 +632,7 @@ internal sealed class ShaderProgramCache
     {
         var enableGraphicsSubgroups = _host.GraphicsSubgroupOperationsEnabled;
         var sharedInt64Atomics = _host.SharedInt64AtomicsEnabled;
+        var imageInt64Atomics = _host.ImageInt64AtomicsEnabled;
         var signedZeroInfNanPreserve = _host.ShaderSignedZeroInfNanPreserveFloat32Supported;
         switch (source.Stage)
         {
@@ -645,6 +646,7 @@ internal sealed class ShaderProgramCache
                     ScratchDwords = info.ScratchDwords,
                     EnableGraphicsSubgroupOperations = enableGraphicsSubgroups,
                     SupportsSharedInt64Atomics = sharedInt64Atomics,
+                    SupportsImageInt64Atomics = imageInt64Atomics,
                     ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
                     RequiredVertexOutputCount = options.RequiredVertexOutputCount,
                     VertexInputs = entry.VertexInputs,
@@ -673,6 +675,7 @@ internal sealed class ShaderProgramCache
                     ScratchDwords = info.ScratchDwords,
                     EnableGraphicsSubgroupOperations = enableGraphicsSubgroups,
                     SupportsSharedInt64Atomics = sharedInt64Atomics,
+                    SupportsImageInt64Atomics = imageInt64Atomics,
                     ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
                     PixelOutputs = options.PixelOutputs,
                     PixelInputEnable = options.PixelInputEnable,
@@ -685,7 +688,7 @@ internal sealed class ShaderProgramCache
 
             default:
                 return BuildComputeRequest(entry.Plan, resources, layout, options.ComputeInfo!, options.ComputeSystemRegisters,
-                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative);
+                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative, imageInt64Atomics);
         }
     }
 
@@ -702,7 +705,7 @@ internal sealed class ShaderProgramCache
 
     private static ShaderCompileRequest BuildComputeRequest(ShaderResourcePlan plan, SpecializedResourceInfo resources, BindingLayout layout,
         ComputeInputInfo info, Gen5ComputeSystemRegisters? systemRegisters, bool sharedInt64Atomics, bool execGuardElision,
-        bool signedZeroInfNanPreserve, bool hostWave64Supported = false) =>
+        bool signedZeroInfNanPreserve, bool hostWave64Supported = false, bool imageInt64Atomics = false) =>
         new(plan, resources, layout)
         {
             WaveSize = info.WaveSize,
@@ -711,6 +714,7 @@ internal sealed class ShaderProgramCache
             TraceDeviceAddressFaults = SharpEmu.HLE.GpuMemory.GuestGpuMemoryHook.TraceEnabled,
             ScratchDwords = info.ScratchDwords,
             SupportsSharedInt64Atomics = sharedInt64Atomics,
+            SupportsImageInt64Atomics = imageInt64Atomics,
             ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
             ComputeSystemRegisters = systemRegisters,
             LocalDataShareDwords = info.LocalDataShareDwords,
@@ -721,7 +725,8 @@ internal sealed class ShaderProgramCache
 
     internal static bool TryCompilePrewarm(ComputePrewarmRecord record, ShaderCodeCapture code, IGuestGpuBackend compiler,
         bool sharedInt64Atomics, bool execGuardElision, bool signedZeroInfNanPreserve, out IGuestCompiledShader? compiled,
-        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool defaultSpecialization = false)
+        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool defaultSpecialization = false,
+        bool imageInt64Atomics = false)
     {
         compiled = null;
         layout = null;
@@ -741,7 +746,7 @@ internal sealed class ShaderProgramCache
             layout = AllocateLayout(program, plan, resources, record.UserDataBase, record.UserDataCount, record.PushDataCursor,
                 record.Info.DispatchThreadDimensions);
             var request = BuildComputeRequest(plan, resources, layout, record.Info, record.SystemRegisters,
-                sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported);
+                sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported, imageInt64Atomics);
             return compiler.TryCompileProgram(request, out compiled, out error) && compiled is not null;
         }
         catch (Exception exception)

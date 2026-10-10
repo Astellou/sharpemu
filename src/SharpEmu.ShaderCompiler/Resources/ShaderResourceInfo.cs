@@ -71,6 +71,8 @@ public sealed class ImageResource
     public bool Read { get; set; }
     public bool Written { get; set; }
     public bool Atomic { get; set; }
+    // The atomics operate on 64-bit texels: a 32_32 uint image viewed as R64ui.
+    public bool Atomic64 { get; set; }
     public bool DepthCompare { get; set; }
     // Guest compare function (0..7) evaluated in the shader for a depth-compare
     // image whose format has no Vulkan depth equivalent; -1 when not emulated.

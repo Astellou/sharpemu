@@ -32,6 +32,13 @@ public static partial class ImageRequestBuilders
             format = Format.D32Sfloat;
         }
 
+        // A 64-bit atomic placeholder is a 32_32 uint texel seen through an R64ui view.
+        var viewFormat = format;
+        if (storage && shape.Atomic64)
+        {
+            (format, guestFormat, viewFormat) = (Format.R32G32Uint, GuestPixelFormat.Bits32_32UInt, Format.R64Uint);
+        }
+
         var description = ImageDescription.Create();
         description.PixelFormat = format;
         description.GuestFormat = guestFormat;
@@ -40,12 +47,12 @@ public static partial class ImageRequestBuilders
             : shape.OneDimensional ? GuestImageType.Color1D : GuestImageType.Color2D;
         description.Extent = new Extent3D(1, 1, 1);
         description.Resources = SubresourceCount.Single;
-        description.BytesPerBlock = 4;
+        description.BytesPerBlock = viewFormat == Format.R64Uint ? 8u : 4u;
         description.Samples = shape.Multisampled ? 4u : 1u;
         description.MipLayout[0] = new MipLevelLayout { Offset = 0, Size = 0, Pitch = 1, Height = 1 };
         var view = ImageViewDescription.Default with
         {
-            Format = format,
+            Format = viewFormat,
             Type = shape.Volume
                 ? ImageViewType.Type3D
                 : shape.OneDimensional
@@ -285,7 +292,10 @@ public static partial class ImageRequestBuilders
             pixelFormat = depthFormat.DepthAttachmentFormat;
         }
         // Atomic storage images are declared as UINT in SPIR-V, including float atomics.
-        var storageViewFormat = storage && (shape.Atomic || format == GuestPixelFormat.Bits32SInt) ? Format.R32Uint : ViewFormatRules.SrgbStorageFormat(pixelFormat);
+        // 64-bit atomics view the 32_32 uint image as one R64ui texel (same 64-bit class).
+        var storageViewFormat = storage && shape.Atomic64 ? Format.R64Uint
+            : storage && (shape.Atomic || format == GuestPixelFormat.Bits32SInt) ? Format.R32Uint
+            : ViewFormatRules.SrgbStorageFormat(pixelFormat);
         var viewFormat = storage && storageViewFormat != Format.Undefined ? storageViewFormat : pixelFormat;
         var blockBytes = GuestPixelFormats.BlockCompressedBytes(format);
         var description = ImageDescription.Create();

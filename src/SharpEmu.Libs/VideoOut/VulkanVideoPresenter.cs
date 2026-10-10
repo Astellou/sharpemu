@@ -91,6 +91,16 @@ internal static unsafe partial class VulkanVideoPresenter
     private static void SetSharedInt64AtomicsCapability(bool supported) =>
         Volatile.Write(ref _sharedInt64AtomicsSupported, supported ? 1 : 0);
 
+    private static int _imageInt64AtomicsSupported;
+
+    // True when the device enables shaderImageInt64Atomics, so 64-bit image atomics
+    // (UE5 Nanite's visibility buffer) compile against an R64ui view.
+    internal static bool ImageInt64AtomicsEnabled =>
+        Volatile.Read(ref _imageInt64AtomicsSupported) != 0;
+
+    private static void SetImageInt64AtomicsCapability(bool supported) =>
+        Volatile.Write(ref _imageInt64AtomicsSupported, supported ? 1 : 0);
+
     internal static bool GraphicsSubgroupOperationsEnabled =>
         VulkanGraphicsSubgroupPolicy.ShouldUseNativeGraphicsSubgroups(
             unchecked((uint)Volatile.Read(ref _nativeSubgroupSize)),

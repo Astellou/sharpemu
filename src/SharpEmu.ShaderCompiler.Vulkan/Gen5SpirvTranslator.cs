@@ -5067,6 +5067,43 @@ public static partial class Gen5SpirvTranslator
                     return false;
                 }
 
+                // A 64-bit atomic (an R64ui view of a 32_32 uint image) takes its value
+                // from a register pair, its compare-swap comparand from the next pair,
+                // and returns the old texel split back into the first pair.
+                if (resource.ComponentType == _ulongType)
+                {
+                    var coordinates64 = BuildIntegerCoordinates(
+                        image,
+                        0,
+                        ImageCoordinateComponentCount(resource));
+                    EmitExecConditional(() =>
+                    {
+                        var pointer = _module.AddInstruction(
+                            SpirvOp.ImageTexelPointer,
+                            _module.TypePointer(SpirvStorageClass.Image, _ulongType),
+                            resource.Variable,
+                            coordinates64,
+                            UInt(0));
+                        var original = EmitAtomic(
+                            atomicOp,
+                            _ulongType,
+                            pointer,
+                            scope: 1,
+                            semantics: 0x808,
+                            value: () => Pair64(LoadV(image.VectorData), LoadV(image.VectorData + 1)),
+                            comparator: () => Pair64(LoadV(image.VectorData + 2), LoadV(image.VectorData + 3)));
+                        if (image.Glc)
+                        {
+                            StoreV(image.VectorData, Narrow(original));
+                            StoreV(
+                                image.VectorData + 1,
+                                Narrow(_module.AddInstruction(SpirvOp.ShiftRightLogical, _ulongType, original, ULong(32))));
+                        }
+                    });
+
+                    return true;
+                }
+
                 var signed = resource.ComponentKind == ImageComponentKind.Sint;
                 var coordinateComponentCount =
                     ImageCoordinateComponentCount(resource);

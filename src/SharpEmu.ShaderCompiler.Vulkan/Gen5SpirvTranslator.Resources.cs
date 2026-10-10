@@ -36,6 +36,12 @@ public static partial class Gen5SpirvTranslator
             return false;
         }
 
+        if (request.UsesImageInt64Atomics && !request.SupportsImageInt64Atomics)
+        {
+            error = "64-bit image atomics need shaderImageInt64Atomics (VK_EXT_shader_image_atomic_int64), which this device lacks";
+            return false;
+        }
+
         if (request.Stage == ShaderStage.Pixel)
         {
             if (request.PixelOutputs.Count > 8 || request.PixelOutputs.Any(output => output.GuestSlot > 7))
@@ -346,6 +352,8 @@ public static partial class Gen5SpirvTranslator
             // they just get there through a bitcast + integer compare-exchange
             // (see Gen5SpirvTranslator.cs's ImageAtomicFmax/Fmin case) instead
             // of through the declared image/sampled type.
+            // A 64-bit atomic class is an R64ui image whose texels are ulongs.
+            var atomic64 = ImageDescriptorBinding.IsAtomic64(binding.Kind);
             var kind = atomic
                 ? ImageComponentKind.Uint
                 : numericClass switch
@@ -354,7 +362,7 @@ public static partial class Gen5SpirvTranslator
                     ImageNumericClass.Sint => ImageComponentKind.Sint,
                     _ => ImageComponentKind.Float,
                 };
-            var componentType = kind switch
+            var componentType = atomic64 ? _ulongType : kind switch
             {
                 ImageComponentKind.Sint => _intType,
                 ImageComponentKind.Uint => _uintType,
@@ -374,7 +382,13 @@ public static partial class Gen5SpirvTranslator
             }
             var arrayed = dimension is ImageDimension.Dim1DArray or ImageDimension.Dim2DArray or ImageDimension.Dim2DMsaaArray;
             var multisampled = dimension is ImageDimension.Dim2DMsaa or ImageDimension.Dim2DMsaaArray;
-            var format = atomic ? SpirvImageFormat.R32ui : SpirvImageFormat.Unknown;
+            var format = atomic64 ? SpirvImageFormat.R64ui : atomic ? SpirvImageFormat.R32ui : SpirvImageFormat.Unknown;
+            if (atomic64)
+            {
+                _module.AddExtension("SPV_EXT_shader_image_int64");
+                _module.AddCapability(SpirvCapability.Int64ImageExt);
+                _module.AddCapability(SpirvCapability.Int64Atomics);
+            }
             if (isStorage && !atomic)
             {
                 _module.AddCapability(SpirvCapability.StorageImageReadWithoutFormat);

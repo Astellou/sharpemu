@@ -25,6 +25,7 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
     private const uint Format32Uint = 20;
     private const uint Format32Sint = 21;
     private const uint Format32Float = 22;
+    private const uint Format32x2Uint = 62;
     private const uint ImageType2D = 9;
     private const uint ResultRegister = 8;
     private const uint ResultBytes = 64;
@@ -112,6 +113,22 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         return Program([.. instructions]);
     }
 
+    // Every lane maxes texel (0, 0) of a 32_32 uint image with (high = lane, low = ~lane),
+    // as UE5 Nanite packs depth over triangle id: the high dword must decide the max.
+    private static Gen5ShaderProgram AtomicUmax64Program()
+    {
+        var instructions = new List<Gen5ShaderInstruction>();
+        uint pc = 0;
+        instructions.AddRange(ImageWords(ref pc, FirstImageRegister, FirstImageAddress, Format32x2Uint));
+        instructions.Add(Vop1(pc, "VMovB32", 5, Gen5Operand.Vector(0))); pc += 8;
+        instructions.Add(Vop1(pc, "VNotB32", 4, Gen5Operand.Vector(0))); pc += 8;
+        instructions.Add(MoveVector(pc, 0, 0)); pc += 8;
+        instructions.Add(MoveVector(pc, 1, 0)); pc += 8;
+        instructions.Add(Image(pc, "ImageAtomicUmax", FirstImageRegister, dmask: 3)); pc += 8;
+        instructions.Add(EndProgram(pc));
+        return Program([.. instructions]);
+    }
+
     private static ImageDescription Describe(ulong guestOffset, Format format, GuestPixelFormat guestFormat, uint width, uint height, uint levels)
     {
         var description = ImageDescription.Create();
@@ -127,7 +144,7 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
 
     private sealed class Run : IDisposable
     {
-        public Run(HeadlessVulkan vulkan, Gen5ShaderProgram program, uint[] registers, uint threadCount)
+        public Run(HeadlessVulkan vulkan, Gen5ShaderProgram program, uint[] registers, uint threadCount, bool imageInt64Atomics = false)
         {
             Plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, 0x5348_4152_5045_4D55, 0, 64);
             var snapshot = new ResourceSnapshot();
@@ -141,7 +158,12 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
                 false,
                 ShaderCompileRequest.RequiresFlattenedTable(Plan, Resources),
                 false);
-            Request = new ShaderCompileRequest(Plan, Resources, layout) { LocalSizeX = threadCount, ThreadCountX = threadCount };
+            Request = new ShaderCompileRequest(Plan, Resources, layout)
+            {
+                LocalSizeX = threadCount,
+                ThreadCountX = threadCount,
+                SupportsImageInt64Atomics = imageInt64Atomics,
+            };
             Assert.True(Gen5SpirvTranslator.TryCompileProgram(Request, out var shader, out var error), error);
             Harness = new ImageTestHarness(vulkan);
             Runner = new LayoutComputeRunner(Harness, Request, shader.Spirv);
@@ -569,5 +591,51 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         Assert.Equal(1u, texels[4]);
         run.Harness.AssertNoValidationMessages();
         output.WriteLine($"Verified per-mip storage descriptors on {vulkan.DeviceName}; validation={vulkan.ValidationEnabled}.");
+    }
+
+    [Fact]
+    public void ImageAtomicUmax64_KeepsTheLargest64BitTexelOfA32x2UintImage()
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan) || !vulkan!.SupportsImageInt64Atomics)
+        {
+            output.WriteLine("Skipped: the device lacks shaderImageInt64Atomics.");
+            return;
+        }
+
+        const uint lanes = 32;
+        using var run = new Run(vulkan, AtomicUmax64Program(), UserData(), lanes, imageInt64Atomics: true);
+        var image = run.Resources.Info.Images[0];
+        Assert.True(image.Atomic64);
+        Assert.True(ImageDescriptorBinding.IsAtomic64(ImageDescriptorBinding.ForImage(image)!.Value));
+
+        var description = Describe(0, Format.R32G32Uint, GuestPixelFormat.Bits32_32UInt, 4, 4, 1);
+        description.BytesPerBlock = 8;
+        var target = run.Harness.CreateImage(description);
+        var copies = ImageTestHarness.WholeImageCopies(description, 0);
+        // Each texel is (low, high); texel 0 starts at 0x00000000_FFFFFFFF, below every lane but
+        // lane 0, so a max of the low dword alone would keep it.
+        var initial = new uint[4 * 4 * 2];
+        for (var texel = 0; texel < 16; texel++)
+        {
+            initial[texel * 2] = texel == 0 ? 0xFFFF_FFFFu : 0x1234_0000u + (uint)texel;
+            initial[texel * 2 + 1] = texel == 0 ? 0u : 0xABCD_0000u + (uint)texel;
+        }
+
+        run.Harness.UploadImage(target, MemoryMarshal.AsBytes<uint>(initial), copies);
+        var view = new DescriptorImageInfo
+        {
+            ImageView = target.GetOrCreateView(ImageViewDescription.Default with { Format = Format.R64Uint, Usage = ImageUsageFlags.StorageBit }),
+            ImageLayout = ImageLayout.General,
+        };
+        run.Dispatch(run.BindImages(new Dictionary<int, DescriptorImageInfo[]> { [0] = [view] }),
+            command => target.Transition(ImageLayout.General, AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit, null, command));
+
+        var texels = MemoryMarshal.Cast<byte, uint>(run.Harness.ReadImage(target, copies, (ulong)initial.Length * 4)).ToArray();
+        Assert.Equal(~(lanes - 1), texels[0]);
+        Assert.Equal(lanes - 1, texels[1]);
+        Assert.Equal(initial[2..], texels[2..]);
+        run.Harness.AssertNoValidationMessages();
+        output.WriteLine($"Verified 64-bit image atomics on {vulkan.DeviceName}; validation={vulkan.ValidationEnabled}.");
     }
 }

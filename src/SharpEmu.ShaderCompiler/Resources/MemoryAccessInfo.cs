@@ -321,6 +321,10 @@ public sealed class MemoryAccessTable
         var adjust = mimgOpcode is
             0xA0 or 0xA1 or 0xA5 or 0xA6 or 0xA8 or 0xA9 or 0xAD or 0xAE or
             0xB0 or 0xB1 or 0xB5 or 0xB6 or 0xB8 or 0xB9 or 0xBD or 0xBE;
+        // An integer image atomic on 64-bit data enables two data dwords (four with the
+        // compare-swap comparand) instead of one (two).
+        var atomic64 = atomic && opcode is not ("ImageAtomicFcmpswap" or "ImageAtomicFmin" or "ImageAtomicFmax") &&
+            System.Numerics.BitOperations.PopCount(control.Dmask) == (opcode == "ImageAtomicCmpswap" ? 4 : 2);
         return new MemoryAccessInfo
         {
             Pc = instruction.Pc,
@@ -330,6 +334,7 @@ public sealed class MemoryAccessTable
             ImageClass = atomic || store ? ImageResourceClass.Storage : ImageResourceClass.Sampled,
             NeedsSampler = sampled,
             Dmask = control.Dmask,
+            DataBits = atomic64 ? 64u : 32u,
             ImageDimension = DecodeImageDimension(control.Dimension),
             ImageSampleFlags =
                 (compare ? ImageSampleFlags.Compare : ImageSampleFlags.None) |

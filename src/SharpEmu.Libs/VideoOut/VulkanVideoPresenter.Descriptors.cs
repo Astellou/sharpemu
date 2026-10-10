@@ -108,7 +108,8 @@ internal static unsafe partial class VulkanVideoPresenter
             R128: image.R128,
             Multisampled: image.Dimension is ImageDimension.Dim2DMsaa or ImageDimension.Dim2DMsaaArray,
             DepthCompare: image.DepthCompare,
-            Atomic: image.Atomic);
+            Atomic: image.Atomic,
+            Atomic64: image.Atomic64);
 
         // The last lookup of one image of one program. A draw binds the same descriptor as the
         // previous draw of its program most of the time; while no image the lookup could find has

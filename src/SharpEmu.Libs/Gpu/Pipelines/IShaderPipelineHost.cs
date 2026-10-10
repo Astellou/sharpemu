@@ -44,6 +44,9 @@ internal interface IShaderPipelineHost
     // The device supports shaderSharedInt64Atomics, so LDS 64-bit atomics can be
     // emitted as real 64-bit atomics instead of a non-atomic 32-bit pair.
     bool SharedInt64AtomicsEnabled { get; }
+    // The device supports shaderImageInt64Atomics, so 64-bit image atomics compile;
+    // without it their shaders are refused.
+    bool ImageInt64AtomicsEnabled => false;
     bool ShaderSignedZeroInfNanPreserveFloat32Supported => false;
     bool ExecGuardElisionEnabled => true;
     ShaderPrewarmList? ShaderPrewarm => null;

@@ -729,11 +729,13 @@ public sealed partial class ResourceTracker
         var resourceClass = memory.ImageClass;
         var mip = resourceClass == ImageResourceClass.Storage && memory.ImageHasMip ? ImageMipMode.DynamicStorage : ImageMipMode.None;
         var depth = (memory.ImageSampleFlags & ImageSampleFlags.Compare) != 0;
+        // 64-bit atomics bind through their own R64ui view, apart from the 32-bit accesses.
+        var atomic64 = memory.Access == MemoryAccess.Atomic && memory.DataBits == 64;
         for (var index = 0; index < _info.Images.Count; index++)
         {
             var image = _info.Images[index];
             if (image.Source == source && image.ResourceClass == resourceClass && image.Dimension == memory.ImageDimension &&
-                image.MipMode == mip && image.DepthCompare == depth && image.R128 == memory.ImageR128)
+                image.MipMode == mip && image.DepthCompare == depth && image.R128 == memory.ImageR128 && image.Atomic64 == atomic64)
             {
                 Merge(image, memory, pc);
                 return (uint)index;
@@ -754,6 +756,7 @@ public sealed partial class ResourceTracker
             MipMode = mip,
             DepthCompare = depth,
             R128 = memory.ImageR128,
+            Atomic64 = atomic64,
         };
         Merge(added, memory, pc);
         _info.Images.Add(added);

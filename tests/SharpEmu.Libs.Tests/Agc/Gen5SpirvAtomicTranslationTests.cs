@@ -164,6 +164,68 @@ public sealed class Gen5SpirvAtomicTranslationTests
         Assert.Contains((ushort)SpirvOp.AtomicIAdd, opcodes);
     }
 
+    // IMAGE_ATOMIC_UMAX v[2:3], v[0:1], s[4:11] dmask:0x3 glc: UE5 Nanite's visibility
+    // buffer write, a 64-bit max of depth and triangle id.
+    private static readonly uint[] ImageAtomicUmax64 = [0xF05C2300, 0x00010200];
+
+    // A one-pixel 32_32 uint image (format 62) with identity component selection.
+    private static Dictionary<uint, uint> Image32x2UintRegisters() => new()
+    {
+        [4] = (uint)(BufferAddress >> 8),
+        [5] = 62u << 20,
+        [7] = (9u << 28) | 0xFACu,
+    };
+
+    [Fact]
+    public void ImageAtomicUmax64_EmitsR64uiAtomicUMax()
+    {
+        var spirv = CompileComputeSpirv(ImageAtomicUmax64, Image32x2UintRegisters(), imageInt64Atomics: true);
+        var opcodes = CollectOpcodes(spirv);
+
+        Assert.Contains((ushort)SpirvOp.ImageTexelPointer, opcodes);
+        Assert.Contains((ushort)SpirvOp.AtomicUMax, opcodes);
+        Assert.True(ContainsInstruction(spirv, SpirvOp.Capability, (uint)SpirvCapability.Int64ImageExt));
+        Assert.True(ContainsInstruction(spirv, SpirvOp.Capability, (uint)SpirvCapability.Int64Atomics));
+        // OpTypeImage: result, sampled type, dim, depth, arrayed, ms, sampled, format.
+        Assert.True(ContainsInstruction(spirv, SpirvOp.TypeImage, (uint)SpirvImageFormat.R64ui, operandIndex: 7));
+    }
+
+    [Fact]
+    public void ImageAtomicCmpswap64_TakesFourDataRegisters()
+    {
+        // IMAGE_ATOMIC_CMPSWAP v[2:5], v[0:1], s[4:11] dmask:0xf glc.
+        var opcodes = CompileComputeOpcodes([0xF0402F00, 0x00010200], Image32x2UintRegisters(), imageInt64Atomics: true);
+
+        Assert.Contains((ushort)SpirvOp.AtomicCompareExchange, opcodes);
+    }
+
+    [Fact]
+    public void ImageAtomic64_WithoutDeviceSupport_IsRefused()
+    {
+        var request = BuildComputeRequest(ImageAtomicUmax64, Image32x2UintRegisters(), imageInt64Atomics: false);
+
+        Assert.True(request.UsesImageInt64Atomics);
+        Assert.False(Gen5SpirvTranslator.TryCompileProgram(request, out _, out var error));
+        Assert.Contains("shaderImageInt64Atomics", error);
+    }
+
+    [Fact]
+    public void ImageAtomic32_KeepsR32uiOnA32BitImage()
+    {
+        // IMAGE_ATOMIC_UMAX v2, v[0:1], s[4:11] dmask:0x1 glc against an R32ui T#.
+        var spirv = CompileComputeSpirv(
+            [0xF05C2100, 0x00010200],
+            new Dictionary<uint, uint>
+            {
+                [4] = (uint)(BufferAddress >> 8),
+                [5] = 20u << 20,
+                [7] = (9u << 28) | 0xFACu,
+            });
+
+        Assert.True(ContainsInstruction(spirv, SpirvOp.TypeImage, (uint)SpirvImageFormat.R32ui, operandIndex: 7));
+        Assert.False(ContainsInstruction(spirv, SpirvOp.Capability, (uint)SpirvCapability.Int64ImageExt));
+    }
+
     private static Dictionary<uint, uint> BufferDescriptorRegisters() => new()
     {
         // V# in s[0:3]: base=BufferAddress, stride=0, numRecords=64 bytes, type=0.
@@ -175,12 +237,44 @@ public sealed class Gen5SpirvAtomicTranslationTests
 
     private static HashSet<ushort> CompileComputeOpcodes(
         uint[] programWords,
-        Dictionary<uint, uint> userDataRegisters) =>
-        CollectOpcodes(CompileComputeSpirv(programWords, userDataRegisters));
+        Dictionary<uint, uint> userDataRegisters,
+        bool imageInt64Atomics = false) =>
+        CollectOpcodes(CompileComputeSpirv(programWords, userDataRegisters, imageInt64Atomics));
+
+    // An instruction of the given opcode whose operand word (after the opcode word) has the value.
+    private static bool ContainsInstruction(byte[] spirv, SpirvOp op, uint value, int operandIndex = 0)
+    {
+        for (var offset = 5 * sizeof(uint); offset + sizeof(uint) <= spirv.Length;)
+        {
+            var word = BinaryPrimitives.ReadUInt32LittleEndian(spirv.AsSpan(offset, sizeof(uint)));
+            var wordCount = Math.Max((int)(word >> 16), 1);
+            if ((ushort)word == (ushort)op && operandIndex + 1 < wordCount &&
+                BinaryPrimitives.ReadUInt32LittleEndian(
+                    spirv.AsSpan(offset + ((operandIndex + 1) * sizeof(uint)), sizeof(uint))) == value)
+            {
+                return true;
+            }
+
+            offset += wordCount * sizeof(uint);
+        }
+
+        return false;
+    }
 
     private static byte[] CompileComputeSpirv(
         uint[] programWords,
-        Dictionary<uint, uint> userDataRegisters)
+        Dictionary<uint, uint> userDataRegisters,
+        bool imageInt64Atomics = false)
+    {
+        var request = BuildComputeRequest(programWords, userDataRegisters, imageInt64Atomics);
+        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
+        return shader.Spirv;
+    }
+
+    private static ShaderCompileRequest BuildComputeRequest(
+        uint[] programWords,
+        Dictionary<uint, uint> userDataRegisters,
+        bool imageInt64Atomics)
     {
         var memory = new FakeCpuMemory(ShaderAddress, 0x2000);
         var context = new CpuContext(memory, Generation.Gen5);
@@ -203,9 +297,7 @@ public sealed class Gen5SpirvAtomicTranslationTests
             BindingLayout.UsesGlobalDataShare(program),
             ShaderCompileRequest.RequiresFlattenedTable(plan, resources),
             BindingLayout.ReadsShaderBase(program), 0);
-        var request = new ShaderCompileRequest(plan, resources, layout);
-        Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out error), error);
-        return shader.Spirv;
+        return new ShaderCompileRequest(plan, resources, layout) { SupportsImageInt64Atomics = imageInt64Atomics };
     }
 
     private static HashSet<ushort> CompileVertexOpcodes(uint[] programWords)

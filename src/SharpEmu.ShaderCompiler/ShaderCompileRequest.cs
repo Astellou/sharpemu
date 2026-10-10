@@ -173,6 +173,13 @@ public sealed class ShaderCompileRequest
     // 64-bit atomics are emitted as real 64-bit atomics instead of a pair of
     // 32-bit ones, which is not atomic as a pair.
     public bool SupportsSharedInt64Atomics { get; init; }
+
+    // The device supports 64-bit integer atomics on storage images
+    // (VK_EXT_shader_image_atomic_int64's shaderImageInt64Atomics). Without it a
+    // shader with 64-bit image atomics is refused instead of compiled.
+    public bool SupportsImageInt64Atomics { get; init; }
+
+    public bool UsesImageInt64Atomics => Resources.Info.Images.Any(static image => image.Atomic64);
     public bool ShaderSignedZeroInfNanPreserveFloat32Supported { get; init; }
     public Gen5ComputeSystemRegisters? ComputeSystemRegisters { get; init; }
 

@@ -55,6 +55,8 @@ public static class ImageDescriptorBinding
     private const uint SampledCompare2DBinding = 43;
     private const uint SampledCompare2DArrayBinding = 44;
     private const uint SampledCompareCubeBinding = 45;
+    // 64-bit atomics view a 32_32 uint image as R64ui, which no 32-bit array can hold.
+    private const uint Atomic64UintBinding = 46;
 
     public static DescriptorBindingKind? ForImage(ImageResource image)
     {
@@ -106,7 +108,7 @@ public static class ImageDescriptorBinding
             {
                 if (image.Atomic)
                 {
-                    return image.NumericClass == ImageNumericClass.Uint
+                    return image.NumericClass == ImageNumericClass.Uint && !image.Atomic64
                         ? (DescriptorBindingKind)AtomicCubeUintBinding
                         : null;
                 }
@@ -156,7 +158,7 @@ public static class ImageDescriptorBinding
                     return null;
                 }
 
-                baseBinding = AtomicUintBinding;
+                baseBinding = image.Atomic64 ? Atomic64UintBinding : AtomicUintBinding;
             }
             else
             {
@@ -248,6 +250,10 @@ public static class ImageDescriptorBinding
 
     public static uint ArrayIndex(DescriptorBindingKind kind) => (uint)kind - BindingLayout.FirstImageBinding;
 
+    // An atomic class whose texels are 64 bits wide (R64ui).
+    public static bool IsAtomic64(DescriptorBindingKind kind) =>
+        (uint)kind >= Atomic64UintBinding && (uint)kind < (uint)DescriptorBindingKind.Samplers;
+
     public static bool IsCube(DescriptorBindingKind kind) =>
         (uint)kind is >= SampledCubeFloatBinding and <= AtomicCubeUintBinding or SampledCompareCubeBinding;
 
@@ -311,9 +317,14 @@ public static class ImageDescriptorBinding
             return (ImageResourceClass.Storage, offset / 5 == 0 ? ImageNumericClass.Float : ImageNumericClass.Uint, StorageDimensions[offset % 5], false);
         }
 
-        if (index >= AtomicUintBinding && index < (uint)DescriptorBindingKind.Samplers)
+        if (index >= AtomicUintBinding && index < SampledCubeFloatBinding)
         {
             return (ImageResourceClass.Storage, ImageNumericClass.Uint, StorageDimensions[index - AtomicUintBinding], true);
+        }
+
+        if (index >= Atomic64UintBinding && index < (uint)DescriptorBindingKind.Samplers)
+        {
+            return (ImageResourceClass.Storage, ImageNumericClass.Uint, StorageDimensions[index - Atomic64UintBinding], true);
         }
 
         return (ImageResourceClass.None, ImageNumericClass.Unsupported, ImageDimension.Unknown, false);
@@ -326,7 +337,7 @@ public sealed class BindingLayout : IEquatable<BindingLayout>
 {
     public const uint FirstImageBinding = 1;
     public const uint FirstStorageImageBinding = 22;
-    public const uint ImageBindingCount = 45;
+    public const uint ImageBindingCount = 50;
     public const uint NoShaderBase = uint.MaxValue;
     public const uint ShaderBaseDwordCount = 2;
     private const int ScalarRegisterCount = 256;

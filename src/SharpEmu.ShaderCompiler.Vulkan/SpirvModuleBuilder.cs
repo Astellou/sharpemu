@@ -198,6 +198,7 @@ public enum SpirvCapability : uint
     Float64 = 10,
     Int64 = 11,
     Int64Atomics = 12,
+    Int64ImageExt = 5016,
     Int16 = 22,
     ImageGatherExtended = 25,
     StorageImageExtendedFormats = 49,
@@ -338,6 +339,7 @@ public enum SpirvImageFormat : uint
     Rg8ui = 37,
     R16ui = 38,
     R8ui = 39,
+    R64ui = 40,
 }
 
 public sealed class SpirvModuleBuilder
@@ -379,6 +381,7 @@ public sealed class SpirvModuleBuilder
     // The value of every 32-bit integer and boolean constant, for folding instructions over them.
     private readonly Dictionary<uint, uint> _scalarConstantValues = [];
     private readonly HashSet<SpirvCapability> _declaredCapabilities = [];
+    private readonly HashSet<string> _declaredExtensions = [];
     private readonly Dictionary<string, uint> _extInstImports = [];
     private uint _nextId = 1;
     private uint? _voidType;
@@ -395,8 +398,13 @@ public sealed class SpirvModuleBuilder
         }
     }
 
-    public void AddExtension(string extension) =>
-        EmitWithString(_extensions, SpirvOp.Extension, [], extension);
+    public void AddExtension(string extension)
+    {
+        if (_declaredExtensions.Add(extension))
+        {
+            EmitWithString(_extensions, SpirvOp.Extension, [], extension);
+        }
+    }
 
     public uint ImportExtInst(string name)
     {

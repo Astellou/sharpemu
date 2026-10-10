@@ -1042,9 +1042,12 @@ public static class ResourceMaterializer
             // MIMG op 0x1D-0x1F) are lowered as a compare-and-swap loop on the
             // raw bit pattern (Gen5SpirvTranslator) and legitimately target a
             // 32-bit float-format UAV instead - reject only formats that are
-            // neither.
-            if (baseImage.Atomic && format != GuestImageFormat.Format32Uint &&
-                GuestImageFormat.SampledNumericClass(format) != ImageNumericClass.Float)
+            // neither. A 64-bit atomic packs its texel in a 32_32 uint image
+            // (UE5's Nanite visibility buffer: depth and triangle id under one max).
+            if (baseImage.Atomic64
+                    ? format != GuestImageFormat.Format32x2Uint
+                    : baseImage.Atomic && format != GuestImageFormat.Format32Uint &&
+                      GuestImageFormat.SampledNumericClass(format) != ImageNumericClass.Float)
             {
                 return Fail($"atomic image descriptor {index} uses unsupported format {format}");
             }
