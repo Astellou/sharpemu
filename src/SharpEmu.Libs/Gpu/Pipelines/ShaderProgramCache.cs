@@ -721,7 +721,7 @@ internal sealed class ShaderProgramCache
 
     internal static bool TryCompilePrewarm(ComputePrewarmRecord record, ShaderCodeCapture code, IGuestGpuBackend compiler,
         bool sharedInt64Atomics, bool execGuardElision, bool signedZeroInfNanPreserve, out IGuestCompiledShader? compiled,
-        out BindingLayout? layout, out string error, bool hostWave64Supported = false)
+        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool defaultSpecialization = false)
     {
         compiled = null;
         layout = null;
@@ -734,7 +734,10 @@ internal sealed class ShaderProgramCache
 
             var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, record.Hash, record.UserDataBase, record.UserDataCount,
                 waveSize: record.Info.WaveSize);
-            var resources = ResourceMaterializer.ApplyTo(plan, record.Specialization);
+            // A shader extracted from the title's files has seen no draw; it compiles
+            // against the plan's own resource classes.
+            var specialization = defaultSpecialization ? ResourceSpecialization.Default(plan.Info) : record.Specialization;
+            var resources = ResourceMaterializer.ApplyTo(plan, specialization);
             layout = AllocateLayout(program, plan, resources, record.UserDataBase, record.UserDataCount, record.PushDataCursor,
                 record.Info.DispatchThreadDimensions);
             var request = BuildComputeRequest(plan, resources, layout, record.Info, record.SystemRegisters,

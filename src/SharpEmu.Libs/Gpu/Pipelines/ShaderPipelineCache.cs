@@ -16,7 +16,7 @@ namespace SharpEmu.Libs.Gpu.Pipelines;
 // The pipeline provider behind the executor: programs by identity, pipelines by their full static state.
 internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 {
-    private const uint VertexUserDataBase = 8;
+    internal const uint VertexUserDataBase = 8;
     private const uint MaxPixelInputs = 32;
     private const uint MaxViewportDimension = 16384;
 

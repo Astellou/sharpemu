@@ -42,4 +42,14 @@ public interface ICpuDispatcher
         IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
         string moduleName = "module",
         CpuExecutionOptions executionOptions = default);
+
+    // Runs a guest routine on behalf of the host, with its first argument in rdi.
+    // Every host call shares one stack, TLS block, and return stub.
+    OrbisGen2Result DispatchHostCall(
+        ulong entryPoint,
+        ulong argument,
+        Generation generation,
+        IReadOnlyDictionary<ulong, string>? importStubs = null,
+        IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
+        CpuExecutionOptions executionOptions = default);
 }

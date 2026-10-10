@@ -17,6 +17,7 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
     {
         ProcessEntry,
         ModuleInitializer,
+        HostCall,
     }
 
     // The top of the x86-64 user address space (0x7FFD..0x7FFF) is only
@@ -47,6 +48,11 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
     private readonly IVirtualMemory _virtualMemory;
     private readonly IModuleManager _moduleManager;
     private INativeCpuBackend? _nativeCpuBackend;
+    // Stack, TLS, and return stub regions are never unmapped, so host calls map
+    // theirs once instead of consuming a fresh slot per call.
+    private ulong _hostCallStackBase;
+    private ulong _hostCallTlsBase;
+    private ulong _hostCallReturnStub;
 
     public CpuDispatcher(
         IVirtualMemory virtualMemory,
@@ -133,6 +139,25 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         }
     }
 
+    public OrbisGen2Result DispatchHostCall(
+        ulong entryPoint,
+        ulong argument,
+        Generation generation,
+        IReadOnlyDictionary<ulong, string>? importStubs = null,
+        IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
+        CpuExecutionOptions executionOptions = default)
+    {
+        return DispatchEntryCore(
+            entryPoint,
+            generation,
+            importStubs,
+            runtimeSymbols,
+            "host-call",
+            executionOptions,
+            EntryFrameKind.HostCall,
+            argument);
+    }
+
     public bool TryInstallAdditionalModule(
         IReadOnlyDictionary<ulong, string> importStubs,
         IReadOnlyDictionary<string, ulong> runtimeSymbols,
@@ -154,9 +179,11 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
         string processImageName = "eboot.bin",
         CpuExecutionOptions executionOptions = default,
-        EntryFrameKind frameKind = EntryFrameKind.ProcessEntry)
+        EntryFrameKind frameKind = EntryFrameKind.ProcessEntry,
+        ulong hostCallArgument = 0)
     {
         Console.Error.WriteLine("[DISPATCHER] DispatchEntryCore STARTING...");
+        var isHostCall = frameKind == EntryFrameKind.HostCall;
 
         LastEntryPoint = entryPoint;
         LastTrapInfo = null;
@@ -183,13 +210,13 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
             return result;
         }
 
-        var stackBase = TryMapStackRegion();
+        var stackBase = isHostCall ? ReuseHostCallRegion(ref _hostCallStackBase, TryMapStackRegion) : TryMapStackRegion();
         if (stackBase == 0)
         {
             return FailEarly(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
 
-        var tlsBase = TryMapTlsRegion();
+        var tlsBase = isHostCall ? ReuseHostCallRegion(ref _hostCallTlsBase, TryMapTlsRegion) : TryMapTlsRegion();
         if (tlsBase == 0)
         {
             return FailEarly(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
@@ -204,7 +231,9 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
             GsBase = tlsBase,
         };
 
-        var returnToHostStubAddress = TryMapReturnToHostStubRegion();
+        var returnToHostStubAddress = isHostCall
+            ? ReuseHostCallRegion(ref _hostCallReturnStub, TryMapReturnToHostStubRegion)
+            : TryMapReturnToHostStubRegion();
         if (returnToHostStubAddress == 0)
         {
             return FailEarly(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
@@ -256,6 +285,10 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         else if (!InitializeModuleInitializerFrame(context))
         {
             return FailEarly(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+        else if (isHostCall)
+        {
+            context[CpuRegister.Rdi] = hostCallArgument;
         }
 
         var entryFrameDiagnostic = BuildEntryFrameDiagnostic(
@@ -351,6 +384,16 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         return FailEarly(
             OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_IMPLEMENTED,
             CpuExitReason.NativeBackendUnavailable);
+    }
+
+    private static ulong ReuseHostCallRegion(ref ulong cached, Func<ulong> map)
+    {
+        if (cached == 0)
+        {
+            cached = map();
+        }
+
+        return cached;
     }
 
     private ulong TryMapStackRegion()

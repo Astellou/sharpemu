@@ -285,6 +285,12 @@ internal static partial class Program
             return 1;
         }
 
+        if (!TryGetPrebuildOptions(args, out var prebuildShaders, out var prebuildDumpDirectory, out var prebuildMaxGroups))
+        {
+            Log.Error("Invalid --prebuild-limit value.");
+            return 1;
+        }
+
         SharpEmu.Debugger.DebuggerServerHost? debugHost = null;
         if (debugServerEnabled)
         {
@@ -335,7 +341,9 @@ internal static partial class Program
                     });
 
                 Console.Error.WriteLine($"[DEBUG] Running: {ebootPath}");
-                result = runtime.Run(ebootPath);
+                result = prebuildShaders
+                    ? runtime.PrebuildShaders(ebootPath, prebuildDumpDirectory, prebuildMaxGroups)
+                    : runtime.Run(ebootPath);
                 Console.Error.WriteLine($"[DEBUG] Result: {result}");
             }
             catch (Exception ex)
@@ -1051,6 +1059,35 @@ internal static partial class Program
         return true;
     }
 
+    /// <summary>
+    /// Detects <c>--prebuild-shaders</c>, which boots the title only far enough to
+    /// extract its shaders, with optional <c>--prebuild-dump=&lt;dir&gt;</c> and
+    /// <c>--prebuild-limit=&lt;groups&gt;</c>.
+    /// </summary>
+    private static bool TryGetPrebuildOptions(string[] args, out bool enabled, out string? dumpDirectory, out int maxGroups)
+    {
+        enabled = false;
+        dumpDirectory = null;
+        maxGroups = 0;
+        foreach (var argument in args)
+        {
+            if (string.Equals(argument, "--prebuild-shaders", StringComparison.OrdinalIgnoreCase))
+            {
+                enabled = true;
+            }
+            else if (TrySplitOption(argument, "--prebuild-dump", out var dump) && !string.IsNullOrWhiteSpace(dump))
+            {
+                dumpDirectory = Path.GetFullPath(dump);
+            }
+            else if (TrySplitOption(argument, "--prebuild-limit", out var limit) && (!int.TryParse(limit, out maxGroups) || maxGroups < 0))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool TryParseArguments(
         string[] args,
         out string ebootPath,
@@ -1235,6 +1272,12 @@ internal static partial class Program
             // rejected as an unknown option or mistaken for the eboot path.
             if (string.Equals(argument, "--debug-server", StringComparison.OrdinalIgnoreCase) ||
                 argument.StartsWith("--debug-server=", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Shader prebuild options are parsed separately (see TryGetPrebuildOptions).
+            if (argument.StartsWith("--prebuild-", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

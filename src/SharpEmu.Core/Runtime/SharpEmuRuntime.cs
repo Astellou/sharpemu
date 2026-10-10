@@ -17,6 +17,8 @@ using SharpEmu.Libs.Fiber;
 using SharpEmu.Libs.SystemService;
 using SharpEmu.Libs.Network;
 using SharpEmu.Libs.Np;
+using SharpEmu.Libs.Gpu.Prebuild;
+using SharpEmu.ShaderCompiler.Resources;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
@@ -146,7 +148,58 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         return _selfLoader.Load(bytes.AsSpan(), _virtualMemory, _moduleManager, _fileSystem, mountRoot);
     }
 
-    public OrbisGen2Result Run(string ebootPath)
+    public OrbisGen2Result Run(string ebootPath) => RunCore(ebootPath, instead: null);
+
+    // Boots the title through its module initializers, then extracts the shaders it
+    // ships instead of entering it. The title's own Oodle decoder unpacks them.
+    public OrbisGen2Result PrebuildShaders(string ebootPath, string? dumpDirectory, int maxGroups)
+    {
+        return RunCore(ebootPath, process =>
+        {
+            var oodle = GuestOodle.TryCreate(
+                process.Image,
+                _virtualMemory,
+                _cpuDispatcher,
+                process.Generation,
+                process.ImportStubs,
+                process.RuntimeSymbols,
+                _cpuExecutionOptions);
+            if (oodle is null)
+            {
+                Console.Error.WriteLine("[PREBUILD][ERROR] OodleLZ_Decompress was not found in the executable.");
+                return OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
+            }
+
+            Console.Error.WriteLine($"[PREBUILD][INFO] OodleLZ_Decompress at 0x{oodle.DecompressAddress:X16}");
+            var report = UnrealShaderPrebuild.Run(process.App0Root, oodle, dumpDirectory, maxGroups, Console.Error);
+            Console.Error.WriteLine(
+                $"[PREBUILD][INFO] Done in {report.Elapsed.TotalSeconds:F1}s: libraries={report.Libraries} " +
+                $"groups={report.Groups} failed={report.FailedGroups} missing={report.MissingGroups} " +
+                $"compressed={report.CompressedBytes >> 20}MiB decompressed={report.DecompressedBytes >> 20}MiB");
+            Console.Error.WriteLine(
+                $"[PREBUILD][INFO] Shaders={report.Shaders} unextracted={report.Unextracted} " +
+                $"unique_hashes={report.UniqueHashes.Count} types=" +
+                string.Join(',', report.AgcShaderTypes.OrderBy(type => type.Key).Select(type => $"{type.Key}:{type.Value}")));
+            Console.Error.WriteLine(
+                "[PREBUILD][INFO] Prepared " +
+                string.Join(' ', report.Preparation.OrderBy(type => type.Key).Select(type => $"type{type.Key}={type.Value.Prepared}/{type.Value.Prepared + type.Value.Failed}")));
+            foreach (var (reason, count) in report.Failures.OrderByDescending(failure => failure.Value).Take(12))
+            {
+                Console.Error.WriteLine($"[PREBUILD][INFO]   {count,6} x {reason}");
+            }
+
+            return report.FailedGroups == 0 ? OrbisGen2Result.ORBIS_GEN2_OK : OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+        });
+    }
+
+    private readonly record struct PreparedProcess(
+        SelfImage Image,
+        Generation Generation,
+        string App0Root,
+        IReadOnlyDictionary<ulong, string> ImportStubs,
+        IReadOnlyDictionary<string, ulong> RuntimeSymbols);
+
+    private OrbisGen2Result RunCore(string ebootPath, Func<PreparedProcess, OrbisGen2Result>? instead)
     {
         var normalizedEbootPath = Path.GetFullPath(ebootPath);
         using var app0Binding = BindApp0Root(normalizedEbootPath);
@@ -163,6 +216,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         KernelModuleRegistry.Reset();
         var image = LoadImage(normalizedEbootPath);
         VideoOutExports.ConfigureApplicationInfo(image.Title, image.TitleId, image.Version);
+        ShaderAnalysisCache.UseTitle(image.TitleId);
         KernelMemoryCompatExports.ConfigureApplicationInfo(image.TitleId);
         SaveDataExports.ConfigureApplicationInfo(image.TitleId);
         SystemServiceExports.ConfigureApplicationInfo(image.TitleId, _systemLanguage);
@@ -205,6 +259,11 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             LastSessionSummary = BuildSessionSummary(_cpuDispatcher.LastSessionSummary);
             LastBasicBlockTrace = _cpuDispatcher.LastBasicBlockTrace;
             return failedInitializerResult;
+        }
+
+        if (instead is not null)
+        {
+            return instead(new PreparedProcess(image, generation, app0Root, activeImportStubs, activeRuntimeSymbols));
         }
 
         Console.Error.WriteLine($"[RUNTIME] Dispatching, gen: {generation}");

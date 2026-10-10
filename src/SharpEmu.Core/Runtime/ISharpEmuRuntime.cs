@@ -22,5 +22,7 @@ public interface ISharpEmuRuntime : IDisposable
 
     OrbisGen2Result Run(string ebootPath);
 
+    OrbisGen2Result PrebuildShaders(string ebootPath, string? dumpDirectory, int maxGroups);
+
     OrbisGen2Result DispatchHleCall(string nid, CpuContext context);
 }
