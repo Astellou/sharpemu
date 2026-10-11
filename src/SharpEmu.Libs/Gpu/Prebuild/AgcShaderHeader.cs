@@ -19,6 +19,10 @@ internal sealed class AgcShaderHeader
     private const int UserDataField = 0x08;
     private const int CodeField = 0x10;
     private const int ShRegistersField = 0x20;
+    private const int SpecialsField = 0x28;
+    // A compute shader's specials hold the modifier the title passes to its dispatches,
+    // the DISPATCH_INITIATOR bits it controls such as CS_W32_EN.
+    private const int ComputeDispatchModifierOffset = 0x10;
     private const int InputSemanticsField = 0x30;
     private const int InputSemanticsCountOffset = 0x50;
     private const int ScratchDwordsOffset = 0x54;
@@ -68,6 +72,10 @@ internal sealed class AgcShaderHeader
 
     // The SH registers the header programs, decoded by the same writers draws use.
     public RegisterBanks Registers { get; }
+
+    public uint ComputeDispatchModifier => Pointer(SpecialsField) is not 0 and var specials
+        ? BinaryPrimitives.ReadUInt32LittleEndian(_header.AsSpan((int)(specials - HeaderAddress) + ComputeDispatchModifierOffset))
+        : 0;
 
     public RegisteredShader Registered => new(
         CodeAddress,

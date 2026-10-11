@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using SharpEmu.Libs.Gpu.GpuCommands.Registers;
 using SharpEmu.Libs.Gpu.Pipelines;
 using SharpEmu.Libs.Gpu.Rendering;
 using SharpEmu.ShaderCompiler;
@@ -16,9 +17,6 @@ internal static class ShaderPrebuild
     private const byte AgcComputeType = 0;
     private const byte AgcPixelType = 1;
     private const byte AgcGeometryType = 2;
-    // DISPATCH_INITIATOR as sceAgcCbDispatch builds it without a modifier:
-    // COMPUTE_SHADER_EN | ORDER_MODE, workgroup counts, wave64.
-    private const uint DefaultDispatchInitiator = 0x41;
     // Graphics stages compile as wave32 (see ShaderProgramCache.CreateEntry).
     private const uint GraphicsWaveSize = 32;
 
@@ -43,9 +41,12 @@ internal static class ShaderPrebuild
         }
     }
 
+    // The dispatch initiator sceAgcCbDispatch builds from the modifier the header carries,
+    // which decides the wave size the analysis is keyed by.
     public static ComputeInputInfo ResolveComputeInput(AgcShaderHeader header, bool hostWave64Supported) =>
         ComputeStageInputResolver.Resolve(
-            header.Registers.Shader.Compute, header.Registered, DefaultDispatchInitiator, !hostWave64Supported, 0, 0, 0);
+            header.Registers.Shader.Compute, header.Registered, Agc.AgcExports.DirectDispatchInitiator(header.ComputeDispatchModifier),
+            !hostWave64Supported, 0, 0, 0);
 
     private static bool TryCompileCompute(AgcShaderHeader header, IGuestGpuBackend compiler, bool hostWave64Supported, out string error)
     {
@@ -75,25 +76,29 @@ internal static class ShaderPrebuild
     private static bool TryAnalyzeGraphics(AgcShaderHeader header, ShaderStage stage, out string error)
     {
         var shaders = header.Registers.Shader;
-        // A stage declaring no user data makes a draw count the user registers the title
-        // wrote instead; a program that declares none most often reads none either.
-        uint userDataCount = stage == ShaderStage.Pixel ? shaders.Pixel.Resource2.UserScalarCount : shaders.Vertex.GeometryResource2.UserScalarCount;
-        if (!Gen5ShaderTranslator.TryDecodeProgram(header.CreateContext(), AgcShaderHeader.CodeAddress, out var program, out error))
+        uint declaredCount = stage == ShaderStage.Pixel ? shaders.Pixel.Resource2.UserScalarCount : shaders.Vertex.GeometryResource2.UserScalarCount;
+        if (!Gen5ShaderTranslator.TryDecodeProgram(header.CreateContext(), AgcShaderHeader.CodeAddress, out var decoded, out error))
         {
             return false;
         }
 
         var userDataBase = stage == ShaderStage.Vertex ? ShaderPipelineCache.VertexUserDataBase : 0u;
-        HashSet<uint>? fixedFunctionLoads = null;
-        if (stage == ShaderStage.Vertex)
+        var metadata = new VertexTableMetadata();
+        if (stage == ShaderStage.Vertex &&
+            !VertexInputResolver.TryReadTables(header.CreateContext(), header.Registered, UserScalarRegisters.Capacity, out metadata, out error))
         {
-            if (!VertexInputResolver.TryReadTables(
-                    header.CreateContext(), header.Registered, GpuCommands.Registers.UserScalarRegisters.Capacity, out var metadata, out error))
-            {
-                return false;
-            }
+            return false;
+        }
 
-            if (metadata.VertexAttributeRegister >= 0)
+        // A stage declaring no user data makes a draw count the user registers the title
+        // wrote, one past the highest written, which differs between draws. Every count a
+        // draw can reach is prepared.
+        var counts = declaredCount != 0 ? [declaredCount] : Enumerable.Range(0, UserScalarRegisters.Capacity + 1).Select(count => (uint)count);
+        foreach (var userDataCount in counts)
+        {
+            var program = decoded;
+            HashSet<uint>? fixedFunctionLoads = null;
+            if (stage == ShaderStage.Vertex && metadata.VertexAttributeRegister >= 0)
             {
                 var fetch = EmbeddedVertexFetchDetector.Detect(
                     program,
@@ -105,10 +110,11 @@ internal static class ShaderPrebuild
                 program = fetch.RemoveReplacedTableLoads(program);
                 fixedFunctionLoads = fetch.Loads.Select(load => load.Pc).ToHashSet();
             }
+
+            _ = ShaderResourcePlan.Extract(program, stage, header.Shader.Hash, userDataBase, userDataCount, fixedFunctionLoads,
+                waveSize: GraphicsWaveSize);
         }
 
-        _ = ShaderResourcePlan.Extract(program, stage, header.Shader.Hash, userDataBase, userDataCount, fixedFunctionLoads,
-            waveSize: GraphicsWaveSize);
         error = string.Empty;
         return true;
     }

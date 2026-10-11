@@ -149,7 +149,7 @@ public static partial class AgcExports
         return ReturnPointer(ctx, commandAddress);
     }
 
-    private static uint DirectDispatchInitiator(uint modifier) =>
+    internal static uint DirectDispatchInitiator(uint modifier) =>
         // AGC's direct API takes workgroup counts by default. Preserve the
         // caller's USE_THREAD_DIMENSIONS bit when explicitly requested; do not
         // force it. Demon's Souls' 0xF00100 dispatch is paired with a
