@@ -1060,9 +1060,10 @@ internal static partial class Program
     }
 
     /// <summary>
-    /// Detects <c>--prebuild-shaders</c>, which boots the title only far enough to
-    /// extract its shaders, with optional <c>--prebuild-dump=&lt;dir&gt;</c> and
-    /// <c>--prebuild-limit=&lt;groups&gt;</c>.
+    /// Detects <c>--prebuild-shaders</c>, which extracts and prepares a title's shaders
+    /// (booting an Unreal title only far enough to unpack them), with optional
+    /// <c>--prebuild-dump=&lt;dir&gt;</c> and <c>--prebuild-limit=&lt;n&gt;</c>, a cap on
+    /// Unreal shader groups or Unity asset files.
     /// </summary>
     private static bool TryGetPrebuildOptions(string[] args, out bool enabled, out string? dumpDirectory, out int maxGroups)
     {

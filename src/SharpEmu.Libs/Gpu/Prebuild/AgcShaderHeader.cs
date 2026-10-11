@@ -36,7 +36,7 @@ internal sealed class AgcShaderHeader
     public AgcShaderHeader(ReadOnlySpan<byte> blob, ExtractedShader shader)
     {
         Shader = shader;
-        _header = blob[shader.HeaderOffset..shader.CodeOffset].ToArray();
+        _header = blob.Slice(shader.HeaderOffset, shader.HeaderSize).ToArray();
         foreach (var field in HeaderPointerFields)
         {
             Relocate(field);

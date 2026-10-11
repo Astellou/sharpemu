@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.Core.Loader;
+using SharpEmu.Libs.Gpu.Prebuild;
 using SharpEmu.ShaderCompiler.Resources;
 
 namespace SharpEmu.Core.Runtime;
@@ -15,14 +16,14 @@ public static class ShaderPrebuildState
     public const string VariableName = "SHARPEMU_SHADER_PREBUILD";
     private const string StampFileName = "prebuild.stamp";
 
-    // Unreal Engine titles cook their shaders into IoStore containers; only those are
-    // prepared ahead today.
+    // Unreal Engine titles cook their shaders into IoStore containers and Unity titles
+    // serialize them into the asset files under Media; those are prepared ahead.
     public static bool HasPreparableShaders(string ebootPath)
     {
         try
         {
             var root = Path.GetDirectoryName(Path.GetFullPath(ebootPath));
-            return root is not null && Directory.EnumerateFiles(root, "*.utoc", SearchOption.AllDirectories).Any();
+            return root is not null && (UnityShaderPrebuild.IsUnityTitle(root) || Directory.EnumerateFiles(root, "*.utoc", SearchOption.AllDirectories).Any());
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -66,14 +67,16 @@ public static class ShaderPrebuildState
         return $"{ShaderAnalysisCache.KeyVersion}|{eboot.Length}|{eboot.LastWriteTimeUtc.Ticks}";
     }
 
-    // The title folder the runtime selects, from the same param.json the loader reads.
-    private static string? StampPath(string ebootPath)
+    // The title id the runtime selects its folder by, from the same param.json the loader reads.
+    internal static string? TitleId(string ebootPath)
     {
         var root = Path.GetDirectoryName(Path.GetFullPath(ebootPath));
         var paramJson = root is null ? null : Path.Combine(root, "sce_sys", "param.json");
-        var titleId = paramJson is not null && File.Exists(paramJson)
+        return paramJson is not null && File.Exists(paramJson)
             ? Ps5ParamJsonReader.TryReadPs5Param(File.ReadAllBytes(paramJson)).TitleId
             : null;
-        return ShaderAnalysisCache.DirectoryFor(titleId) is { } directory ? Path.Combine(directory, StampFileName) : null;
     }
+
+    private static string? StampPath(string ebootPath) =>
+        ShaderAnalysisCache.DirectoryFor(TitleId(ebootPath)) is { } directory ? Path.Combine(directory, StampFileName) : null;
 }

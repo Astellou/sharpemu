@@ -150,10 +150,16 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
 
     public OrbisGen2Result Run(string ebootPath) => RunCore(ebootPath, instead: null);
 
-    // Boots the title through its module initializers, then extracts the shaders it
-    // ships instead of entering it. The title's own Oodle decoder unpacks them.
+    // Extracts and prepares the shaders a title ships. Unity data is plain LZ4 and is read
+    // directly; an Unreal title is booted through its module initializers, not entered,
+    // so its own Oodle decoder can unpack its shader libraries.
     public OrbisGen2Result PrebuildShaders(string ebootPath, string? dumpDirectory, int maxGroups)
     {
+        if (UnityShaderPrebuild.IsUnityTitle(Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty))
+        {
+            return PrebuildUnityShaders(ebootPath, dumpDirectory, maxGroups);
+        }
+
         return RunCore(ebootPath, process =>
         {
             var oodle = GuestOodle.TryCreate(
@@ -176,18 +182,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
                 $"[PREBUILD][INFO] Done in {report.Elapsed.TotalSeconds:F1}s: libraries={report.Libraries} " +
                 $"groups={report.Groups} failed={report.FailedGroups} missing={report.MissingGroups} " +
                 $"compressed={report.CompressedBytes >> 20}MiB decompressed={report.DecompressedBytes >> 20}MiB");
-            Console.Error.WriteLine(
-                $"[PREBUILD][INFO] Shaders={report.Shaders} unextracted={report.Unextracted} " +
-                $"unique_hashes={report.UniqueHashes.Count} types=" +
-                string.Join(',', report.AgcShaderTypes.OrderBy(type => type.Key).Select(type => $"{type.Key}:{type.Value}")));
-            Console.Error.WriteLine(
-                "[PREBUILD][INFO] Prepared " +
-                string.Join(' ', report.Preparation.OrderBy(type => type.Key).Select(type => $"type{type.Key}={type.Value.Prepared}/{type.Value.Prepared + type.Value.Failed}")));
-            foreach (var (reason, count) in report.Failures.OrderByDescending(failure => failure.Value).Take(12))
-            {
-                Console.Error.WriteLine($"[PREBUILD][INFO]   {count,6} x {reason}");
-            }
-
+            report.WriteSummary(Console.Error);
             if (report.FailedGroups != 0)
             {
                 return OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
@@ -201,6 +196,22 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
 
             return OrbisGen2Result.ORBIS_GEN2_OK;
         });
+    }
+
+    private static OrbisGen2Result PrebuildUnityShaders(string ebootPath, string? dumpDirectory, int maxFiles)
+    {
+        var app0Root = Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty;
+        ShaderAnalysisCache.UseTitle(ShaderPrebuildState.TitleId(ebootPath));
+        var report = UnityShaderPrebuild.Run(app0Root, dumpDirectory, maxFiles, Console.Error);
+        Console.Error.WriteLine($"[PREBUILD][INFO] Done in {report.Elapsed.TotalSeconds:F1}s");
+        report.WriteSummary(Console.Error);
+        // Only a whole prebuild lets the launcher skip the next one.
+        if (maxFiles == 0)
+        {
+            ShaderPrebuildState.MarkCurrent(ebootPath);
+        }
+
+        return OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
     private readonly record struct PreparedProcess(
