@@ -1,7 +1,7 @@
 {
   "_languageName": "Español",
   "Options.Env.StrictCompute.Desc": "Detener ante rechazos de shaders de cálculo y dibujo (predeterminado).\nDesactivar para omitir el trabajo afectado. Puede haber imágenes ausentes, errores o bloqueos. Reinicia el juego tras un cambio.",
-  "Options.Env.ShaderPrebuild.Desc": "Preparar los shaders de un juego antes de iniciarlo, la primera vez y tras cada actualización de SharpEmu (predeterminado). Solo juegos Unreal Engine.\nDesactívalo para iniciar de inmediato; los shaders se prepararán durante la partida, lo que puede causar tirones.",
+  "Options.Env.ShaderPrebuild.Desc": "Preparar los shaders de un juego antes de iniciarlo, la primera vez y tras cada actualización de SharpEmu (predeterminado). Solo juegos Unreal Engine y Unity.\nDesactívalo para iniciar de inmediato; los shaders se prepararán durante la partida, lo que puede causar tirones.",
   "Prebuild.Title": "Preparando shaders",
   "Prebuild.Starting": "Leyendo los shaders del juego…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "Copiar ruta",
   "Library.Context.CopyTitleId": "Copiar ID del título",
   "Library.Context.Remove": "Eliminar de la biblioteca",
+  "Library.Context.ClearCache": "Vaciar caché",
+  "Library.ClearCache.Title": "Vaciar la caché del juego",
+  "Library.ClearCache.Message": "{0}: se eliminarán {1} de cachés de shaders y pipelines.",
+  "Library.ClearCache.Desc": "Los shaders del juego se prepararán de nuevo en su próximo inicio.",
+  "Library.ClearCache.Confirm": "Vaciar",
+  "Library.ClearCache.Done": "Caché vaciada para {0} ({1} liberados).",
+  "Library.ClearCache.Failed": "No se pudo vaciar la caché de {0}: {1}",
 
   "Library.Empty.Title": "Tu biblioteca está vacía",
   "Library.Empty.Hint": "Añade una carpeta que contenga tus juegos para empezar.",

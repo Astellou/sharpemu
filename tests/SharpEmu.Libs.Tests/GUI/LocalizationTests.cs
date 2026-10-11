@@ -184,14 +184,17 @@ public sealed class LocalizationTests : IDisposable
         }
     }
 
-    // The shader preparation panel follows the selected language like every other screen,
-    // and each translation formats with the values the panel passes.
-    [Fact]
-    public void EmbeddedLanguages_TranslateEveryShaderPrebuildString()
+    // The shader preparation panel and the cache clearing dialog follow the selected
+    // language like every other screen, and each translation formats with the values
+    // they pass.
+    [Theory]
+    [InlineData("Prebuild.")]
+    [InlineData("Library.ClearCache.")]
+    public void EmbeddedLanguages_TranslateEveryShaderCacheString(string prefix)
     {
         var assembly = typeof(Localization).Assembly;
         var english = ReadEmbeddedLanguage(assembly, "Languages.en.json");
-        var prebuildKeys = english.Keys.Where(key => key.StartsWith("Prebuild.", StringComparison.Ordinal)).Order().ToArray();
+        var prebuildKeys = english.Keys.Where(key => key.StartsWith(prefix, StringComparison.Ordinal)).Order().ToArray();
         Assert.NotEmpty(prebuildKeys);
         object[] arguments = [12345L, 104161L, 11L];
 
@@ -200,7 +203,7 @@ public sealed class LocalizationTests : IDisposable
         {
             var language = ReadEmbeddedLanguage(assembly, resourceName);
             var missing = prebuildKeys.Where(key => !language.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value)).ToArray();
-            Assert.True(missing.Length == 0, $"{resourceName} is missing shader prebuild strings: {string.Join(", ", missing)}");
+            Assert.True(missing.Length == 0, $"{resourceName} is missing {prefix}* strings: {string.Join(", ", missing)}");
             foreach (var key in prebuildKeys)
             {
                 _ = string.Format(language[key], arguments);

@@ -167,6 +167,7 @@ public partial class MainWindow : Window
     private DiscordRichPresence? _discord;
     private string? _runningGameName;
     private string? _runningGameTitleId;
+    private string? _clearingCacheTitleId;
     private long _runningSinceUnixSeconds;
     private int _libraryScanGeneration;
     private int _detailLoadGeneration;
@@ -406,6 +407,7 @@ public partial class MainWindow : Window
         CtxCopyTitleId.Click += async (_, _) =>
             await CopyToClipboardAsync((GameList.SelectedItem as GameEntry)?.TitleId);
         CtxGameSettings.Click += (_, _) => OpenSelectedGameSettings();
+        CtxClearCache.Click += async (_, _) => await ClearSelectedGameCacheAsync();
         CtxRemove.Click += (_, _) => RemoveSelectedFromLibrary();
         PrebuildSkipButton.Click += (_, _) => SkipShaderPrebuild();
 
@@ -2473,6 +2475,53 @@ public partial class MainWindow : Window
         CtxLaunch.IsEnabled = !_isRunning;
         CtxCopyTitleId.IsEnabled = game.TitleId is not null;
         CtxGameSettings.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
+        // A running game, or one whose shaders are being prepared, still writes its caches.
+        CtxClearCache.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId) &&
+            !IsGameActive(game.TitleId) &&
+            GameCacheStorage.Directories(game.TitleId, EmulatorDirectory).Any(Directory.Exists);
+    }
+
+    private string EmulatorDirectory =>
+        Path.GetDirectoryName(_emulatorExePath) ?? AppContext.BaseDirectory;
+
+    private bool IsGameActive(string titleId) =>
+        _isRunning && string.Equals(_runningGameTitleId, titleId, StringComparison.OrdinalIgnoreCase);
+
+    private async Task ClearSelectedGameCacheAsync()
+    {
+        if (GameList.SelectedItem is not GameEntry { TitleId: { Length: > 0 } titleId } game || IsGameActive(titleId))
+        {
+            return;
+        }
+
+        var emulatorDirectory = EmulatorDirectory;
+        var size = await Task.Run(() => GameCacheStorage.Size(titleId, emulatorDirectory));
+        var confirmed = await new ClearCacheDialog(game.Name, GameEntry.FormatSize(size)).ShowDialog<bool>(this);
+        // The game may have been launched while the dialog was open.
+        if (!confirmed || IsGameActive(titleId))
+        {
+            return;
+        }
+
+        // The game cannot be launched while its caches are being deleted.
+        _clearingCacheTitleId = titleId;
+        try
+        {
+            var freed = await Task.Run(() => GameCacheStorage.Clear(titleId, emulatorDirectory));
+            AppendConsoleLine(
+                Localization.Instance.Format("Library.ClearCache.Done", game.Name, GameEntry.FormatSize(freed)),
+                DimLineBrush);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AppendConsoleLine(
+                Localization.Instance.Format("Library.ClearCache.Failed", game.Name, exception.Message),
+                ErrorLineBrush);
+        }
+        finally
+        {
+            _clearingCacheTitleId = null;
+        }
     }
 
     private void OpenSelectedGameFolder()
@@ -2819,6 +2868,11 @@ public partial class MainWindow : Window
             ? _allGames.FirstOrDefault(game =>
                 game.Path.Equals(ebootPath, GameLibraryPath.Comparison))?.TitleId
             : titleId;
+        if (resolvedTitleId is not null && string.Equals(resolvedTitleId, _clearingCacheTitleId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         var perGame = PerGameSettings.Load(resolvedTitleId);
         var effective = EffectiveLaunchSettings.Resolve(_settings, perGame);
         var customEnvironment = CustomEnvironmentVariables.Merge(

@@ -1,7 +1,7 @@
 {
   "_languageName": "Polski",
   "Options.Env.StrictCompute.Desc": "Zatrzymuj przy odrzuceniu shaderów obliczeń i rysowania (domyślnie).\nWyłącz, aby pomijać te operacje. Mogą wystąpić brakujące obrazy, błędy lub zawieszenia. Po zmianie uruchom grę ponownie.",
-  "Options.Env.ShaderPrebuild.Desc": "Przygotuj shadery gry przed jej uruchomieniem, za pierwszym razem i po każdej aktualizacji SharpEmu (domyślnie). Tylko gry na Unreal Engine.\nWyłącz, aby uruchomić od razu; shadery będą wtedy przygotowywane w trakcie gry, co może powodować przycięcia.",
+  "Options.Env.ShaderPrebuild.Desc": "Przygotuj shadery gry przed jej uruchomieniem, za pierwszym razem i po każdej aktualizacji SharpEmu (domyślnie). Tylko gry na Unreal Engine i Unity.\nWyłącz, aby uruchomić od razu; shadery będą wtedy przygotowywane w trakcie gry, co może powodować przycięcia.",
   "Prebuild.Title": "Przygotowywanie shaderów",
   "Prebuild.Starting": "Odczytywanie shaderów gry…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaderów · {2} %",
@@ -47,6 +47,13 @@
   "Library.Context.CopyTitleId": "Kopiuj numer seryjny",
   "Library.Context.GameSettings": "Ustawienia gry…",
   "Library.Context.Remove": "Usuń z biblioteki",
+  "Library.Context.ClearCache": "Wyczyść pamięć podręczną",
+  "Library.ClearCache.Title": "Wyczyść pamięć podręczną gry",
+  "Library.ClearCache.Message": "{0}: zostanie usunięte {1} pamięci podręcznej shaderów i potoków.",
+  "Library.ClearCache.Desc": "Shadery gry zostaną ponownie przygotowane przy następnym uruchomieniu.",
+  "Library.ClearCache.Confirm": "Wyczyść",
+  "Library.ClearCache.Done": "Wyczyszczono pamięć podręczną gry {0} (zwolniono {1}).",
+  "Library.ClearCache.Failed": "Nie udało się wyczyścić pamięci podręcznej gry {0}: {1}",
 
   "Library.Empty.Title": "Twoja biblioteka jest pusta",
   "Library.Empty.Hint": "Dodaj folder zawierający twoje gry, aby rozpocząć.",

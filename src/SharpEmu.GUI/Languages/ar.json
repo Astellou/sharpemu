@@ -1,7 +1,7 @@
 {
   "_languageName": "العربية",
   "Options.Env.StrictCompute.Desc": "التوقف عند رفض مظللات الحوسبة والرسم (افتراضي).\nأوقف الخيار لتخطي العمل المتأثر. قد تظهر صور مفقودة أو أخطاء أو توقفات. أعد تشغيل اللعبة بعد التغيير.",
-  "Options.Env.ShaderPrebuild.Desc": "تحضير مظللات اللعبة قبل تشغيلها، في المرة الأولى وبعد كل تحديث لـ SharpEmu (افتراضي). لألعاب Unreal Engine فقط.\nأوقف الخيار للتشغيل فورًا؛ ستُحضَّر المظللات أثناء اللعب، مما قد يسبب تقطعًا.",
+  "Options.Env.ShaderPrebuild.Desc": "تحضير مظللات اللعبة قبل تشغيلها، في المرة الأولى وبعد كل تحديث لـ SharpEmu (افتراضي). لألعاب Unreal Engine وUnity فقط.\nأوقف الخيار للتشغيل فورًا؛ ستُحضَّر المظللات أثناء اللعب، مما قد يسبب تقطعًا.",
   "Prebuild.Title": "تحضير المظللات",
   "Prebuild.Starting": "قراءة مظللات اللعبة…",
   "Prebuild.Progress": "{0:N0} / {1:N0} مظلل · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "نسخ المسار",
   "Library.Context.CopyTitleId": "نسخ معرف العنوان",
   "Library.Context.Remove": "إزالة من المكتبة",
+  "Library.Context.ClearCache": "مسح ذاكرة التخزين المؤقت",
+  "Library.ClearCache.Title": "مسح ذاكرة التخزين المؤقت للعبة",
+  "Library.ClearCache.Message": "{0}: سيتم حذف {1} من ذاكرة التخزين المؤقت للمظللات وخطوط المعالجة.",
+  "Library.ClearCache.Desc": "سيتم تحضير مظللات اللعبة من جديد عند تشغيلها التالي.",
+  "Library.ClearCache.Confirm": "مسح",
+  "Library.ClearCache.Done": "تم مسح ذاكرة التخزين المؤقت لـ {0} (تحرير {1}).",
+  "Library.ClearCache.Failed": "تعذر مسح ذاكرة التخزين المؤقت لـ {0}: {1}",
 
   "Library.Empty.Title": "مكتبتك فارغة",
   "Library.Empty.Hint": "أضف مجلداً يحتوي على ألعابك للبدء.",

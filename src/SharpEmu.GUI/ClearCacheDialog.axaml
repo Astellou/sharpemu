@@ -1,0 +1,36 @@
+<!--
+Copyright (C) 2026 SharpEmu Emulator Project
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SharpEmu.GUI"
+        x:Class="SharpEmu.GUI.ClearCacheDialog"
+        Width="480"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BgBrush}"
+        Title="{Binding [Library.ClearCache.Title], Source={x:Static local:Localization.Instance}}">
+  <StackPanel Margin="24" Spacing="12">
+    <TextBlock Text="{Binding [Library.ClearCache.Title], Source={x:Static local:Localization.Instance}}"
+               FontSize="20"
+               FontWeight="Bold" />
+    <TextBlock x:Name="MessageText" TextWrapping="Wrap" />
+    <TextBlock Text="{Binding [Library.ClearCache.Desc], Source={x:Static local:Localization.Instance}}"
+               Foreground="{StaticResource MutedBrush}"
+               TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Spacing="8"
+                Margin="0,8,0,0">
+      <Button x:Name="CancelButton"
+              Classes="ghost"
+              Content="{Binding [Common.Cancel], Source={x:Static local:Localization.Instance}}" />
+      <Button x:Name="ClearButton"
+              Classes="danger"
+              Content="{Binding [Library.ClearCache.Confirm], Source={x:Static local:Localization.Instance}}" />
+    </StackPanel>
+  </StackPanel>
+</Window>

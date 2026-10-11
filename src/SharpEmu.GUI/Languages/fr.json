@@ -1,6 +1,6 @@
 {
   "_languageName": "Français",
-  "Options.Env.ShaderPrebuild.Desc": "Préparer les shaders d'un jeu avant son démarrage, la première fois et après chaque mise à jour de SharpEmu (par défaut). Jeux Unreal Engine uniquement.\nDésactiver pour démarrer tout de suite ; les shaders sont alors préparés pendant la partie, ce qui peut provoquer des saccades.",
+  "Options.Env.ShaderPrebuild.Desc": "Préparer les shaders d'un jeu avant son démarrage, la première fois et après chaque mise à jour de SharpEmu (par défaut). Jeux Unreal Engine et Unity uniquement.\nDésactiver pour démarrer tout de suite ; les shaders sont alors préparés pendant la partie, ce qui peut provoquer des saccades.",
   "Prebuild.Title": "Préparation des shaders",
   "Prebuild.Starting": "Lecture des shaders du jeu…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "Copier le chemin",
   "Library.Context.CopyTitleId": "Copier l’identifiant du jeu",
   "Library.Context.Remove": "Retirer de la bibliothèque",
+  "Library.Context.ClearCache": "Vider le cache",
+  "Library.ClearCache.Title": "Vider le cache du jeu",
+  "Library.ClearCache.Message": "{0} : {1} de caches de shaders et de pipelines seront supprimés.",
+  "Library.ClearCache.Desc": "Les shaders du jeu seront de nouveau préparés à son prochain lancement.",
+  "Library.ClearCache.Confirm": "Vider",
+  "Library.ClearCache.Done": "Cache vidé pour {0} ({1} libérés).",
+  "Library.ClearCache.Failed": "Impossible de vider le cache de {0} : {1}",
 
   "Library.Empty.Title": "Votre bibliothèque est vide",
   "Library.Empty.Hint": "Ajoutez un dossier contenant vos jeux pour commencer.",

@@ -1,7 +1,7 @@
 {
   "_languageName": "한국어",
   "Options.Env.StrictCompute.Desc": "컴퓨트 및 그리기 셰이더 거부 시 중지합니다(기본값).\n끄면 해당 작업을 건너뜁니다. 이미지 누락, 오류 또는 멈춤이 발생할 수 있습니다. 변경 후 게임을 다시 시작하세요.",
-  "Options.Env.ShaderPrebuild.Desc": "게임을 시작하기 전에 셰이더를 준비합니다(처음 실행 시와 SharpEmu 업데이트 후, 기본값). Unreal Engine 게임만 해당.\n끄면 바로 시작되지만 셰이더가 플레이 중에 준비되어 끊김이 생길 수 있습니다.",
+  "Options.Env.ShaderPrebuild.Desc": "게임을 시작하기 전에 셰이더를 준비합니다(처음 실행 시와 SharpEmu 업데이트 후, 기본값). Unreal Engine 및 Unity 게임만 해당.\n끄면 바로 시작되지만 셰이더가 플레이 중에 준비되어 끊김이 생길 수 있습니다.",
   "Prebuild.Title": "셰이더 준비 중",
   "Prebuild.Starting": "게임 셰이더를 읽는 중…",
   "Prebuild.Progress": "{0:N0} / {1:N0} 셰이더 · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "경로 복사",
   "Library.Context.CopyTitleId": "게임 ID 복사",
   "Library.Context.Remove": "라이브러리에서 제거",
+  "Library.Context.ClearCache": "캐시 지우기",
+  "Library.ClearCache.Title": "게임 캐시 지우기",
+  "Library.ClearCache.Message": "{0}: 셰이더 및 파이프라인 캐시 {1}이(가) 삭제됩니다.",
+  "Library.ClearCache.Desc": "다음 실행 시 게임의 셰이더가 다시 준비됩니다.",
+  "Library.ClearCache.Confirm": "지우기",
+  "Library.ClearCache.Done": "{0}의 캐시를 지웠습니다({1} 확보).",
+  "Library.ClearCache.Failed": "{0}의 캐시를 지울 수 없습니다: {1}",
 
   "Library.Empty.Title": "라이브러리가 비어 있습니다",
   "Library.Empty.Hint": "시작하려면 게임이 포함된 폴더를 추가하세요.",

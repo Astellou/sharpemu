@@ -21,13 +21,13 @@ internal static class VulkanPipelineCacheStorage
                 Environment.ExpandEnvironmentVariables(configuredPath));
         }
 
-        return Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "user",
-            "pipeline_cache",
-            SanitizeTitleId(titleId),
-            CacheFileName));
+        return Path.Combine(TitleDirectory(titleId, AppContext.BaseDirectory), CacheFileName);
     }
+
+    // The folder holding a title's pipeline cache and shader prewarm list under an
+    // emulator installation.
+    internal static string TitleDirectory(string? titleId, string baseDirectory) =>
+        Path.GetFullPath(Path.Combine(baseDirectory, "user", "pipeline_cache", SanitizeTitleId(titleId)));
 
     internal static string GetLegacyPath()
     {

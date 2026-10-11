@@ -1,6 +1,6 @@
 {
   "_languageName": "English",
-  "Options.Env.ShaderPrebuild.Desc": "Prepare a game's shaders before it starts, the first time and after each SharpEmu update (default). Unreal Engine games only.\nTurn off to start right away; shaders are then prepared while playing, which can cause stutter.",
+  "Options.Env.ShaderPrebuild.Desc": "Prepare a game's shaders before it starts, the first time and after each SharpEmu update (default). Unreal Engine and Unity games only.\nTurn off to start right away; shaders are then prepared while playing, which can cause stutter.",
   "Prebuild.Title": "Preparing shaders",
   "Prebuild.Starting": "Reading the game's shaders…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",
@@ -47,6 +47,13 @@
   "Library.Context.CopyTitleId": "Copy title ID",
   "Library.Context.GameSettings": "Game settings…",
   "Library.Context.Remove": "Remove from library",
+  "Library.Context.ClearCache": "Clear cache",
+  "Library.ClearCache.Title": "Clear game cache",
+  "Library.ClearCache.Message": "{0}: {1} of shader and pipeline caches will be deleted.",
+  "Library.ClearCache.Desc": "The game's shaders will be prepared again on its next launch.",
+  "Library.ClearCache.Confirm": "Clear",
+  "Library.ClearCache.Done": "Cache cleared for {0} ({1} freed).",
+  "Library.ClearCache.Failed": "Could not clear the cache of {0}: {1}",
 
   "Library.Empty.Title": "Your library is empty",
   "Library.Empty.Hint": "Add a folder containing your games to get started.",

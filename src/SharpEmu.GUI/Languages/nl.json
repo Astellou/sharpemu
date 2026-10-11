@@ -1,7 +1,7 @@
 {
   "_languageName": "Nederlands",
   "Options.Env.StrictCompute.Desc": "Stop bij shaderafwijzingen voor berekeningen en tekenen (standaard).\nSchakel uit om betrokken werk over te slaan. Ontbrekende beelden, fouten of vastlopers zijn mogelijk. Herstart het spel na een wijziging.",
-  "Options.Env.ShaderPrebuild.Desc": "De shaders van een game voorbereiden vóór het starten, de eerste keer en na elke SharpEmu-update (standaard). Alleen Unreal Engine-games.\nUitschakelen om direct te starten; de shaders worden dan tijdens het spelen voorbereid, wat haperingen kan veroorzaken.",
+  "Options.Env.ShaderPrebuild.Desc": "De shaders van een game voorbereiden vóór het starten, de eerste keer en na elke SharpEmu-update (standaard). Alleen Unreal Engine- en Unity-games.\nUitschakelen om direct te starten; de shaders worden dan tijdens het spelen voorbereid, wat haperingen kan veroorzaken.",
   "Prebuild.Title": "Shaders voorbereiden",
   "Prebuild.Starting": "Shaders van de game lezen…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "Pad kopiëren",
   "Library.Context.CopyTitleId": "Titel-ID kopiëren",
   "Library.Context.Remove": "Verwijderen uit bibliotheek",
+  "Library.Context.ClearCache": "Cache wissen",
+  "Library.ClearCache.Title": "Gamecache wissen",
+  "Library.ClearCache.Message": "{0}: {1} aan shader- en pipelinecaches wordt verwijderd.",
+  "Library.ClearCache.Desc": "De shaders van de game worden bij de volgende start opnieuw voorbereid.",
+  "Library.ClearCache.Confirm": "Wissen",
+  "Library.ClearCache.Done": "Cache gewist voor {0} ({1} vrijgemaakt).",
+  "Library.ClearCache.Failed": "Kan de cache van {0} niet wissen: {1}",
 
   "Library.Empty.Title": "Je bibliotheek is leeg",
   "Library.Empty.Hint": "Voeg een map met je games toe om te beginnen.",

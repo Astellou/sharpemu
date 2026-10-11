@@ -1,7 +1,7 @@
 {
   "_languageName": "Hungarian",
   "Options.Env.StrictCompute.Desc": "Leállás a számítási és rajzolási shaderek elutasításakor (alapértelmezett).\nKikapcsolva az érintett munka kimarad. Hiányzó képek, hibák vagy lefagyás fordulhat elő. Módosítás után indítsd újra a játékot.",
-  "Options.Env.ShaderPrebuild.Desc": "A játék shadereinek előkészítése indítás előtt, első alkalommal és minden SharpEmu-frissítés után (alapértelmezett). Csak Unreal Engine-játékok.\nKapcsold ki az azonnali indításhoz; a shaderek ekkor játék közben készülnek el, ami akadozást okozhat.",
+  "Options.Env.ShaderPrebuild.Desc": "A játék shadereinek előkészítése indítás előtt, első alkalommal és minden SharpEmu-frissítés után (alapértelmezett). Csak Unreal Engine- és Unity-játékok.\nKapcsold ki az azonnali indításhoz; a shaderek ekkor játék közben készülnek el, ami akadozást okozhat.",
   "Prebuild.Title": "Shaderek előkészítése",
   "Prebuild.Starting": "A játék shadereinek beolvasása…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shader · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "Elérési út másolása",
   "Library.Context.CopyTitleId": "Cím ID másolása",
   "Library.Context.Remove": "Eltávolítás a Könyvtárból",
+  "Library.Context.ClearCache": "Gyorsítótár ürítése",
+  "Library.ClearCache.Title": "A játék gyorsítótárának ürítése",
+  "Library.ClearCache.Message": "{0}: {1} shader- és pipeline-gyorsítótár törlődik.",
+  "Library.ClearCache.Desc": "A játék shaderei a következő indításkor újra elkészülnek.",
+  "Library.ClearCache.Confirm": "Ürítés",
+  "Library.ClearCache.Done": "{0} gyorsítótára kiürítve ({1} felszabadítva).",
+  "Library.ClearCache.Failed": "{0} gyorsítótára nem üríthető: {1}",
 
   "Library.Empty.Title": "A könyvtárad üres",
   "Library.Empty.Hint": "Add meg a játékaidat tartalmazó mappát a kezdáshez.",

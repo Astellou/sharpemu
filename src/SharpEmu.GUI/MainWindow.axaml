@@ -224,6 +224,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                   </MenuItem.Icon>
                 </MenuItem>
+                <MenuItem x:Name="CtxClearCache"
+                          Header="{Binding [Library.Context.ClearCache], Source={x:Static local:Localization.Instance}}">
+                  <MenuItem.Icon>
+                    <TextBlock Text="⟲" FontSize="13" Foreground="{StaticResource MutedBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </MenuItem.Icon>
+                </MenuItem>
                 <Separator />
                 <MenuItem x:Name="CtxRemove"
                           Header="{Binding [Library.Context.Remove], Source={x:Static local:Localization.Instance}}"

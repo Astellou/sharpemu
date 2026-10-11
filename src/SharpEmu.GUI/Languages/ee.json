@@ -1,7 +1,7 @@
 {
   "_languageName": "Eesti",
   "Options.Env.StrictCompute.Desc": "Peata arvutus- ja joonistusvarjutajate tagasilükkamisel (vaikimisi).\nLülita välja, et mõjutatud töö vahele jätta. Võimalikud on puuduvad pildid, vead või hangumine. Pärast muudatust taaskäivita mäng.",
-  "Options.Env.ShaderPrebuild.Desc": "Valmista mängu varjutajad enne käivitamist ette – esimesel korral ja pärast iga SharpEmu uuendust (vaikimisi). Ainult Unreal Engine'i mängud.\nLülita välja, et kohe käivitada; varjutajad valmistatakse siis mängu ajal, mis võib põhjustada hakkimist.",
+  "Options.Env.ShaderPrebuild.Desc": "Valmista mängu varjutajad enne käivitamist ette – esimesel korral ja pärast iga SharpEmu uuendust (vaikimisi). Ainult Unreal Engine'i ja Unity mängud.\nLülita välja, et kohe käivitada; varjutajad valmistatakse siis mängu ajal, mis võib põhjustada hakkimist.",
   "Prebuild.Title": "Varjutajate ettevalmistamine",
   "Prebuild.Starting": "Mängu varjutajate lugemine…",
   "Prebuild.Progress": "{0:N0} / {1:N0} varjutajat · {2} %",
@@ -47,6 +47,13 @@
   "Library.Context.CopyTitleId": "Kopeeri Title ID",
   "Library.Context.GameSettings": "Mängu seaded…",
   "Library.Context.Remove": "Eemalda teegist",
+  "Library.Context.ClearCache": "Tühjenda vahemälu",
+  "Library.ClearCache.Title": "Tühjenda mängu vahemälu",
+  "Library.ClearCache.Message": "{0}: kustutatakse {1} varjutajate ja konveierite vahemälu.",
+  "Library.ClearCache.Desc": "Mängu varjutajad valmistatakse järgmisel käivitamisel uuesti ette.",
+  "Library.ClearCache.Confirm": "Tühjenda",
+  "Library.ClearCache.Done": "{0} vahemälu tühjendatud ({1} vabastatud).",
+  "Library.ClearCache.Failed": "{0} vahemälu ei õnnestunud tühjendada: {1}",
 
   "Library.Empty.Title": "Sinu teek on tühi",
   "Library.Empty.Hint": "Alustamiseks lisa kaust, kus sinu mängud asuvad.",

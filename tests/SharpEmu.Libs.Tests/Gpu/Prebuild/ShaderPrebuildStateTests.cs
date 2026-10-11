@@ -22,11 +22,20 @@ public sealed class ShaderPrebuildStateTests : IDisposable
     private string Eboot => Path.Combine(_game, "eboot.bin");
 
     [Fact]
-    public void OnlyGamesWithIoStoreContainersArePreparable()
+    public void UnrealGamesWithIoStoreContainersArePreparable()
     {
         Assert.False(ShaderPrebuildState.HasPreparableShaders(Eboot));
         Directory.CreateDirectory(Path.Combine(_game, "Game", "Content", "Paks"));
         File.WriteAllBytes(Path.Combine(_game, "Game", "Content", "Paks", "pakchunk0-ps5.utoc"), []);
+        Assert.True(ShaderPrebuildState.HasPreparableShaders(Eboot));
+    }
+
+    [Fact]
+    public void UnityPlayersArePreparable()
+    {
+        Assert.False(ShaderPrebuildState.HasPreparableShaders(Eboot));
+        Directory.CreateDirectory(Path.Combine(_game, "Media"));
+        File.WriteAllBytes(Path.Combine(_game, "Media", "globalgamemanagers"), []);
         Assert.True(ShaderPrebuildState.HasPreparableShaders(Eboot));
     }
 
@@ -46,6 +55,31 @@ public sealed class ShaderPrebuildStateTests : IDisposable
         // A title update replaces the executable, which leaves the prepared analyses stale.
         File.WriteAllBytes(Eboot, [1, 2, 3, 4, 5]);
         Assert.False(ShaderPrebuildState.IsCurrent(Eboot));
+    }
+
+    [Fact]
+    public void ClearingDeletesTheTitleCachesAndItsPrebuildStamp()
+    {
+        if (ShaderAnalysisCache.DirectoryFor(_titleId) is null)
+        {
+            return; // The analysis cache is disabled in this environment.
+        }
+
+        var emulator = Path.Combine(_game, "emulator");
+        var pipelines = Path.Combine(emulator, "user", "pipeline_cache", _titleId);
+        Directory.CreateDirectory(pipelines);
+        File.WriteAllBytes(Path.Combine(pipelines, "vulkan-pipeline-cache.bin"), new byte[100]);
+        ShaderPrebuildState.MarkCurrent(Eboot);
+        var other = Path.Combine(emulator, "user", "pipeline_cache", "OTHER00000");
+        Directory.CreateDirectory(other);
+
+        Assert.Equal(2, GameCacheStorage.Directories(_titleId, emulator).Count(Directory.Exists));
+        Assert.True(GameCacheStorage.Size(_titleId, emulator) > 100);
+        Assert.Equal(GameCacheStorage.Size(_titleId, emulator), GameCacheStorage.Clear(_titleId, emulator));
+        Assert.DoesNotContain(GameCacheStorage.Directories(_titleId, emulator), Directory.Exists);
+        Assert.False(ShaderPrebuildState.IsCurrent(Eboot));
+        Assert.True(Directory.Exists(other));
+        Assert.Equal(0, GameCacheStorage.Clear(_titleId, emulator));
     }
 
     public void Dispose()

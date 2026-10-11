@@ -1,7 +1,7 @@
 {
   "_languageName": "Deutsch",
   "Options.Env.StrictCompute.Desc": "Bei Shader-Ablehnungen für Compute und Zeichenbefehle stoppen (Standard).\nAusschalten, um betroffene Arbeit zu überspringen. Fehlende Bilder, Fehler oder Stillstände sind möglich. Spiel nach Änderungen neu starten.",
-  "Options.Env.ShaderPrebuild.Desc": "Shader eines Spiels vor dem Start vorbereiten, beim ersten Mal und nach jedem SharpEmu-Update (Standard). Nur Unreal-Engine-Spiele.\nAusschalten, um sofort zu starten; die Shader werden dann während des Spiels vorbereitet, was Ruckler verursachen kann.",
+  "Options.Env.ShaderPrebuild.Desc": "Shader eines Spiels vor dem Start vorbereiten, beim ersten Mal und nach jedem SharpEmu-Update (Standard). Nur Unreal-Engine- und Unity-Spiele.\nAusschalten, um sofort zu starten; die Shader werden dann während des Spiels vorbereitet, was Ruckler verursachen kann.",
   "Prebuild.Title": "Shader werden vorbereitet",
   "Prebuild.Starting": "Shader des Spiels werden gelesen…",
   "Prebuild.Progress": "{0:N0} / {1:N0} Shader · {2} %",
@@ -44,6 +44,13 @@
   "Library.Context.CopyPath": "Pfad kopieren",
   "Library.Context.CopyTitleId": "Title ID kopieren",
   "Library.Context.Remove": "Aus Bibliothek entfernen",
+  "Library.Context.ClearCache": "Cache leeren",
+  "Library.ClearCache.Title": "Spiel-Cache leeren",
+  "Library.ClearCache.Message": "{0}: {1} an Shader- und Pipeline-Caches werden gelöscht.",
+  "Library.ClearCache.Desc": "Die Shader des Spiels werden beim nächsten Start erneut vorbereitet.",
+  "Library.ClearCache.Confirm": "Leeren",
+  "Library.ClearCache.Done": "Cache für {0} geleert ({1} freigegeben).",
+  "Library.ClearCache.Failed": "Der Cache von {0} konnte nicht geleert werden: {1}",
 
   "Library.Empty.Title": "Deine Bibliothek ist leer",
   "Library.Empty.Hint": "Füge einen Ordner mit deinen Spielen hinzu, um zu beginnen.",
