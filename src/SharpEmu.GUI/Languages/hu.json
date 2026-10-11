@@ -1,7 +1,7 @@
 {
   "_languageName": "Hungarian",
   "Options.Env.StrictCompute.Desc": "Leállás a számítási és rajzolási shaderek elutasításakor (alapértelmezett).\nKikapcsolva az érintett munka kimarad. Hiányzó képek, hibák vagy lefagyás fordulhat elő. Módosítás után indítsd újra a játékot.",
-  "Options.Env.ShaderPrebuild.Desc": "A játék shadereinek előkészítése indítás előtt, első alkalommal és minden SharpEmu-frissítés után (alapértelmezett). Csak Unreal Engine- és Unity-játékok.\nKapcsold ki az azonnali indításhoz; a shaderek ekkor játék közben készülnek el, ami akadozást okozhat.",
+  "Options.Env.ShaderPrebuild.Desc": "A játék shadereinek előkészítése indítás előtt, első alkalommal és minden SharpEmu-frissítés után (alapértelmezett). Unreal Engine- és Unity-játékok, valamint azok a játékok, amelyek shaderei a futtatható fájlban vannak.\nKapcsold ki az azonnali indításhoz; a shaderek ekkor játék közben készülnek el, ami akadozást okozhat.",
   "Prebuild.Title": "Shaderek előkészítése",
   "Prebuild.Starting": "A játék shadereinek beolvasása…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shader · {2} %",

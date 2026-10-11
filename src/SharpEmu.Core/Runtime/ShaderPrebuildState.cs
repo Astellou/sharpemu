@@ -16,14 +16,18 @@ public static class ShaderPrebuildState
     public const string VariableName = "SHARPEMU_SHADER_PREBUILD";
     private const string StampFileName = "prebuild.stamp";
 
-    // Unreal Engine titles cook their shaders into IoStore containers and Unity titles
-    // serialize them into the asset files under Media; those are prepared ahead.
+    // Unreal Engine titles cook their shaders into IoStore containers, Unity titles
+    // serialize them into the asset files under Media and engines such as Team Asobi's
+    // compile them into the executable; those are prepared ahead.
     public static bool HasPreparableShaders(string ebootPath)
     {
         try
         {
             var root = Path.GetDirectoryName(Path.GetFullPath(ebootPath));
-            return root is not null && (UnityShaderPrebuild.IsUnityTitle(root) || Directory.EnumerateFiles(root, "*.utoc", SearchOption.AllDirectories).Any());
+            return root is not null &&
+                (UnityShaderPrebuild.IsUnityTitle(root) ||
+                 UnrealShaderPrebuild.IsUnrealTitle(root) ||
+                 ExecutableShaderPrebuild.EmbedsShaders(ebootPath));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

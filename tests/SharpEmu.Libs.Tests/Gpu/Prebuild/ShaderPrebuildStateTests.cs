@@ -39,6 +39,17 @@ public sealed class ShaderPrebuildStateTests : IDisposable
         Assert.True(ShaderPrebuildState.HasPreparableShaders(Eboot));
     }
 
+    // The header signature straddles two sniffed chunks.
+    [Fact]
+    public void ExecutablesWithEmbeddedShadersArePreparable()
+    {
+        Assert.False(ShaderPrebuildState.HasPreparableShaders(Eboot));
+        var executable = new byte[(4 << 20) + 0x100];
+        "1234\x18\0\0\0"u8.CopyTo(executable.AsSpan((4 << 20) - 3));
+        File.WriteAllBytes(Eboot, executable);
+        Assert.True(ShaderPrebuildState.HasPreparableShaders(Eboot));
+    }
+
     [Fact]
     public void StampFollowsTheTitleFolderAndTheExecutable()
     {

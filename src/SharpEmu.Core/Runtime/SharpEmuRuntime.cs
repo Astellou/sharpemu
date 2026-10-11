@@ -152,12 +152,19 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
 
     // Extracts and prepares the shaders a title ships. Unity data is plain LZ4 and is read
     // directly; an Unreal title is booted through its module initializers, not entered,
-    // so its own Oodle decoder can unpack its shader libraries.
+    // so its own Oodle decoder can unpack its shader libraries. Any other title is read
+    // for the shaders compiled into its executable.
     public OrbisGen2Result PrebuildShaders(string ebootPath, string? dumpDirectory, int maxGroups)
     {
-        if (UnityShaderPrebuild.IsUnityTitle(Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty))
+        var app0Root = Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty;
+        if (UnityShaderPrebuild.IsUnityTitle(app0Root))
         {
             return PrebuildUnityShaders(ebootPath, dumpDirectory, maxGroups);
+        }
+
+        if (!UnrealShaderPrebuild.IsUnrealTitle(app0Root))
+        {
+            return PrebuildExecutableShaders(ebootPath, dumpDirectory);
         }
 
         return RunCore(ebootPath, process =>
@@ -211,6 +218,29 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             ShaderPrebuildState.MarkCurrent(ebootPath);
         }
 
+        return OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    // The executable is loaded, which relocates the pointer pairs naming tabled shaders'
+    // code, but nothing in it runs.
+    private OrbisGen2Result PrebuildExecutableShaders(string ebootPath, string? dumpDirectory)
+    {
+        var image = LoadImage(ebootPath);
+        ShaderAnalysisCache.UseTitle(image.TitleId);
+        var segments = new List<(ulong Address, byte[] Bytes)>();
+        foreach (var region in image.MappedRegions)
+        {
+            var bytes = new byte[region.MemorySize];
+            if (_virtualMemory.TryRead(region.VirtualAddress, bytes))
+            {
+                segments.Add((region.VirtualAddress, bytes));
+            }
+        }
+
+        var report = ExecutableShaderPrebuild.Run(segments, dumpDirectory, Console.Error);
+        Console.Error.WriteLine($"[PREBUILD][INFO] Done in {report.Elapsed.TotalSeconds:F1}s");
+        report.WriteSummary(Console.Error);
+        ShaderPrebuildState.MarkCurrent(ebootPath);
         return OrbisGen2Result.ORBIS_GEN2_OK;
     }
 

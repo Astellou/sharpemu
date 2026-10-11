@@ -1,7 +1,7 @@
 {
   "_languageName": "Italiano",
   "Options.Env.StrictCompute.Desc": "Arresta in caso di rifiuto degli shader di calcolo e disegno (predefinito).\nDisattiva per saltare il lavoro interessato. Sono possibili immagini mancanti, errori o blocchi. Riavvia il gioco dopo una modifica.",
-  "Options.Env.ShaderPrebuild.Desc": "Prepara gli shader di un gioco prima dell'avvio, la prima volta e dopo ogni aggiornamento di SharpEmu (predefinito). Solo giochi Unreal Engine e Unity.\nDisattiva per avviare subito; gli shader verranno preparati durante il gioco, con possibili scatti.",
+  "Options.Env.ShaderPrebuild.Desc": "Prepara gli shader di un gioco prima dell'avvio, la prima volta e dopo ogni aggiornamento di SharpEmu (predefinito). Giochi Unreal Engine e Unity e giochi con gli shader incorporati nell'eseguibile.\nDisattiva per avviare subito; gli shader verranno preparati durante il gioco, con possibili scatti.",
   "Prebuild.Title": "Preparazione degli shader",
   "Prebuild.Starting": "Lettura degli shader del gioco…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shader · {2} %",

@@ -1,7 +1,7 @@
 {
   "_languageName": "Português (Brasil)",
   "Options.Env.StrictCompute.Desc": "Parar nas rejeições de shaders de cálculo e desenho (padrão).\nDesative para ignorar o trabalho afetado. Podem ocorrer imagens ausentes, erros ou travamentos. Reinicie o jogo após uma alteração.",
-  "Options.Env.ShaderPrebuild.Desc": "Preparar os shaders de um jogo antes de iniciá-lo, na primeira vez e após cada atualização do SharpEmu (padrão). Apenas jogos Unreal Engine e Unity.\nDesative para iniciar imediatamente; os shaders serão preparados durante o jogo, o que pode causar travadas.",
+  "Options.Env.ShaderPrebuild.Desc": "Preparar os shaders de um jogo antes de iniciá-lo, na primeira vez e após cada atualização do SharpEmu (padrão). Jogos Unreal Engine e Unity e jogos cujos shaders estão embutidos no executável.\nDesative para iniciar imediatamente; os shaders serão preparados durante o jogo, o que pode causar travadas.",
   "Prebuild.Title": "Preparando shaders",
   "Prebuild.Starting": "Lendo os shaders do jogo…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",

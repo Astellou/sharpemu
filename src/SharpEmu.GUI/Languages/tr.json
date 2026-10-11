@@ -1,7 +1,7 @@
 {
   "_languageName": "Türkçe",
   "Options.Env.StrictCompute.Desc": "Hesaplama ve çizim gölgelendiricisi retlerinde durdur (varsayılan).\nEtkilenen işlemleri atlamak için kapat. Eksik görüntüler, hatalar veya takılmalar olabilir. Değişiklikten sonra oyunu yeniden başlatın.",
-  "Options.Env.ShaderPrebuild.Desc": "Bir oyunun gölgelendiricilerini başlamadan önce hazırla; ilk seferde ve her SharpEmu güncellemesinden sonra (varsayılan). Yalnızca Unreal Engine ve Unity oyunları.\nHemen başlatmak için kapatın; gölgelendiriciler oyun sırasında hazırlanır ve takılmalara yol açabilir.",
+  "Options.Env.ShaderPrebuild.Desc": "Bir oyunun gölgelendiricilerini başlamadan önce hazırla; ilk seferde ve her SharpEmu güncellemesinden sonra (varsayılan). Unreal Engine ve Unity oyunları ile gölgelendiricileri yürütülebilir dosyaya gömülü oyunlar.\nHemen başlatmak için kapatın; gölgelendiriciler oyun sırasında hazırlanır ve takılmalara yol açabilir.",
   "Prebuild.Title": "Gölgelendiriciler hazırlanıyor",
   "Prebuild.Starting": "Oyunun gölgelendiricileri okunuyor…",
   "Prebuild.Progress": "{0:N0} / {1:N0} gölgelendirici · {2} %",

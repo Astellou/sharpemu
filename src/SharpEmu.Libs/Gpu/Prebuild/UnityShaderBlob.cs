@@ -8,15 +8,16 @@ namespace SharpEmu.Libs.Gpu.Prebuild;
 // Unity stores each PS5 shader program as its code followed directly by its AGC header,
 // many programs to one decompressed subprogram blob. The header gives both sizes.
 // Newer players prefix the pair with its total size; older ones wrap it in an ELF
-// whose first section, at a fixed offset, is the code.
+// whose first section, at a fixed offset, is the code. That ELF is what the AGC
+// compiler emits, so executables that embed their shaders carry the same framing.
 internal static class UnityShaderBlob
 {
-    private const int AgcHeaderMinimumSize = 0x60;
-    private const int AgcHeaderSizeOffset = 0x40;
-    private const int AgcCodeSizeOffset = 0x44;
-    private const int AgcTypeOffset = 0x5A;
+    internal const int AgcHeaderMinimumSize = 0x60;
+    internal const int AgcHeaderSizeOffset = 0x40;
+    internal const int AgcCodeSizeOffset = 0x44;
+    internal const int AgcTypeOffset = 0x5A;
     private const int ElfCodeOffset = 0x100;
-    private static ReadOnlySpan<byte> AgcHeaderSignature => "1234\x18\0\0\0"u8;
+    internal static ReadOnlySpan<byte> AgcHeaderSignature => "1234\x18\0\0\0"u8;
     private static ReadOnlySpan<byte> ElfSignature => "\u007FELF"u8;
 
     public static List<ExtractedShader> Extract(ReadOnlySpan<byte> blob)

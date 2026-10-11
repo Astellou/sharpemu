@@ -22,6 +22,10 @@ internal static class UnrealShaderPrebuild
     private const byte ShaderCodeChunkType = 9;
     private const string ManifestFileName = "manifest.tsv";
 
+    // Unreal Engine titles cook their shaders into IoStore containers.
+    public static bool IsUnrealTitle(string app0Root) =>
+        Directory.EnumerateFiles(app0Root, "*.utoc", SearchOption.AllDirectories).Any();
+
     public static UnrealShaderPrebuildReport Run(
         string app0Root,
         IOodleDecompressor oodle,

@@ -1,6 +1,6 @@
 {
   "_languageName": "Français",
-  "Options.Env.ShaderPrebuild.Desc": "Préparer les shaders d'un jeu avant son démarrage, la première fois et après chaque mise à jour de SharpEmu (par défaut). Jeux Unreal Engine et Unity uniquement.\nDésactiver pour démarrer tout de suite ; les shaders sont alors préparés pendant la partie, ce qui peut provoquer des saccades.",
+  "Options.Env.ShaderPrebuild.Desc": "Préparer les shaders d'un jeu avant son démarrage, la première fois et après chaque mise à jour de SharpEmu (par défaut). Jeux Unreal Engine et Unity, et jeux dont les shaders sont intégrés à l'exécutable.\nDésactiver pour démarrer tout de suite ; les shaders sont alors préparés pendant la partie, ce qui peut provoquer des saccades.",
   "Prebuild.Title": "Préparation des shaders",
   "Prebuild.Starting": "Lecture des shaders du jeu…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",

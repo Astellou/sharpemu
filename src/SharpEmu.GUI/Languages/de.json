@@ -1,7 +1,7 @@
 {
   "_languageName": "Deutsch",
   "Options.Env.StrictCompute.Desc": "Bei Shader-Ablehnungen für Compute und Zeichenbefehle stoppen (Standard).\nAusschalten, um betroffene Arbeit zu überspringen. Fehlende Bilder, Fehler oder Stillstände sind möglich. Spiel nach Änderungen neu starten.",
-  "Options.Env.ShaderPrebuild.Desc": "Shader eines Spiels vor dem Start vorbereiten, beim ersten Mal und nach jedem SharpEmu-Update (Standard). Nur Unreal-Engine- und Unity-Spiele.\nAusschalten, um sofort zu starten; die Shader werden dann während des Spiels vorbereitet, was Ruckler verursachen kann.",
+  "Options.Env.ShaderPrebuild.Desc": "Shader eines Spiels vor dem Start vorbereiten, beim ersten Mal und nach jedem SharpEmu-Update (Standard). Unreal-Engine- und Unity-Spiele sowie Spiele, deren Shader in der ausführbaren Datei stecken.\nAusschalten, um sofort zu starten; die Shader werden dann während des Spiels vorbereitet, was Ruckler verursachen kann.",
   "Prebuild.Title": "Shader werden vorbereitet",
   "Prebuild.Starting": "Shader des Spiels werden gelesen…",
   "Prebuild.Progress": "{0:N0} / {1:N0} Shader · {2} %",

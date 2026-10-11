@@ -1,7 +1,7 @@
 {
   "_languageName": "한국어",
   "Options.Env.StrictCompute.Desc": "컴퓨트 및 그리기 셰이더 거부 시 중지합니다(기본값).\n끄면 해당 작업을 건너뜁니다. 이미지 누락, 오류 또는 멈춤이 발생할 수 있습니다. 변경 후 게임을 다시 시작하세요.",
-  "Options.Env.ShaderPrebuild.Desc": "게임을 시작하기 전에 셰이더를 준비합니다(처음 실행 시와 SharpEmu 업데이트 후, 기본값). Unreal Engine 및 Unity 게임만 해당.\n끄면 바로 시작되지만 셰이더가 플레이 중에 준비되어 끊김이 생길 수 있습니다.",
+  "Options.Env.ShaderPrebuild.Desc": "게임을 시작하기 전에 셰이더를 준비합니다(처음 실행 시와 SharpEmu 업데이트 후, 기본값). Unreal Engine 및 Unity 게임과 실행 파일에 셰이더가 포함된 게임이 해당됩니다.\n끄면 바로 시작되지만 셰이더가 플레이 중에 준비되어 끊김이 생길 수 있습니다.",
   "Prebuild.Title": "셰이더 준비 중",
   "Prebuild.Starting": "게임 셰이더를 읽는 중…",
   "Prebuild.Progress": "{0:N0} / {1:N0} 셰이더 · {2} %",

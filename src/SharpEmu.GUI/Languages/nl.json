@@ -1,7 +1,7 @@
 {
   "_languageName": "Nederlands",
   "Options.Env.StrictCompute.Desc": "Stop bij shaderafwijzingen voor berekeningen en tekenen (standaard).\nSchakel uit om betrokken werk over te slaan. Ontbrekende beelden, fouten of vastlopers zijn mogelijk. Herstart het spel na een wijziging.",
-  "Options.Env.ShaderPrebuild.Desc": "De shaders van een game voorbereiden vóór het starten, de eerste keer en na elke SharpEmu-update (standaard). Alleen Unreal Engine- en Unity-games.\nUitschakelen om direct te starten; de shaders worden dan tijdens het spelen voorbereid, wat haperingen kan veroorzaken.",
+  "Options.Env.ShaderPrebuild.Desc": "De shaders van een game voorbereiden vóór het starten, de eerste keer en na elke SharpEmu-update (standaard). Unreal Engine- en Unity-games, en games met shaders in het uitvoerbare bestand.\nUitschakelen om direct te starten; de shaders worden dan tijdens het spelen voorbereid, wat haperingen kan veroorzaken.",
   "Prebuild.Title": "Shaders voorbereiden",
   "Prebuild.Starting": "Shaders van de game lezen…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",

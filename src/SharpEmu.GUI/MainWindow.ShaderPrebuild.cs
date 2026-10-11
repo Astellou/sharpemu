@@ -31,8 +31,8 @@ public partial class MainWindow
     {
         if (!DefaultOnEnvironmentSwitch.ShaderPrebuild.IsEnabled(launch.Settings.EnvironmentToggles) ||
             string.IsNullOrWhiteSpace(_emulatorExePath) ||
-            !ShaderPrebuildState.HasPreparableShaders(launch.EbootPath) ||
-            ShaderPrebuildState.IsCurrent(launch.EbootPath))
+            ShaderPrebuildState.IsCurrent(launch.EbootPath) ||
+            !ShaderPrebuildState.HasPreparableShaders(launch.EbootPath))
         {
             return false;
         }

@@ -1,7 +1,7 @@
 {
   "_languageName": "Eesti",
   "Options.Env.StrictCompute.Desc": "Peata arvutus- ja joonistusvarjutajate tagasilükkamisel (vaikimisi).\nLülita välja, et mõjutatud töö vahele jätta. Võimalikud on puuduvad pildid, vead või hangumine. Pärast muudatust taaskäivita mäng.",
-  "Options.Env.ShaderPrebuild.Desc": "Valmista mängu varjutajad enne käivitamist ette – esimesel korral ja pärast iga SharpEmu uuendust (vaikimisi). Ainult Unreal Engine'i ja Unity mängud.\nLülita välja, et kohe käivitada; varjutajad valmistatakse siis mängu ajal, mis võib põhjustada hakkimist.",
+  "Options.Env.ShaderPrebuild.Desc": "Valmista mängu varjutajad enne käivitamist ette – esimesel korral ja pärast iga SharpEmu uuendust (vaikimisi). Unreal Engine'i ja Unity mängud ning mängud, mille varjutajad on käivitusfailis.\nLülita välja, et kohe käivitada; varjutajad valmistatakse siis mängu ajal, mis võib põhjustada hakkimist.",
   "Prebuild.Title": "Varjutajate ettevalmistamine",
   "Prebuild.Starting": "Mängu varjutajate lugemine…",
   "Prebuild.Progress": "{0:N0} / {1:N0} varjutajat · {2} %",

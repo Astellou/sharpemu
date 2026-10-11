@@ -1,7 +1,7 @@
 {
   "_languageName": "Polski",
   "Options.Env.StrictCompute.Desc": "Zatrzymuj przy odrzuceniu shaderów obliczeń i rysowania (domyślnie).\nWyłącz, aby pomijać te operacje. Mogą wystąpić brakujące obrazy, błędy lub zawieszenia. Po zmianie uruchom grę ponownie.",
-  "Options.Env.ShaderPrebuild.Desc": "Przygotuj shadery gry przed jej uruchomieniem, za pierwszym razem i po każdej aktualizacji SharpEmu (domyślnie). Tylko gry na Unreal Engine i Unity.\nWyłącz, aby uruchomić od razu; shadery będą wtedy przygotowywane w trakcie gry, co może powodować przycięcia.",
+  "Options.Env.ShaderPrebuild.Desc": "Przygotuj shadery gry przed jej uruchomieniem, za pierwszym razem i po każdej aktualizacji SharpEmu (domyślnie). Gry na Unreal Engine i Unity oraz gry z shaderami wbudowanymi w plik wykonywalny.\nWyłącz, aby uruchomić od razu; shadery będą wtedy przygotowywane w trakcie gry, co może powodować przycięcia.",
   "Prebuild.Title": "Przygotowywanie shaderów",
   "Prebuild.Starting": "Odczytywanie shaderów gry…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaderów · {2} %",

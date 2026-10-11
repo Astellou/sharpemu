@@ -1,6 +1,6 @@
 {
   "_languageName": "English",
-  "Options.Env.ShaderPrebuild.Desc": "Prepare a game's shaders before it starts, the first time and after each SharpEmu update (default). Unreal Engine and Unity games only.\nTurn off to start right away; shaders are then prepared while playing, which can cause stutter.",
+  "Options.Env.ShaderPrebuild.Desc": "Prepare a game's shaders before it starts, the first time and after each SharpEmu update (default). Unreal Engine and Unity games, and games whose shaders are built into the executable.\nTurn off to start right away; shaders are then prepared while playing, which can cause stutter.",
   "Prebuild.Title": "Preparing shaders",
   "Prebuild.Starting": "Reading the game's shaders…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",

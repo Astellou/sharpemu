@@ -1,7 +1,7 @@
 {
   "_languageName": "Dansk",
   "Options.Env.StrictCompute.Desc": "Stop ved shaderafvisninger for beregning og tegning (standard).\nSlå fra for at springe det berørte arbejde over. Manglende billeder, fejl eller stop kan forekomme. Genstart spillet efter en ændring.",
-  "Options.Env.ShaderPrebuild.Desc": "Forbered et spils shaders før det starter, første gang og efter hver SharpEmu-opdatering (standard). Kun Unreal Engine- og Unity-spil.\nSlå fra for at starte med det samme; shaders forberedes så under spillet, hvilket kan give hak.",
+  "Options.Env.ShaderPrebuild.Desc": "Forbered et spils shaders før det starter, første gang og efter hver SharpEmu-opdatering (standard). Unreal Engine- og Unity-spil samt spil med shaders indbygget i den eksekverbare fil.\nSlå fra for at starte med det samme; shaders forberedes så under spillet, hvilket kan give hak.",
   "Prebuild.Title": "Forbereder shaders",
   "Prebuild.Starting": "Læser spillets shaders…",
   "Prebuild.Progress": "{0:N0} / {1:N0} shaders · {2} %",
