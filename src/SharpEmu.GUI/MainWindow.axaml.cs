@@ -370,7 +370,9 @@ public partial class MainWindow : Window
         PerformanceFrameTraceToggle.IsCheckedChanged += (_, _) =>
             SetEnvironmentToggle("SHARPEMU_PROFILE_PERFORMANCE_FRAME_TRACE", PerformanceFrameTraceToggle.IsChecked == true);
         StrictComputeToggle.IsCheckedChanged += (_, _) =>
-            StrictComputeSettings.SetEnabled(_settings.EnvironmentToggles, StrictComputeToggle.IsChecked == true);
+            DefaultOnEnvironmentSwitch.StrictCompute.SetEnabled(_settings.EnvironmentToggles, StrictComputeToggle.IsChecked == true);
+        ShaderPrebuildToggle.IsCheckedChanged += (_, _) =>
+            DefaultOnEnvironmentSwitch.ShaderPrebuild.SetEnabled(_settings.EnvironmentToggles, ShaderPrebuildToggle.IsChecked == true);
         EnvBthidToggle.IsCheckedChanged += (_, _) =>
             SetEnvironmentToggle("SHARPEMU_BTHID_UNAVAILABLE", EnvBthidToggle.IsChecked == true);
         EnvLoopGuardToggle.IsCheckedChanged += (_, _) =>
@@ -405,6 +407,7 @@ public partial class MainWindow : Window
             await CopyToClipboardAsync((GameList.SelectedItem as GameEntry)?.TitleId);
         CtxGameSettings.Click += (_, _) => OpenSelectedGameSettings();
         CtxRemove.Click += (_, _) => RemoveSelectedFromLibrary();
+        PrebuildSkipButton.Click += (_, _) => SkipShaderPrebuild();
 
         Opened += async (_, _) => await OnOpenedAsync();
         Closing += (_, _) => BeginWindowClosing();
@@ -1269,6 +1272,7 @@ public partial class MainWindow : Window
         RunShutdownStep("title music", _sndPreview.Stop);
         RunShutdownStep("Discord Rich Presence", () => _discord?.Dispose());
         RunShutdownStep("console window", () => _consoleWindow?.Close());
+        RunShutdownStep("shader prebuild process", () => _prebuild?.Dispose());
         RunShutdownStep("emulator process", () => _emulator?.Dispose());
         RunShutdownStep("console mirror", () => _consoleMirror?.Dispose());
         RunShutdownStep("pending console output", FlushAllPendingConsoleLines);
@@ -1429,7 +1433,8 @@ public partial class MainWindow : Window
         AutoUpdateToggle.IsChecked = _settings.CheckForUpdatesOnStartup;
         PerformanceProfileToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_PROFILE_PERFORMANCE");
         PerformanceFrameTraceToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_PROFILE_PERFORMANCE_FRAME_TRACE");
-        StrictComputeToggle.IsChecked = StrictComputeSettings.IsEnabled(_settings.EnvironmentToggles);
+        StrictComputeToggle.IsChecked = DefaultOnEnvironmentSwitch.StrictCompute.IsEnabled(_settings.EnvironmentToggles);
+        ShaderPrebuildToggle.IsChecked = DefaultOnEnvironmentSwitch.ShaderPrebuild.IsEnabled(_settings.EnvironmentToggles);
         EnvBthidToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_BTHID_UNAVAILABLE");
         EnvLoopGuardToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_DISABLE_IMPORT_LOOP_GUARD");
         EnvWritableApp0Toggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_WRITABLE_APP0");
@@ -2871,9 +2876,9 @@ public partial class MainWindow : Window
             DefaultProfileEnvironmentName,
             GuiSettings.NormalizeDefaultProfile(_settings.DefaultProfile));
         // Apply both values so an inherited skip setting cannot override the GUI choice.
-        Environment.SetEnvironmentVariable(StrictComputeSettings.VariableName,
-            StrictComputeSettings.GetLaunchValue(effective.EnvironmentToggles));
-        _appliedEnvironmentVariables.Add(StrictComputeSettings.VariableName);
+        Environment.SetEnvironmentVariable(DefaultOnEnvironmentSwitch.StrictCompute.VariableName,
+            DefaultOnEnvironmentSwitch.StrictCompute.GetLaunchValue(effective.EnvironmentToggles));
+        _appliedEnvironmentVariables.Add(DefaultOnEnvironmentSwitch.StrictCompute.VariableName);
         _appliedEnvironmentVariables.Add(DefaultProfileEnvironmentName);
 
         // An absent switch now enables the guard opt-out by default; send 0 for a disabled GUI toggle.
@@ -2938,7 +2943,11 @@ public partial class MainWindow : Window
             effective,
             runtimeOptions);
 
-        StartPendingSession();
+        // An Unreal Engine game first prepares its shaders; the session starts after it.
+        if (!TryStartShaderPrebuild(_pendingLaunch))
+        {
+            StartPendingSession();
+        }
     }
 
     private static bool TryParseEnvironmentEntry(string entry, out string name, out string value)
@@ -2962,6 +2971,13 @@ public partial class MainWindow : Window
     {
         if (!_isRunning || _isStopping)
         {
+            return;
+        }
+
+        if (TryCancelShaderPrebuild())
+        {
+            _isStopping = true;
+            UpdateRunButtons();
             return;
         }
 

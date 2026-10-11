@@ -1000,6 +1000,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
                           <ToggleSwitch x:Name="GameStrictComputeToggle" Classes="optionToggle" />
                         </local:SettingRow>
                         <local:SettingRow Classes="optionRow"
+                                          Label="SHARPEMU_SHADER_PREBUILD"
+                                          Description="{Binding [Options.Env.ShaderPrebuild.Desc],
+                                                                Source={x:Static local:Localization.Instance},
+                                                                x:CompileBindings=False}">
+                          <ToggleSwitch x:Name="GameShaderPrebuildToggle" Classes="optionToggle" />
+                        </local:SettingRow>
+                        <local:SettingRow Classes="optionRow"
                                           Label="SHARPEMU_RENDERDOC"
                                           Description="{Binding [Options.Env.RenderDoc.Desc],
                                                                 Source={x:Static local:Localization.Instance},
@@ -1602,6 +1609,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
                         <ToggleSwitch x:Name="StrictComputeToggle" Classes="optionToggle" />
                       </local:SettingRow>
 
+                      <local:SettingRow Classes="optionRow" LabelFontFamily="Consolas,monospace" Label="SHARPEMU_SHADER_PREBUILD"
+                                        Description="{Binding [Options.Env.ShaderPrebuild.Desc], Source={x:Static local:Localization.Instance}}">
+                        <ToggleSwitch x:Name="ShaderPrebuildToggle" Classes="optionToggle" />
+                      </local:SettingRow>
+
                       <local:SettingRow x:Name="EnvRenderDocRow" Classes="optionRow" LabelFontFamily="Consolas,monospace" Label="SHARPEMU_RENDERDOC"
                                         Description="{Binding [Options.Env.RenderDoc.Desc], Source={x:Static local:Localization.Instance}}">
                         <ToggleSwitch x:Name="EnvRenderDocToggle" Classes="optionToggle" />
@@ -1733,6 +1745,58 @@ SPDX-License-Identifier: GPL-2.0-or-later
         </Grid>
       </Border>
 
+    </Grid>
+
+    <!-- Shader preparation that runs before an Unreal Engine game starts; the
+         game launches when it ends or when the user skips it. -->
+    <Grid x:Name="PrebuildOverlay"
+          Grid.Row="1"
+          ZIndex="900"
+          Background="#B3000000"
+          IsVisible="False">
+      <Border Width="480"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Padding="28,24"
+              CornerRadius="12"
+              Background="{StaticResource CardBrush}"
+              BorderBrush="{StaticResource CardBorderBrush}"
+              BorderThickness="1"
+              BoxShadow="0 24 60 0 #99000000">
+        <StackPanel Spacing="12">
+          <TextBlock x:Name="PrebuildGameName"
+                     FontSize="13"
+                     Foreground="{StaticResource MutedBrush}"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding [Prebuild.Title], Source={x:Static local:Localization.Instance}}"
+                     FontSize="20"
+                     FontWeight="SemiBold"
+                     Foreground="{StaticResource TextBrush}" />
+          <ProgressBar x:Name="PrebuildProgress"
+                       Height="6"
+                       Minimum="0"
+                       Maximum="1000"
+                       IsIndeterminate="True"
+                       Foreground="{StaticResource AccentBrush}" />
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock x:Name="PrebuildDetail"
+                       FontSize="13"
+                       Foreground="{StaticResource SecondaryTextBrush}" />
+            <TextBlock x:Name="PrebuildRemaining"
+                       Grid.Column="1"
+                       FontSize="13"
+                       Foreground="{StaticResource SecondaryTextBrush}" />
+          </Grid>
+          <TextBlock Text="{Binding [Prebuild.Note], Source={x:Static local:Localization.Instance}}"
+                     FontSize="12"
+                     TextWrapping="Wrap"
+                     Foreground="{StaticResource MutedBrush}" />
+          <Button x:Name="PrebuildSkipButton"
+                  Classes="ghost"
+                  HorizontalAlignment="Right"
+                  Content="{Binding [Prebuild.Skip], Source={x:Static local:Localization.Instance}}" />
+        </StackPanel>
+      </Border>
     </Grid>
 
     <!-- Portable resize hit targets for the frameless desktop window. They
