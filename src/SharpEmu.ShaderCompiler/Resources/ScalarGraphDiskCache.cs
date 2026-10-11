@@ -13,6 +13,12 @@ namespace SharpEmu.ShaderCompiler.Resources;
 public static class ShaderAnalysisCache
 {
     public static void UseTitle(string? titleId) => ScalarGraphDiskCache.UseTitle(titleId);
+
+    // The folder a title's analyses live in, or null when the cache is disabled.
+    public static string? DirectoryFor(string? titleId) => ScalarGraphDiskCache.TitleDirectory(titleId);
+
+    // Changes whenever cached analyses stop matching: a new snapshot format or analysis build.
+    public static string KeyVersion => ScalarGraphDiskCache.KeyVersion;
 }
 
 internal static class ScalarGraphDiskCache
@@ -36,17 +42,27 @@ internal static class ScalarGraphDiskCache
     private static readonly Dictionary<string, long> DirectoryBytes = new(StringComparer.OrdinalIgnoreCase);
     private static string _cachePath = RootPath;
 
-    internal static void UseTitle(string? titleId)
+    internal static string KeyVersion => $"{Version}:{typeof(ScalarValueGraph).Module.ModuleVersionId:N}";
+
+    internal static string? TitleDirectory(string? titleId)
     {
         if (RootPath == "0")
         {
-            return;
+            return null;
         }
 
         var name = string.IsNullOrWhiteSpace(titleId)
             ? "unknown"
             : string.Concat(titleId.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
-        Volatile.Write(ref _cachePath, Path.Combine(RootPath, name));
+        return Path.Combine(RootPath, name);
+    }
+
+    internal static void UseTitle(string? titleId)
+    {
+        if (TitleDirectory(titleId) is { } directory)
+        {
+            Volatile.Write(ref _cachePath, directory);
+        }
     }
 
     internal static ScalarValueGraph Build(Gen5ShaderProgram program, uint userDataBase, uint userDataCount,

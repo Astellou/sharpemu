@@ -188,7 +188,18 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
                 Console.Error.WriteLine($"[PREBUILD][INFO]   {count,6} x {reason}");
             }
 
-            return report.FailedGroups == 0 ? OrbisGen2Result.ORBIS_GEN2_OK : OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+            if (report.FailedGroups != 0)
+            {
+                return OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+            }
+
+            // Only a whole prebuild lets the launcher skip the next one.
+            if (maxGroups == 0)
+            {
+                ShaderPrebuildState.MarkCurrent(ebootPath);
+            }
+
+            return OrbisGen2Result.ORBIS_GEN2_OK;
         });
     }
 

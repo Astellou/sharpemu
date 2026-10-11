@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace SharpEmu.Libs.Gpu.Prebuild;
@@ -20,6 +21,8 @@ internal sealed class UnrealShaderPrebuildReport
     // Per AGC shader type: prepared and failed counts, and failure reasons.
     public Dictionary<byte, (int Prepared, int Failed)> Preparation { get; } = [];
     public Dictionary<string, int> Failures { get; } = [];
+    public long TotalShaders;
+    public long ProcessedShaders;
     public TimeSpan Elapsed { get; set; }
 }
 
@@ -29,6 +32,9 @@ internal static class UnrealShaderPrebuild
     private const byte ShaderCodeLibraryChunkType = 8;
     private const byte ShaderCodeChunkType = 9;
     private const string ManifestFileName = "manifest.tsv";
+    private static readonly TimeSpan ProgressReportInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan SlowCheckInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan SlowPreparation = TimeSpan.FromSeconds(10);
 
     public static UnrealShaderPrebuildReport Run(
         string app0Root,
@@ -81,11 +87,17 @@ internal static class UnrealShaderPrebuild
             }
 
             log.WriteLine($"[PREBUILD][INFO] Unreal IoStore: containers={containers.Count} shader_libraries={libraries.Count} shader_groups={groupChunks.Count}");
+            // The libraries are small tables, so all are read first and the progress total
+            // is known before the first group is decompressed.
+            var archives = libraries
+                .Select(library => (library.Container, Archive: UnrealShaderArchive.Parse(library.Container.ReadChunk(library.Index))))
+                .ToList();
+            report.TotalShaders = archives.Sum(library => library.Archive.Groups.Sum(group => (long)group.ShaderCount));
+            using var progress = new ProgressReporter(report, log);
             var visited = new HashSet<IoChunkId>();
-            for (var libraryIndex = 0; libraryIndex < libraries.Count; libraryIndex++)
+            for (var libraryIndex = 0; libraryIndex < archives.Count; libraryIndex++)
             {
-                var (container, index) = libraries[libraryIndex];
-                var archive = UnrealShaderArchive.Parse(container.ReadChunk(index));
+                var (container, archive) = archives[libraryIndex];
                 report.Libraries++;
                 log.WriteLine(
                     $"[PREBUILD][INFO] Shader library {libraryIndex} in {Path.GetFileName(container.TocPath)}: " +
@@ -102,12 +114,14 @@ internal static class UnrealShaderPrebuild
                     var entry = archive.Groups[group];
                     if (!visited.Add(entry.Chunk))
                     {
+                        Interlocked.Add(ref report.ProcessedShaders, (long)entry.ShaderCount);
                         continue;
                     }
 
                     if (!groupChunks.TryGetValue(entry.Chunk, out var location))
                     {
                         report.MissingGroups++;
+                        Interlocked.Add(ref report.ProcessedShaders, (long)entry.ShaderCount);
                         continue;
                     }
 
@@ -115,7 +129,7 @@ internal static class UnrealShaderPrebuild
                     var jobBytes = job.Source.Length + job.Destination.Length;
                     if (batch.Count != 0 && batchBytes + jobBytes > oodle.MaxBatchBytes)
                     {
-                        Flush(archive, libraryIndex, batch, oodle, report, dumpDirectory, manifest);
+                        Flush(archive, libraryIndex, batch, oodle, report, dumpDirectory, manifest, log);
                         batchBytes = 0;
                     }
 
@@ -123,7 +137,7 @@ internal static class UnrealShaderPrebuild
                     batchBytes += jobBytes;
                 }
 
-                Flush(archive, libraryIndex, batch, oodle, report, dumpDirectory, manifest);
+                Flush(archive, libraryIndex, batch, oodle, report, dumpDirectory, manifest, log);
             }
         }
         finally
@@ -136,8 +150,46 @@ internal static class UnrealShaderPrebuild
         }
 
         report.Elapsed = Stopwatch.GetElapsedTime(started);
+        WriteProgress(report, log);
         return report;
     }
+
+    // Reports from its own thread: the preparation keeps every pool thread busy, which
+    // holds a pool timer's callbacks back for many seconds.
+    private sealed class ProgressReporter : IDisposable
+    {
+        private readonly ManualResetEventSlim _stop = new();
+        private readonly Thread _thread;
+
+        public ProgressReporter(UnrealShaderPrebuildReport report, TextWriter log)
+        {
+            _thread = new Thread(() =>
+            {
+                do
+                {
+                    WriteProgress(report, log);
+                }
+                while (!_stop.Wait(ProgressReportInterval));
+            })
+            {
+                IsBackground = true,
+                Name = "SharpEmu prebuild progress",
+            };
+            _thread.Start();
+        }
+
+        public void Dispose()
+        {
+            _stop.Set();
+            _thread.Join();
+            _stop.Dispose();
+        }
+    }
+
+    // A launcher follows a prebuild through these lines: shader entries handled so far
+    // and the total, each library entry counted once whether prepared or skipped.
+    private static void WriteProgress(UnrealShaderPrebuildReport report, TextWriter log) =>
+        log.WriteLine($"[PREBUILD][PROGRESS] {Interlocked.Read(ref report.ProcessedShaders)} {report.TotalShaders}");
 
     private static void Flush(
         UnrealShaderArchive archive,
@@ -146,7 +198,8 @@ internal static class UnrealShaderPrebuild
         IOodleDecompressor oodle,
         UnrealShaderPrebuildReport report,
         string? dumpDirectory,
-        TextWriter? manifest)
+        TextWriter? manifest,
+        TextWriter log)
     {
         if (batch.Count == 0)
         {
@@ -162,6 +215,7 @@ internal static class UnrealShaderPrebuild
             if (job.Result != job.Destination.Length)
             {
                 report.FailedGroups++;
+                Interlocked.Add(ref report.ProcessedShaders, (long)archive.Groups[group].ShaderCount);
                 continue;
             }
 
@@ -174,6 +228,7 @@ internal static class UnrealShaderPrebuild
                 if (!UnrealShaderBlob.TryExtract(blob, out var shader))
                 {
                     report.Unextracted++;
+                    Interlocked.Increment(ref report.ProcessedShaders);
                     manifest?.WriteLine($"{name}\t-\t-\t-");
                 }
                 else
@@ -181,7 +236,12 @@ internal static class UnrealShaderPrebuild
                     report.AgcShaderTypes[shader.Type] = report.AgcShaderTypes.GetValueOrDefault(shader.Type) + 1;
                     if (report.UniqueHashes.Add(shader.Hash) && ShaderPrebuild.IsPrepared(shader.Type))
                     {
+                        // Counted once its preparation finishes.
                         work.Add(new AgcShaderHeader(blob, shader));
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref report.ProcessedShaders);
                     }
 
                     manifest?.WriteLine($"{name}\t{shader.Hash:X16}\t{shader.Type}\t{shader.CodeSize}");
@@ -196,9 +256,28 @@ internal static class UnrealShaderPrebuild
 
         batch.Clear();
         var compiler = GuestGpu.Current;
+        // One pathological program can hold a whole batch, so every program still running
+        // long is reported while the batch waits for it.
+        var running = new ConcurrentDictionary<AgcShaderHeader, long>();
+        using var slowCheck = new Timer(_ =>
+        {
+            foreach (var (header, started) in running)
+            {
+                var elapsed = Stopwatch.GetElapsedTime(started);
+                if (elapsed >= SlowPreparation)
+                {
+                    log.WriteLine(
+                        $"[PREBUILD][WARN] Still preparing hash=0x{header.Shader.Hash:X16} type={header.Shader.Type} " +
+                        $"code_bytes={header.Shader.CodeSize} for {elapsed.TotalSeconds:F0}s");
+                }
+            }
+        }, null, SlowCheckInterval, SlowCheckInterval);
         Parallel.ForEach(work, header =>
         {
+            running[header] = Stopwatch.GetTimestamp();
             var prepared = ShaderPrebuild.TryPrepare(header, compiler, hostWave64Supported: false, out var error);
+            running.TryRemove(header, out _);
+            Interlocked.Increment(ref report.ProcessedShaders);
             lock (report.Failures)
             {
                 var (ok, failed) = report.Preparation.GetValueOrDefault(header.Shader.Type);
