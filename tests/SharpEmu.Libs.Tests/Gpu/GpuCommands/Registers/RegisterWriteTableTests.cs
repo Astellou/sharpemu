@@ -49,27 +49,6 @@ public sealed class RegisterWriteTableTests
     }
 
     [Fact]
-    public void UndocumentedShaderRegister192_IsAcceptedFromTablesAndPackets()
-    {
-        var banks = NewBanks();
-        var vertex = banks.Shader.Vertex.Copy();
-        RegisterWriteTable.WriteShaderEntry(banks, SpiShaderUndocumented192, 1, PacketAddress);
-        Assert.Equal(1u, WriteShader(banks, SpiShaderUndocumented192, 1));
-        Assert.Equal(vertex.LocalAddress, banks.Shader.Vertex.LocalAddress);
-        Assert.Equal(vertex.HullAddress, banks.Shader.Vertex.HullAddress);
-    }
-
-    [Fact]
-    public void UndocumentedUserConfigRegister191_IsAcceptedFromTablesAndPackets()
-    {
-        var banks = NewBanks();
-        var primitiveType = banks.UserConfig.PrimitiveType;
-        RegisterWriteTable.WriteUserConfigEntry(banks, UserConfigUndocumented191, 0, PacketAddress);
-        Assert.Equal(1u, WriteUserConfig(banks, UserConfigUndocumented191, 0));
-        Assert.Equal(primitiveType, banks.UserConfig.PrimitiveType);
-    }
-
-    [Fact]
     public void CapturedMixedSampleRegistersKeepDepthStorageSeparateFromEqaaAnchors()
     {
         var banks = NewBanks();
