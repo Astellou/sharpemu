@@ -222,9 +222,7 @@ internal sealed unsafe class VulkanTickDevice : IGpuTickDevice
         Result result;
         using (RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.GpuCompletionWait))
         {
-            var waitStart = System.Diagnostics.Stopwatch.GetTimestamp(); // TEMP
             result = _vk.WaitSemaphores(_device, &waitInfo, ulong.MaxValue);
-            Scheduling.SubmitCauseProfileTemp.NoteRenderWait("tick", System.Diagnostics.Stopwatch.GetElapsedTime(waitStart).TotalMilliseconds); // TEMP
         }
         failure = result.ToString();
         return result == Result.Success && WaitRetired(tick);
