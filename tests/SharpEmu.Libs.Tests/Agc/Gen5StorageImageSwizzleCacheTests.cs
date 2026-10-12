@@ -10,16 +10,17 @@ namespace SharpEmu.Libs.Tests.Agc;
 
 public sealed class Gen5StorageImageSwizzleCacheTests
 {
+    // A storage image reads its destination selects from the dispatch's shader data, so two
+    // swizzles share one specialization and one compiled program.
     [Theory]
     [InlineData("ImageStore")]
     [InlineData("ImageStoreMip")]
-    public void SpecializationSeparatesStorageImageSwizzles(string opcode)
+    public void StorageImageSwizzlesShareOneSpecialization(string opcode)
     {
         var identity = CreateSpecialization(Gen5ShaderTranslator.IdentityImageDstSelect, opcode);
         var rotated = CreateSpecialization(0x9F5u, opcode);
-        Assert.NotEqual(identity, rotated);
-        Assert.Equal(Gen5ShaderTranslator.IdentityImageDstSelect, Assert.Single(identity.Images).ShaderSwizzle);
-        Assert.Equal(0x9F5u, Assert.Single(rotated.Images).ShaderSwizzle);
+        Assert.Equal(identity, rotated);
+        Assert.Equal(Gen5ShaderTranslator.IdentityImageDstSelect, Assert.Single(rotated.Images).ShaderSwizzle);
     }
 
     private static ResourceSpecialization CreateSpecialization(uint destinationSelect, string opcode)

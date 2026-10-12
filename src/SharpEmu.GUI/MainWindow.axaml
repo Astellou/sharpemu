@@ -1754,8 +1754,9 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
     </Grid>
 
-    <!-- Shader preparation that runs before an Unreal Engine game starts; the
-         game launches when it ends or when the user skips it. -->
+    <!-- Shader preparation that runs before a game starts, which launches when it
+         ends or when the user skips it. The shader prewarm a running game holds its
+         splash screen for shows here too, without Skip. -->
     <Grid x:Name="PrebuildOverlay"
           Grid.Row="1"
           ZIndex="900"
@@ -1775,7 +1776,14 @@ SPDX-License-Identifier: GPL-2.0-or-later
                      FontSize="13"
                      Foreground="{StaticResource MutedBrush}"
                      TextTrimming="CharacterEllipsis" />
-          <TextBlock Text="{Binding [Prebuild.Title], Source={x:Static local:Localization.Instance}}"
+          <TextBlock x:Name="PrebuildTitle"
+                     Text="{Binding [Prebuild.Title], Source={x:Static local:Localization.Instance}}"
+                     FontSize="20"
+                     FontWeight="SemiBold"
+                     Foreground="{StaticResource TextBrush}" />
+          <TextBlock x:Name="PrewarmTitle"
+                     IsVisible="False"
+                     Text="{Binding [Prewarm.Title], Source={x:Static local:Localization.Instance}}"
                      FontSize="20"
                      FontWeight="SemiBold"
                      Foreground="{StaticResource TextBrush}" />
@@ -1794,7 +1802,14 @@ SPDX-License-Identifier: GPL-2.0-or-later
                        FontSize="13"
                        Foreground="{StaticResource SecondaryTextBrush}" />
           </Grid>
-          <TextBlock Text="{Binding [Prebuild.Note], Source={x:Static local:Localization.Instance}}"
+          <TextBlock x:Name="PrebuildNote"
+                     Text="{Binding [Prebuild.Note], Source={x:Static local:Localization.Instance}}"
+                     FontSize="12"
+                     TextWrapping="Wrap"
+                     Foreground="{StaticResource MutedBrush}" />
+          <TextBlock x:Name="PrewarmNote"
+                     IsVisible="False"
+                     Text="{Binding [Prewarm.Note], Source={x:Static local:Localization.Instance}}"
                      FontSize="12"
                      TextWrapping="Wrap"
                      Foreground="{StaticResource MutedBrush}" />

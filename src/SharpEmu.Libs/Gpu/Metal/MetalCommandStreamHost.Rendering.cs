@@ -527,6 +527,7 @@ internal sealed partial class MetalCommandStreamHost : IRenderHost, IShaderPipel
         }
 
         stage.WriteDispatchThreadLimits(shaderData);
+        stage.WriteDescriptorFields(shaderData);
         prepared.ShaderData = shaderData;
         if (RenderTrace.Enabled && RenderTrace.Pipeline())
         {

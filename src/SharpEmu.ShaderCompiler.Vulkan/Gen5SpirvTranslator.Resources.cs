@@ -287,6 +287,7 @@ public static partial class Gen5SpirvTranslator
             var descriptorsPointer = _module.TypePointer(SpirvStorageClass.StorageBuffer, descriptors);
             _storageBlockPointer = _module.TypePointer(SpirvStorageClass.StorageBuffer, block);
             _globalBuffers = _module.AddGlobalVariable(descriptorsPointer, SpirvStorageClass.StorageBuffer);
+            _globalBufferCount = count;
             _module.AddName(_globalBuffers, "guestBuffers");
             _module.AddDecoration(_globalBuffers, SpirvDecoration.DescriptorSet, 0);
             _module.AddDecoration(_globalBuffers, SpirvDecoration.Binding, bindingNumber);
@@ -1620,9 +1621,18 @@ public static partial class Gen5SpirvTranslator
                 imageClass.Dimension,
                 imageInfo.ConversionFormat,
                 imageInfo.ShaderSwizzle,
-                imageInfo.EmulatedCompareFunction);
+                imageInfo.EmulatedCompareFunction,
+                imageInfo.RuntimeSwizzle ? LoadImageSwizzle(resourceIndex) : 0);
             dstSelect = imageInfo.ShaderSwizzle;
             return true;
+        }
+
+        // The destination selects the dispatch binds for a storage image, packed two images
+        // to a shader-data dword.
+        private uint LoadImageSwizzle(int image)
+        {
+            var packed = LoadShaderDataDword(UInt(_request.Bindings.ImageSwizzleDword + (uint)image / 2));
+            return BitwiseAnd(ShiftRightLogical(packed, UInt((uint)image % 2 * 16)), UInt(0xFFF));
         }
 
         private static uint ImageSpatialComponentCountOf(SpirvImageDim dimension) => dimension switch

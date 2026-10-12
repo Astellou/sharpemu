@@ -153,7 +153,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     // Extracts and prepares the shaders a title ships. Unity data is plain LZ4 and is read
     // directly; an Unreal title is booted through its module initializers, not entered,
     // so its own Oodle decoder can unpack its shader libraries. Any other title is read
-    // for the shaders compiled into its executable.
+    // for the shaders compiled into its executable and bundled in its shader containers.
     public OrbisGen2Result PrebuildShaders(string ebootPath, string? dumpDirectory, int maxGroups)
     {
         var app0Root = Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty;
@@ -237,7 +237,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             }
         }
 
-        var report = ExecutableShaderPrebuild.Run(segments, dumpDirectory, Console.Error);
+        var app0Root = Path.GetDirectoryName(Path.GetFullPath(ebootPath)) ?? string.Empty;
+        var report = ExecutableShaderPrebuild.Run(segments, ChainedShaderBlob.FindContainers(app0Root), dumpDirectory, Console.Error);
         Console.Error.WriteLine($"[PREBUILD][INFO] Done in {report.Elapsed.TotalSeconds:F1}s");
         report.WriteSummary(Console.Error);
         ShaderPrebuildState.MarkCurrent(ebootPath);

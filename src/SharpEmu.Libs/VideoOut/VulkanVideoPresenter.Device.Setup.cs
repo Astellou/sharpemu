@@ -8,6 +8,7 @@ using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Pipelines;
 using SharpEmu.Libs.Gpu.Rendering;
 using SharpEmu.Libs.Gpu.Scheduling;
+using SharpEmu.ShaderCompiler;
 using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
@@ -46,6 +47,9 @@ internal static unsafe partial class VulkanVideoPresenter
         private bool _supportsIndependentBlend;
         private bool _supportsDepthBiasClamp;
         private bool _supportsShaderSignedZeroInfNanPreserveFloat32;
+        // The float-controls half of native f16 conversions; shaderFloat16 completes it.
+        private bool _supportsFloat16ConversionControls;
+        private bool _supportsNativeFloat16Conversions;
         private uint _maxColorAttachments;
         private Device _device;
         private PipelineCache _pipelineCache;
@@ -607,6 +611,16 @@ internal static unsafe partial class VulkanVideoPresenter
             _vk.GetPhysicalDeviceProperties2(_physicalDevice, &properties2);
             _supportsShaderSignedZeroInfNanPreserveFloat32 =
                 floatControls.ShaderSignedZeroInfNanPreserveFloat32;
+            _supportsFloat16ConversionControls = ShaderCompileRequest.SupportsNativeFloat16Conversions(
+                shaderFloat16: true,
+                floatControls.ShaderRoundingModeRtefloat16,
+                floatControls.ShaderDenormPreserveFloat16,
+                floatControls.ShaderSignedZeroInfNanPreserveFloat16,
+                floatControls.ShaderRoundingModeRtefloat64,
+                floatControls.ShaderDenormPreserveFloat64,
+                floatControls.ShaderSignedZeroInfNanPreserveFloat64,
+                floatControls.RoundingModeIndependence != ShaderFloatControlsIndependence.IndependenceNone,
+                floatControls.DenormBehaviorIndependence != ShaderFloatControlsIndependence.IndependenceNone);
             SetNativeSubgroupCapabilities(subgroup.SubgroupSize, subgroup.SupportedStages);
             _canRequireComputeSubgroup32 =
                 subgroup.SubgroupSize != RdnaSubgroupSize &&
@@ -955,10 +969,15 @@ internal static unsafe partial class VulkanVideoPresenter
                 SType = StructureType.PhysicalDeviceBufferDeviceAddressFeatures,
                 PNext = &timelineSemaphoreFeatures,
             };
+            var float16Features = new PhysicalDeviceShaderFloat16Int8Features
+            {
+                SType = StructureType.PhysicalDeviceShaderFloat16Int8Features,
+                PNext = &addressFeatures,
+            };
             var atomicInt64Features = new PhysicalDeviceShaderAtomicInt64Features
             {
                 SType = StructureType.PhysicalDeviceShaderAtomicInt64Features,
-                PNext = &addressFeatures,
+                PNext = &float16Features,
             };
             var featuresQuery = new PhysicalDeviceFeatures2
             {
@@ -969,6 +988,11 @@ internal static unsafe partial class VulkanVideoPresenter
             var supportsTimelineSemaphore = timelineSemaphoreFeatures.TimelineSemaphore;
             var supportsBufferDeviceAddress = addressFeatures.BufferDeviceAddress;
             var supportsSharedInt64Atomics = atomicInt64Features.ShaderSharedInt64Atomics;
+            _supportsNativeFloat16Conversions = float16Features.ShaderFloat16 && _supportsFloat16ConversionControls &&
+                Environment.GetEnvironmentVariable("SHARPEMU_NATIVE_F16") != "0";
+            Console.Error.WriteLine(
+                $"[LOADER][INFO] Vulkan native f16 conversions enabled={_supportsNativeFloat16Conversions} " +
+                $"shaderFloat16={(bool)float16Features.ShaderFloat16} float_controls={_supportsFloat16ConversionControls}");
             var supportsMaintenance8 = maintenance8Features.Maintenance8;
             var supportsRobustBufferAccess2 = robustness2Features.RobustBufferAccess2;
             var supportsRobustImageAccess2 = robustness2Features.RobustImageAccess2;
@@ -1129,6 +1153,17 @@ internal static unsafe partial class VulkanVideoPresenter
                         PNext = renderingChain,
                     };
                     renderingChain = &atomicInt64Features;
+                }
+
+                if (_supportsNativeFloat16Conversions)
+                {
+                    float16Features = new PhysicalDeviceShaderFloat16Int8Features
+                    {
+                        SType = StructureType.PhysicalDeviceShaderFloat16Int8Features,
+                        ShaderFloat16 = true,
+                        PNext = renderingChain,
+                    };
+                    renderingChain = &float16Features;
                 }
 
                 if (supportsImageInt64Atomics)

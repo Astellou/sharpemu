@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Varjutajate ettevalmistamine katkes (väljumiskood {0}); mäng käivitub siiski.",
   "Prebuild.Duration.Minutes": "{0} min {1:D2} s",
   "Prebuild.Duration.Seconds": "{0} s",
+  "Prewarm.Title": "Varjutajate uuesti kompileerimine",
+  "Prewarm.Note": "SharpEmu või graafikadraiver on muutunud: selles mängus juba kasutatud varjutajad kompileeritakse enne jätkamist uuesti. See juhtub pärast iga uuendust ühe korra.",
   "Options.Env.PerformanceProfile.Desc": "Logi jõudlusajad ja FPS alates järgmisest mängu käivitamisest.\nSee võib jõudlust vähendada.",
   "Options.Env.PerformanceFrameTrace.Desc": "Säilita viimased 4096 esitamisintervalli ja kirjuta need sulgemisel logisse.\nVajab jõudluse profileerimist. Jälje salvestamiseks sulge mäng tavapäraselt.",
   "Options.OverlayEnabled.Label": "Jõudlusnäidik",

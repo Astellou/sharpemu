@@ -444,6 +444,7 @@ public sealed class SubmissionScheduler : IGpuTickScheduler, IDisposable
     // Add the timeline signal to a copy. Keep the caller's submission bundle unchanged.
     public ulong Submit(SubmitBundle? bundle = null)
     {
+        SubmitCauseProfileTemp.NoteSubmit(); // TEMP
         var submit = bundle == null ? new SubmitBundle() : new SubmitBundle(bundle);
         if (_command.IsInvalid)
         {

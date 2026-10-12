@@ -181,6 +181,28 @@ public sealed class ShaderCompileRequest
 
     public bool UsesImageInt64Atomics => Resources.Info.Images.Any(static image => image.Atomic64);
     public bool ShaderSignedZeroInfNanPreserveFloat32Supported { get; init; }
+
+    // The device has shaderFloat16 and can pin f16 (and f64) results to round-to-nearest-
+    // even with denormals and Inf/NaN preserved. The shader then uses
+    // OpFConvert for the f32->f16 narrowing instead of the exact integer sequence, which
+    // dominates the code of shaders heavy in packed f16 math.
+    public bool NativeFloat16Conversions { get; init; }
+
+    // Whether a device's float controls let NativeFloat16Conversions pin the f16 modes. The
+    // f64 modes are pinned alongside, since some devices (AMD) only make 32-bit independent.
+    public static bool SupportsNativeFloat16Conversions(
+        bool shaderFloat16,
+        bool roundingModeRte16,
+        bool denormPreserve16,
+        bool signedZeroInfNanPreserve16,
+        bool roundingModeRte64,
+        bool denormPreserve64,
+        bool signedZeroInfNanPreserve64,
+        bool roundingModesIndependent,
+        bool denormModesIndependent) =>
+        shaderFloat16 && roundingModeRte16 && denormPreserve16 && signedZeroInfNanPreserve16 &&
+        roundingModeRte64 && denormPreserve64 && signedZeroInfNanPreserve64 &&
+        roundingModesIndependent && denormModesIndependent;
     public Gen5ComputeSystemRegisters? ComputeSystemRegisters { get; init; }
 
     public IReadOnlyList<Gen5PixelOutputBinding> PixelOutputs { get; init; } = [];

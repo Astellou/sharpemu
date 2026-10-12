@@ -10,6 +10,9 @@ internal sealed class ExecutableShaderPrebuildReport : ShaderPrebuildReport
 {
     public int ElfPrograms { get; set; }
     public int PairedPrograms { get; set; }
+    public int ContainerFiles { get; set; }
+    public int ContainerPrograms { get; set; }
+    public int UnreadableContainers { get; set; }
 }
 
 // One program found in an executable image: its code followed by its AGC header, the
@@ -52,8 +55,11 @@ internal static class ExecutableShaderPrebuild
         return false;
     }
 
+    // The executable's programs, then those of the shader containers the title ships beside
+    // it (see ChainedShaderBlob), each kept once.
     public static ExecutableShaderPrebuildReport Run(
         IReadOnlyList<(ulong Address, byte[] Bytes)> segments,
+        IEnumerable<string> containers,
         string? dumpDirectory,
         TextWriter log)
     {
@@ -73,29 +79,60 @@ internal static class ExecutableShaderPrebuild
         }
 
         var work = new List<AgcShaderHeader>();
+        void Add(ReadOnlySpan<byte> blob, ExtractedShader shader, string name)
+        {
+            report.Shaders++;
+            report.AgcShaderTypes[shader.Type] = report.AgcShaderTypes.GetValueOrDefault(shader.Type) + 1;
+            if (!report.UniqueHashes.Add(shader.Hash))
+            {
+                return;
+            }
+
+            if (ShaderPrebuild.IsPrepared(shader.Type))
+            {
+                work.Add(new AgcShaderHeader(blob, shader));
+            }
+
+            manifest?.WriteLine($"{name}\t{shader.Hash:X16}\t{shader.Type}\t{shader.CodeSize}");
+            if (dumpDirectory is not null)
+            {
+                File.WriteAllBytes(Path.Combine(dumpDirectory, Sanitize(name) + ".bin"), blob[shader.CodeOffset..(shader.HeaderOffset + shader.HeaderSize)].ToArray());
+            }
+        }
+
         try
         {
             foreach (var (blob, shader, headerAddress) in shaders)
             {
-                report.Shaders++;
-                report.AgcShaderTypes[shader.Type] = report.AgcShaderTypes.GetValueOrDefault(shader.Type) + 1;
-                if (!report.UniqueHashes.Add(shader.Hash))
+                Add(blob, shader, $"header_{headerAddress:X16}");
+            }
+
+            foreach (var path in containers)
+            {
+                byte[] bytes;
+                try
                 {
+                    bytes = File.ReadAllBytes(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    report.UnreadableContainers++;
+                    log.WriteLine($"[PREBUILD][WARN] Skipping {Path.GetFileName(path)}: {exception.Message}");
                     continue;
                 }
 
-                if (ShaderPrebuild.IsPrepared(shader.Type))
+                report.ContainerFiles++;
+                foreach (var shader in ChainedShaderBlob.Extract(bytes))
                 {
-                    work.Add(new AgcShaderHeader(blob, shader));
-                }
-
-                var name = $"header_{headerAddress:X16}";
-                manifest?.WriteLine($"{name}\t{shader.Hash:X16}\t{shader.Type}\t{shader.CodeSize}");
-                if (dumpDirectory is not null)
-                {
-                    File.WriteAllBytes(Path.Combine(dumpDirectory, name + ".bin"), blob);
+                    report.ContainerPrograms++;
+                    // The header is copied out, so only the program's own bytes are kept.
+                    Add(bytes.AsSpan(0, shader.HeaderOffset + shader.HeaderSize), shader, $"{Path.GetFileNameWithoutExtension(path)}_{shader.HeaderOffset:X}");
                 }
             }
+
+            log.WriteLine(
+                $"[PREBUILD][INFO] Containers: files={report.ContainerFiles} programs={report.ContainerPrograms} " +
+                $"unreadable={report.UnreadableContainers} unique_hashes={report.UniqueHashes.Count}");
         }
         finally
         {
@@ -254,6 +291,9 @@ internal static class ExecutableShaderPrebuild
             search += found + 1;
         }
     }
+
+    private static string Sanitize(string name) =>
+        string.Concat(name.Select(character => char.IsLetterOrDigit(character) || character is '_' or '-' ? character : '_'));
 
     private static bool TrySizes(byte[] bytes, int header, out uint headerSize, out uint codeSize)
     {

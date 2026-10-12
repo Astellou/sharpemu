@@ -1022,16 +1022,22 @@ public static partial class Gen5MslTranslator
             string descriptorWord3;
             uint descriptorFormat;
             {
-                // The dense buffer, its stride and its format come from the specialization.
+                // The dense buffer and its format come from the specialization; the stride
+                // comes from the shader data the dispatch fills.
                 if (!TryResolveLayoutBuffer(instruction.Pc, out bindingIndex, out var specialized))
                 {
                     error = "missing buffer-memory binding";
                     return false;
                 }
 
-                stride = FormatUInt(specialized.PackedStride & 0x3FFF);
+                stride = control.IndexEnabled
+                    ? $"(({ShaderDataDword(_request.Bindings.BufferStrideDword + (uint)bindingIndex / 2)} >> " +
+                      $"{(uint)bindingIndex % 2 * 16}u) & {SharpEmu.ShaderCompiler.Resources.DescriptorConstants.BufferStrideMask}u)"
+                    : "0u";
                 descriptorFormat = specialized.DescriptorFormat;
-                descriptorWord3 = FormatUInt((specialized.DescriptorFormat << 12) | (specialized.DescriptorSwizzle & 0xFFF));
+                descriptorWord3 = specialized.RuntimeFormat
+                    ? ShaderDataDword(_request.Bindings.BufferFormatDword + (uint)bindingIndex)
+                    : FormatUInt((specialized.DescriptorFormat << 12) | (specialized.DescriptorSwizzle & 0xFFF));
             }
 
             var scalarOffset = instruction.Sources.Count > 2
@@ -1051,6 +1057,12 @@ public static partial class Gen5MslTranslator
             if (instruction.Opcode is "BufferStoreFormatX" or "BufferStoreFormatXy" or
                 "BufferStoreFormatXyz" or "BufferStoreFormatXyzw")
             {
+                if (_request.Resources.Info.Buffers[bindingIndex].RuntimeFormat)
+                {
+                    EmitRuntimeBufferFormatStore(bindingIndex, address, control, descriptorWord3);
+                    return true;
+                }
+
                 if (descriptorFormat == 0)
                 {
                     return true;
@@ -1276,6 +1288,44 @@ public static partial class Gen5MslTranslator
             _indent--;
             Line("}");
             return true;
+        }
+
+        // A formatted store whose format the dispatch binds: the prelude's runtime layout and
+        // encoder fill the element and the masks that keep its other bits.
+        private void EmitRuntimeBufferFormatStore(int bindingIndex, string byteAddress, Gen5BufferMemoryControl control, string descriptorWord3)
+        {
+            var word3 = Temp("uint", descriptorWord3);
+            var entry = Temp("uint", $"sharpemu_gfx10_formats[({word3} >> 12) & 0x7Fu]");
+            var dataFormat = Temp("uint", $"{entry} & 0xFFu");
+            var numberFormat = Temp("uint", $"({entry} >> 8) & 0xFFu");
+            var values = Temp("uint4", "uint4(0u)");
+            var masks = Temp("uint4", "uint4(0u)");
+            var elementBytes = Temp("uint", "0u");
+            for (uint component = 0; component < Math.Min(control.DwordCount, 4u); component++)
+            {
+                var byteOffset = Temp("uint", "0u");
+                var bitOffset = Temp("uint", "0u");
+                var bitCount = Temp("uint", "0u");
+                Line($"sharpemu_format_layout({dataFormat}, {component}u, {byteOffset}, {bitOffset}, {bitCount});");
+                Line($"if ({bitCount} != 0u)");
+                Line("{");
+                _indent++;
+                var mask = Temp("uint", $"{bitCount} >= 32u ? 0xFFFFFFFFu : ((1u << {bitCount}) - 1u)");
+                var bit = Temp("uint", $"(({byteOffset} & 3u) * 8u) + {bitOffset}");
+                Line($"{values}[{byteOffset} >> 2] |= (sharpemu_format_encode(v[{control.VectorData + component}], {bitCount}, {numberFormat}, {dataFormat}) & {mask}) << {bit};");
+                Line($"{masks}[{byteOffset} >> 2] |= {mask} << {bit};");
+                Line($"{elementBytes} = max({elementBytes}, {byteOffset} + (({bitOffset} + {bitCount} + 7u) >> 3u));");
+                _indent--;
+                Line("}");
+            }
+
+            var inBounds = ElementInBounds(bindingIndex, byteAddress, elementBytes);
+            Line($"if (exec && (({word3} >> 12) & 0x7Fu) != 0u && {elementBytes} != 0u && {inBounds})");
+            Line("{");
+            _indent++;
+            Line($"sharpemu_store_element(b{bindingIndex}, {BufferBytes(bindingIndex)}, {byteAddress}, ({elementBytes} + 3u) >> 2, {values}, {masks});");
+            _indent--;
+            Line("}");
         }
 
         private string LoadFormatComponent(

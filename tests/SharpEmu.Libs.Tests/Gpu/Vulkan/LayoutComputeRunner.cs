@@ -181,12 +181,21 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
         uint[]? flattenedTable = null,
         IReadOnlyDictionary<DescriptorBindingKind, DescriptorImageInfo[]>? boundImages = null,
         ulong shaderBase = 0,
-        uint[]? dispatchThreadLimits = null)
+        uint[]? dispatchThreadLimits = null,
+        IReadOnlyList<uint[]>? bufferDescriptors = null,
+        IReadOnlyList<uint[]>? imageDescriptors = null)
     {
         var vk = _harness.Vk;
         var device = _harness.Device.Device;
         var layout = _request.Bindings;
         var shaderData = new uint[layout.ShaderDataDwordCount];
+        // The strides, runtime formats and storage swizzles the program reads, as a dispatch
+        // fills them; descriptors a test leaves out read as no stride and identity swizzles.
+        layout.WriteDescriptorFields(
+            shaderData,
+            bufferDescriptors ?? Enumerable.Repeat(Array.Empty<uint>(), (int)layout.MemoryOffsetCount).ToArray(),
+            imageDescriptors ?? Enumerable.Repeat(Array.Empty<uint>(), (int)layout.ImageSwizzleCount).ToArray());
+
         for (var index = 0; index < layout.UserDataRegisters.Count; index++)
         {
             var register = layout.UserDataRegisters[index];

@@ -23,16 +23,19 @@ public sealed class Gen5TypedBufferLoadSpirvTests
         Assert.DoesNotContain(DescriptorFormatTableName, ModuleNames(shader.Spirv));
     }
 
+    // A buffer the program only reads decodes with the format its dispatch binds, so one
+    // module serves every format and a prebuild can compile it without seeing a dispatch.
     [Fact]
-    public void FormattedUntypedLoad_SpecializesOnTheDescriptorFormat()
+    public void FormattedUntypedLoad_ReadsTheDescriptorFormatAtRuntime()
     {
         var request = CreateCompileRequest("BufferLoadFormatXyzw", typed: false, typedFormat: 0, dwordCount: 4);
-        Assert.Equal(77u, Assert.Single(request.Resources.Info.Buffers).DescriptorFormat);
+        var buffer = Assert.Single(request.Resources.Info.Buffers);
+        Assert.True(buffer.RuntimeFormat);
+        Assert.Equal(DescriptorConstants.InvalidFormat, buffer.DescriptorFormat);
+        Assert.True(request.Bindings.UsesBufferFormats);
         Assert.True(Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error), error);
 
-        // The specialized format is a translation-time constant, so it decodes on the host and
-        // the module needs no run-time format lookup table at all.
-        Assert.DoesNotContain(DescriptorFormatTableName, ModuleNames(shader.Spirv));
+        Assert.Contains(DescriptorFormatTableName, ModuleNames(shader.Spirv));
     }
 
     [Fact]
@@ -72,6 +75,9 @@ public sealed class Gen5TypedBufferLoadSpirvTests
     }
 
     private const uint OpAtomicCompareExchange = 230;
+    private const uint OpConvertSToF = 111;
+    private const uint OpConvertUToF = 112;
+    private const uint OpFDiv = 136;
 
     private static Gen5SpirvShader CompileBufferProgram(string opcode, bool typed, uint typedFormat, uint dwordCount)
     {

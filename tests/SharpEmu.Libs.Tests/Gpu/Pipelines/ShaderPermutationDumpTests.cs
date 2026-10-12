@@ -141,7 +141,7 @@ public sealed class ShaderPermutationDumpTests : IDisposable
         var guest = new PipelineTestGuest();
         guest.RegisterProgram(CodeAddress, HeaderAddress, PipelineTestGuest.FormatLoadProgram);
         var integerDescriptor = PipelineTestGuest.BufferDescriptor(PipelineTestGuest.MemoryBase + 0x40000, 16, 4, 75);
-        var floatDescriptor = PipelineTestGuest.BufferDescriptor(PipelineTestGuest.MemoryBase + 0x40000, 16, 4, 77);
+        var floatDescriptor = PipelineTestGuest.BufferDescriptor(PipelineTestGuest.MemoryBase + 0x40000, 16, 4, 77, swizzled: true);
         Compile(guest, integerDescriptor, PipelineTestGuest.ComputeOptions());
         Compile(guest, floatDescriptor, PipelineTestGuest.ComputeOptions());
         Compile(guest, floatDescriptor, PipelineTestGuest.ComputeOptions(), cursor: 3);
@@ -155,7 +155,8 @@ public sealed class ShaderPermutationDumpTests : IDisposable
         var candidate = Assert.Single(resource.GetProperty("Candidates").EnumerateArray());
         Assert.False(candidate.GetProperty("SpecializationMatches").GetBoolean());
         Assert.True(candidate.GetProperty("PushDataMatches").GetBoolean());
-        Assert.Equal(77u, resource.GetProperty("Specialization").GetProperty("Buffers")[0].GetProperty("DescriptorFormat").GetUInt32());
+        // The swizzled descriptor sets the packed stride's swizzle bit; its stride is read at runtime.
+        Assert.Equal(1u << 14, resource.GetProperty("Specialization").GetProperty("Buffers")[0].GetProperty("PackedStride").GetUInt32());
 
         using var pushInput = JsonDocument.Parse(File.ReadAllText(files[2]));
         var matchingResources = Assert.Single(pushInput.RootElement.GetProperty("Candidates").EnumerateArray(),

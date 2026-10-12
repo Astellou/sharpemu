@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Shadervoorbereiding gestopt (afsluitcode {0}); de game start toch.",
   "Prebuild.Duration.Minutes": "{0} min {1:D2} s",
   "Prebuild.Duration.Seconds": "{0} s",
+  "Prewarm.Title": "Shaders opnieuw compileren",
+  "Prewarm.Note": "SharpEmu of het grafische stuurprogramma is gewijzigd: de shaders die deze game al gebruikte, worden opnieuw gecompileerd voordat hij verdergaat. Dit gebeurt één keer na elke update.",
   "Options.Env.PerformanceProfile.Desc": "Log prestatietijden en FPS vanaf de volgende start van het spel.\nDit kan de prestaties verminderen.",
   "Options.Env.PerformanceFrameTrace.Desc": "Bewaar de laatste 4.096 presentatie-intervallen en schrijf ze bij afsluiten naar het logboek.\nVereist prestatieprofilering. Sluit het spel normaal af om de trace op te slaan.",
   "Options.OverlayEnabled.Label": "Prestatiegegevens",

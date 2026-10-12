@@ -173,47 +173,25 @@ public sealed class Gen5ImageTests
 
         Assert.Contains(instructions, item => item.Opcode == SpirvOp.ImageDrefGather);
     }
-
+    // A storage image store applies its descriptor's destination selects from the dispatch's
+    // shader data, so its module is the same for every swizzle (the device tests check the
+    // components it writes).
     [Theory]
-    [InlineData(0xFACu, 0xFu, 4, 5, 6, 7)]
-    [InlineData(0x9F5u, 0xFu, 7, 4, 5, 6)]
-    [InlineData(0xF2Eu, 0xFu, 6, 5, 4, 7)]
-    [InlineData(0x3ACu, 0xFu, 4, 5, 6, -1)]
-    [InlineData(0xFA4u, 0xFu, 4, -1, 6, 7)]
-    [InlineData(0xFACu, 0x0u, 4, -1, -1, -1)]
-    public void ImageStoreAppliesInverseDescriptorSwizzle(
-        uint dstSelect,
-        uint dmask,
-        int physicalX,
-        int physicalY,
-        int physicalZ,
-        int physicalW)
+    [InlineData("ImageStore")]
+    [InlineData("ImageStoreMip")]
+    public void ImageStoreModuleDoesNotDependOnTheDescriptorSwizzle(string opcode)
     {
-        var spirv = CompileImageOperation(
-            "ImageStore",
-            dimension: 1,
-            dmask,
-            dstSelect);
+        var request = ImageOperationRequest(opcode, dimension: 1, dmask: 0xF, dstSelect: 0x9F5u);
+        Assert.True(Assert.Single(request.Resources.Info.Images).RuntimeSwizzle);
+        Assert.NotEqual(0u, request.Bindings.ImageSwizzleCount);
 
         Assert.Equal(
-            [physicalX, physicalY, physicalZ, physicalW],
-            GetStoredVgprRegisters(spirv));
+            CompileImageOperation(opcode, dimension: 1, dmask: 0xF),
+            CompileImageOperation(opcode, dimension: 1, dmask: 0xF, dstSelect: 0x9F5u));
     }
 
     [Fact]
-    public void ImageStoreMipAppliesInverseDescriptorSwizzle()
-    {
-        var spirv = CompileImageOperation(
-            "ImageStoreMip",
-            dimension: 1,
-            dmask: 0xF,
-            dstSelect: 0x9F5u);
-
-        Assert.Equal([7, 4, 5, 6], GetStoredVgprRegisters(spirv));
-    }
-
-    [Fact]
-    public void UintImageStoreUsesUintTexelAndInverseDescriptorSwizzle()
+    public void UintImageStoreUsesAUintTexel()
     {
         var spirv = CompileImageOperation(
             "ImageStore",
@@ -232,7 +210,6 @@ public sealed class Gen5ImageTests
                 item.Operands[0] == imageType.Operands[1]);
 
         Assert.Equal(0u, scalarType.Operands[2]);
-        Assert.Equal([6, 5, 4, 7], GetStoredVgprRegisters(spirv));
     }
 
     private static byte[] CompileImageOperation(
@@ -322,81 +299,6 @@ public sealed class Gen5ImageTests
             ShaderCompileRequest.RequiresFlattenedTable(plan, resources), false);
         return new ShaderCompileRequest(plan, resources, layout);
     }
-
-    private static int[] GetStoredVgprRegisters(byte[] spirv)
-    {
-        var instructions = ReadSpirvInstructions(spirv);
-        var write = Assert.Single(
-            instructions,
-            item => item.Opcode == SpirvOp.ImageWrite);
-        var texel = FindResult(
-            instructions,
-            SpirvOp.CompositeConstruct,
-            write.Operands[2]);
-        Assert.Equal(6, texel.Operands.Length);
-
-        var result = new int[4];
-        for (var component = 0; component < result.Length; component++)
-        {
-            var valueId = texel.Operands[component + 2];
-            var value = FindValueDefinition(instructions, valueId);
-            if (value.Opcode == SpirvOp.Constant)
-            {
-                result[component] = -1;
-                continue;
-            }
-
-            if (value.Opcode == SpirvOp.Bitcast)
-            {
-                value = FindValueDefinition(instructions, value.Operands[2]);
-            }
-
-            Assert.Equal(SpirvOp.Load, value.Opcode);
-            result[component] = VgprIndexOfPointer(instructions, value.Operands[2]);
-        }
-
-        return result;
-    }
-
-    // A VGPR is either its own Private variable named "v<N>" or an access chain into the register array.
-    private static int VgprIndexOfPointer(IReadOnlyList<ParsedSpirvInstruction> instructions, uint pointerId)
-    {
-        var names = instructions.Where(item =>
-            item.Opcode == SpirvOp.Name && item.Operands.Length > 1 && item.Operands[0] == pointerId).ToArray();
-        if (names.Length == 1)
-        {
-            var name = names[0];
-            var bytes = name.Operands.Skip(1).SelectMany(BitConverter.GetBytes).TakeWhile(static b => b != 0).ToArray();
-            var text = System.Text.Encoding.UTF8.GetString(bytes);
-            Assert.StartsWith("v", text);
-            return int.Parse(text[1..], System.Globalization.CultureInfo.InvariantCulture);
-        }
-
-        var pointer = FindResult(instructions, SpirvOp.AccessChain, pointerId);
-        var register = FindResult(instructions, SpirvOp.Constant, pointer.Operands[^1]);
-        return checked((int)register.Operands[2]);
-    }
-
-    private static ParsedSpirvInstruction FindValueDefinition(
-        IReadOnlyList<ParsedSpirvInstruction> instructions,
-        uint resultId) =>
-        Assert.Single(
-            instructions,
-            item =>
-                item.Operands.Length > 1 &&
-                item.Operands[1] == resultId &&
-                item.Opcode is SpirvOp.Bitcast or SpirvOp.Load or SpirvOp.Constant);
-
-    private static ParsedSpirvInstruction FindResult(
-        IReadOnlyList<ParsedSpirvInstruction> instructions,
-        SpirvOp opcode,
-        uint resultId) =>
-        Assert.Single(
-            instructions,
-            item =>
-                item.Opcode == opcode &&
-                item.Operands.Length > 1 &&
-                item.Operands[1] == resultId);
 
     private static IReadOnlyList<ParsedSpirvInstruction> ReadSpirvInstructions(
         byte[] spirv)

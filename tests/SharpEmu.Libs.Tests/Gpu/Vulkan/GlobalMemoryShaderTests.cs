@@ -103,6 +103,56 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
         yield return [Format32x4Float, (Format8x4Unorm << 12) | IdentitySwizzle, (uint)(BufferBytes - 8), "zero"];
     }
 
+    public static IEnumerable<object[]> RuntimeStoreCases()
+    {
+        // descriptor format, the four register values, and the dword written at MemoryOffset
+        yield return [Format8x4Unorm, new[] { F(0f), F(0.5f), F(1f), F(2f) }, 0xFFFF_8000u];
+        // 0.25 x 1023 = 255.75 rounds to 256 and 0.5 x 1023 = 511.5 to even 512.
+        yield return [50u, new[] { F(0.25f), F(0.5f), F(1f), F(1f) }, 0xFFF8_0100u];
+        yield return [29u, new[] { F(0.5f), F(-2f), F(9f), F(9f) }, 0xC000_3800u];
+        yield return [Format8x4Uint, new[] { 300u, 7u, 0u, 1u }, 0x0100_07FFu];
+        yield return [Format32Float, new[] { F(1.5f), F(2f), F(3f), F(4f) }, 0x3FC0_0000u];
+    }
+
+    private static uint F(float value) => BitConverter.SingleToUInt32Bits(value);
+
+    // An untyped formatted store encodes with the format its dispatch binds; the dword after
+    // a one-dword element keeps its bits.
+    [Theory]
+    [MemberData(nameof(RuntimeStoreCases))]
+    public void FormattedStores_EncodeWithTheRuntimeFormatOnTheDevice(uint format, uint[] values, uint expected)
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan, shaderInt64: true)) return;
+
+        const uint descriptorRegister = 16;
+        var words = new List<uint>();
+        for (uint component = 0; component < 4; component++)
+        {
+            // v_mov_b32 v[4 + component], literal
+            words.Add(0x7E00_02FFu | ((4 + component) << 17));
+            words.Add(values[component]);
+        }
+
+        // buffer_store_format_xyzw v[4:7], off, s[16:19], MemoryOffset
+        words.Add(0xE000_0000u | (7u << 18) | MemoryOffset);
+        words.Add((0x80u << 24) | ((descriptorRegister / 4) << 16) | (4u << 8));
+        words.Add(0xBF81_0000);
+        var program = DecodeProgram(words);
+        Assert.Equal("BufferStoreFormatXyzw", Assert.Single(program.Instructions, instruction => instruction.Control is Gen5BufferMemoryControl).Opcode);
+
+        var scalars = BaseScalars();
+        scalars[descriptorRegister] = scalars[0];
+        scalars[descriptorRegister + 1] = scalars[1];
+        scalars[descriptorRegister + 2] = BufferBytes;
+        scalars[descriptorRegister + 3] = (format << 12) | IdentitySwizzle;
+        var initial = CreateInput();
+        var result = RunOnce(vulkan, CompileProgram(program, scalars), initial);
+        Assert.Equal(expected, ReadWord(result, MemoryOffset));
+        Assert.Equal(ReadWord(initial, MemoryOffset + 4), ReadWord(result, MemoryOffset + 4));
+        output.WriteLine($"Verified runtime store format={format} word=0x{expected:X8} on {vulkan.DeviceName}.");
+    }
+
     // Bytes 0x00 and 0xFF convert to exact floats, so the comparison does not depend on the
     // device's division rounding.
     private const int UnormOffset = MemoryOffset + 32;
@@ -395,7 +445,7 @@ public sealed class GlobalMemoryShaderTests(HeadlessVulkanFixture fixture, ITest
             flattenedTable[slot + 1] = (uint)(BufferAddress >> 32);
             flattenedTable[slot + 2] = BufferBytes;
         }
-        harness.Run(() => runner.Dispatch(fixture.UserData, bindings, 1, flattenedTable: flattenedTable));
+        harness.Run(() => runner.Dispatch(fixture.UserData, bindings, 1, flattenedTable: flattenedTable, bufferDescriptors: snapshot.Buffers));
         var result = harness.ReadBack(records.Handle, 0, BufferBytes);
         if (traceMissingPage)
         {

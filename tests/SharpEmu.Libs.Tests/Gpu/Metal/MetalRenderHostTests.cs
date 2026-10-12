@@ -487,8 +487,8 @@ public sealed class MetalRenderHostTests : IDisposable
         Assert.True(Assert.Single(draw.Textures).IsFallback);
         var sampler = Assert.Single(pixel.Samplers);
         Assert.Equal(0u, sampler.Word0 & (0x7u << 12));
-        // Two user registers, then the packed memory offset of the one buffer.
-        Assert.Equal([0x11u, 0x22u, 0u], pixel.ShaderData);
+        // Two user registers, the packed memory offset of the one buffer, then its stride.
+        Assert.Equal([0x11u, 0x22u, 0u, 0u], pixel.ShaderData);
         Assert.Equal(provider.Pixel.Hash, pixel.ProgramHash);
         Assert.Equal(provider.Vertex.Hash, vertex.ProgramHash);
         Assert.False(pixel.UsesGlobalDataShare);
@@ -527,7 +527,7 @@ public sealed class MetalRenderHostTests : IDisposable
         Assert.Equal((int)PushData.DwordCount, pushData.Length);
         Assert.Equal([0x11u, 0x22u], pushData[..2]);
         Assert.Equal(0u, provider.Vertex.Bindings!.PushDataStartDword);
-        Assert.Equal(1u, provider.Vertex.Bindings.ShaderDataDwordCount);
+        Assert.Equal(2u, provider.Vertex.Bindings.ShaderDataDwordCount);
     }
 
     [Fact]

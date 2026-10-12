@@ -499,7 +499,7 @@ public sealed class ResourceTrackerTests
         Assert.NotNull(layout.Find(DescriptorBindingKind.FaultBuffer));
         Assert.Equal((uint)layout.UserDataRegisters.Count, layout.MemoryOffsetDword);
         Assert.Equal(1u, layout.MemoryOffsetCount);
-        Assert.Equal(layout.MemoryOffsetDword + 1, layout.ShaderDataDwordCount);
+        Assert.Equal(layout.MemoryOffsetDword + 2, layout.ShaderDataDwordCount);
     }
 
     [Fact]
@@ -621,26 +621,44 @@ public sealed class ResourceTrackerTests
     }
 
     [Fact]
-    public void BufferSwizzleSpecialization()
+    public void AGraphicsStageCompilesItsBufferFormatIn()
     {
-        var program = Program(BufferLoad(4, 0, formatted: true), EndProgram(12));
-        var plan = Extract(program);
+        var plan = Extract(Program(BufferLoad(4, 0, formatted: true), EndProgram(12)), stage: ShaderStage.Pixel);
+        Assert.False(plan.Info.Buffers[0].RuntimeFormat);
         const uint swizzle = 4 | (5 << 3) | (0 << 6) | (1 << 9);
         uint[] userData = [0, 16 << 16, 1, swizzle | (Format32x2Float << 12) | (1u << 24)];
         var snapshot = new ResourceSnapshot();
         var specialization = new ResourceSpecialization();
         Assert.True(ResourceMaterializer.Materialize(plan, Inputs(userData), ref snapshot, ref specialization));
-        var applied = ResourceMaterializer.ApplyTo(plan, specialization);
-        Assert.Equal(swizzle, applied.Info.Buffers[0].DescriptorSwizzle);
+        Assert.Equal(Format32x2Float, specialization.Buffers[0].DescriptorFormat);
         Assert.Equal(swizzle, specialization.Buffers[0].DescriptorSwizzle);
-
-        userData[3] ^= 1u << 9;
-        var changedSnapshot = new ResourceSnapshot();
-        var changedSpecialization = new ResourceSpecialization();
-        Assert.True(ResourceMaterializer.Materialize(plan, Inputs(userData), ref changedSnapshot, ref changedSpecialization));
-        Assert.NotEqual(specialization, changedSpecialization);
     }
 
+    [Fact]
+    public void BufferFormatAndSwizzleAreReadAtRuntime()
+    {
+        // A formatted load or store decodes or encodes with the format and swizzle its
+        // dispatch binds, so neither enters the specialization and a swizzle change is no
+        // new permutation.
+        const uint swizzle = 4 | (5 << 3) | (0 << 6) | (1 << 9);
+        foreach (var access in new[] { BufferLoad(4, 0, formatted: true), BufferStore(4, 0, formatted: true) })
+        {
+            var plan = Extract(Program(access, EndProgram(12)));
+            Assert.True(plan.Info.Buffers[0].RuntimeFormat);
+            uint[] userData = [0, 16 << 16, 1, swizzle | (Format32x2Float << 12) | (1u << 24)];
+            var snapshot = new ResourceSnapshot();
+            var specialization = new ResourceSpecialization();
+            Assert.True(ResourceMaterializer.Materialize(plan, Inputs(userData), ref snapshot, ref specialization));
+            Assert.Equal(DescriptorConstants.InvalidFormat, specialization.Buffers[0].DescriptorFormat);
+            Assert.Equal(DescriptorConstants.IdentityDestinationSelect, specialization.Buffers[0].DescriptorSwizzle);
+
+            userData[3] ^= 1u << 9;
+            var changedSnapshot = new ResourceSnapshot();
+            var changedSpecialization = new ResourceSpecialization();
+            Assert.True(ResourceMaterializer.Materialize(plan, Inputs(userData), ref changedSnapshot, ref changedSpecialization));
+            Assert.Equal(specialization, changedSpecialization);
+        }
+    }
     [Fact]
     public void BuffersPastTheBindingBudget_ReadTheirDescriptorsOnTheDevice()
     {

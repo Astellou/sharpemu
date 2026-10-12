@@ -46,6 +46,8 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
     public bool SupportsFillRectangle { get; private init; }
     // shaderImageInt64Atomics (VK_EXT_shader_image_atomic_int64) is enabled on the device.
     public bool SupportsImageInt64Atomics { get; private init; }
+    // shaderFloat16 is enabled and f16 can be pinned to RTE with denormals and Inf/NaN preserved.
+    public bool SupportsNativeFloat16Conversions { get; private init; }
 
     private static readonly string[] RenderingExtensionNames =
     [
@@ -322,6 +324,21 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         }
         var imageInt64Atomics = (bool)imageAtomicInt64Features.ShaderImageInt64Atomics;
 
+        var float16Features = new PhysicalDeviceShaderFloat16Int8Features { SType = StructureType.PhysicalDeviceShaderFloat16Int8Features };
+        var floatControls = new PhysicalDeviceFloatControlsProperties { SType = StructureType.PhysicalDeviceFloatControlsProperties };
+        {
+            var query = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2, PNext = &float16Features };
+            vk.GetPhysicalDeviceFeatures2(physical, &query);
+            var properties = new PhysicalDeviceProperties2 { SType = StructureType.PhysicalDeviceProperties2, PNext = &floatControls };
+            vk.GetPhysicalDeviceProperties2(physical, &properties);
+        }
+        var nativeFloat16 = SharpEmu.ShaderCompiler.ShaderCompileRequest.SupportsNativeFloat16Conversions(
+            float16Features.ShaderFloat16, floatControls.ShaderRoundingModeRtefloat16, floatControls.ShaderDenormPreserveFloat16,
+            floatControls.ShaderSignedZeroInfNanPreserveFloat16, floatControls.ShaderRoundingModeRtefloat64,
+            floatControls.ShaderDenormPreserveFloat64, floatControls.ShaderSignedZeroInfNanPreserveFloat64,
+            floatControls.RoundingModeIndependence != ShaderFloatControlsIndependence.None,
+            floatControls.DenormBehaviorIndependence != ShaderFloatControlsIndependence.None);
+
         var vulkan13Features = new PhysicalDeviceVulkan13Features
         {
             SType = StructureType.PhysicalDeviceVulkan13Features,
@@ -395,6 +412,16 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             };
             vulkan13Features.PNext = &imageAtomicInt64Features;
         }
+        if (nativeFloat16)
+        {
+            float16Features = new PhysicalDeviceShaderFloat16Int8Features
+            {
+                SType = StructureType.PhysicalDeviceShaderFloat16Int8Features,
+                ShaderFloat16 = true,
+                PNext = vulkan13Features.PNext,
+            };
+            vulkan13Features.PNext = &float16Features;
+        }
         var extensionNames = new List<string>();
         if (dynamicRendering) extensionNames.AddRange(RenderingExtensionNames);
         if (barycentric) extensionNames.Add(barycentricExtension);
@@ -431,6 +458,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             SupportsFragmentShaderBarycentric = barycentric,
             SupportsFillRectangle = fillRectangle,
             SupportsImageInt64Atomics = imageInt64Atomics,
+            SupportsNativeFloat16Conversions = nativeFloat16,
         };
         if (validation)
         {

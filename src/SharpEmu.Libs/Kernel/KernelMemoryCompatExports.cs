@@ -366,12 +366,11 @@ public static partial class KernelMemoryCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
 
-        // Only obviously-bogus destinations or absurd sizes are rejected. Large
-        // but plausible clears (engines zero multi-hundred-MB resource pools in
-        // one call) are allowed; the write loop below clamps to the mapped range
-        // if the request runs off the end of a region instead of hard-faulting.
-        const ulong MaxSane = 2UL * 1024 * 1024 * 1024;
-        if (destination < 0x1000 || destination >= CanonicalUserUpper || length > MaxSane)
+        // Only obviously-bogus destinations or ranges leaving user space are
+        // rejected. Large clears are legitimate (UE5 titles zero multi-GB pools
+        // in one call); the write loop below clamps to the mapped range if the
+        // request runs off the end of a region instead of hard-faulting.
+        if (destination < 0x1000 || destination >= CanonicalUserUpper || length > CanonicalUserUpper - destination)
         {
             Console.WriteLine("!!! CRITICAL: Bad Memset Call !!!");
             Console.WriteLine($"Called from RIP: 0x{ctx.Rip:X}");

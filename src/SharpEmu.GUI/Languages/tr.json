@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Gölgelendirici hazırlığı durduruldu (çıkış kodu {0}); oyun yine de başlıyor.",
   "Prebuild.Duration.Minutes": "{0} dk {1:D2} sn",
   "Prebuild.Duration.Seconds": "{0} sn",
+  "Prewarm.Title": "Gölgelendiriciler yeniden derleniyor",
+  "Prewarm.Note": "SharpEmu veya grafik sürücüsü değişti: bu oyunun daha önce kullandığı gölgelendiriciler devam etmeden önce yeniden derleniyor. Bu, her güncellemeden sonra bir kez olur.",
   "Options.Env.PerformanceProfile.Desc": "Sonraki oyun başlangıcından itibaren performans sürelerini ve FPS değerlerini kaydet.\nBu, performansı düşürebilir.",
   "Options.Env.PerformanceFrameTrace.Desc": "Son 4.096 sunum aralığını sakla ve kapanışta günlüğe yaz.\nPerformans profillemesi gerektirir. İzi kaydetmek için oyunu normal şekilde kapat.",
   "Options.OverlayEnabled.Label": "Performans göstergesi",

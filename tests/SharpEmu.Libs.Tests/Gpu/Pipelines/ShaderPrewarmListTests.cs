@@ -32,12 +32,12 @@ public sealed class ShaderPrewarmListTests : IDisposable
         return shader.Spirv;
     }
 
-    private static (IShaderPipelineHost Host, byte[] Spirv) CompileAtRuntime(ShaderPrewarmList list, uint format)
+    private static (IShaderPipelineHost Host, byte[] Spirv) CompileAtRuntime(ShaderPrewarmList list, bool swizzled = false)
     {
         var guest = new PipelineTestGuest(Compile);
         guest.Host.ShaderPrewarm = list;
         guest.RegisterProgram(CodeAddress, HeaderAddress, PipelineTestGuest.FormatLoadProgram);
-        var userData = PipelineTestGuest.BufferDescriptor(BufferAddress, 4, 64, format);
+        var userData = PipelineTestGuest.BufferDescriptor(BufferAddress, 4, 64, BufferDescriptorWords.Format32UInt, swizzled);
         var cursor = 0u;
         guest.Programs.GetOrCompile(
             guest.Source(CodeAddress, ShaderStage.Compute, userData), PipelineTestGuest.ComputeOptions(threadsX: 64), ref cursor, out _);
@@ -53,7 +53,7 @@ public sealed class ShaderPrewarmListTests : IDisposable
         IShaderPipelineHost host;
         using (var list = Open())
         {
-            (host, runtime) = CompileAtRuntime(list, BufferDescriptorWords.Format32UInt);
+            (host, runtime) = CompileAtRuntime(list);
         }
 
         using var reloaded = Open();
@@ -72,9 +72,9 @@ public sealed class ShaderPrewarmListTests : IDisposable
     {
         using (var list = Open())
         {
-            CompileAtRuntime(list, BufferDescriptorWords.Format32UInt);
-            CompileAtRuntime(list, BufferDescriptorWords.Format32UInt);
-            CompileAtRuntime(list, BufferDescriptorWords.Format32x4UInt);
+            CompileAtRuntime(list);
+            CompileAtRuntime(list);
+            CompileAtRuntime(list, swizzled: true);
         }
 
         using var reloaded = Open();
@@ -88,7 +88,7 @@ public sealed class ShaderPrewarmListTests : IDisposable
     {
         using (var list = Open())
         {
-            CompileAtRuntime(list, BufferDescriptorWords.Format32UInt);
+            CompileAtRuntime(list);
         }
 
         var path = Path.Combine(_directory, ShaderPrewarmList.FileName);
@@ -102,7 +102,7 @@ public sealed class ShaderPrewarmListTests : IDisposable
         {
             Assert.Equal(1, list.LoadedComputeCount);
             Assert.Equal(intactLength, new FileInfo(path).Length);
-            CompileAtRuntime(list, BufferDescriptorWords.Format32x4UInt);
+            CompileAtRuntime(list, swizzled: true);
         }
 
         using var reloaded = Open();
@@ -154,8 +154,8 @@ public sealed class ShaderPrewarmListTests : IDisposable
     {
         using (var list = Open())
         {
-            _ = CompileAtRuntime(list, BufferDescriptorWords.Format32UInt);
-            _ = CompileAtRuntime(list, BufferDescriptorWords.Format32x4UInt);
+            _ = CompileAtRuntime(list);
+            _ = CompileAtRuntime(list, swizzled: true);
         }
 
         using var reloaded = Open();

@@ -34,6 +34,8 @@ public static class DescriptorConstants
     public const uint IdentityDestinationSelect = 4 | (5 << 3) | (6 << 6) | (7 << 9);
     public const uint IdentityImageSwizzle = 0xFAC;
     public const uint InvalidFormat = 0;
+    // The stride bits of a buffer descriptor's word 1 and of a packed stride.
+    public const uint BufferStrideMask = 0x3FFF;
     public const uint NoIndex = uint.MaxValue;
 }
 
@@ -52,6 +54,12 @@ public sealed class BufferResource
     public bool Atomic { get; set; }
     public bool Formatted { get; set; }
     public bool Scalar { get; set; }
+
+    // The buffer decodes and encodes with the descriptor format and swizzle its dispatch
+    // binds, so one compiled program serves every format. The plan sets it for a compute
+    // program's formatted buffers, which a prebuild compiles ahead; a graphics stage keeps
+    // its formats compiled in, since its generic decoder costs far more to compile.
+    public bool RuntimeFormat { get; set; }
 
     public BufferResource Clone() => (BufferResource)MemberwiseClone();
 }
@@ -83,6 +91,11 @@ public sealed class ImageResource
     public uint IndirectMappingOffset { get; set; }
     public uint IndirectSearchIterations { get; set; }
     public List<uint> IndirectResources { get; set; } = [];
+
+    // A storage image's view cannot swizzle, so the program applies the descriptor's
+    // destination selects itself; it reads them from its shader data unless the program
+    // converts the format, where they stay compiled in with the conversion.
+    public bool RuntimeSwizzle => ResourceClass == ImageResourceClass.Storage && ConversionFormat == DescriptorConstants.InvalidFormat;
 
     public ImageResource Clone()
     {

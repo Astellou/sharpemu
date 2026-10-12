@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Shader-előkészítés megszakadt (kilépési kód: {0}); a játék így is elindul.",
   "Prebuild.Duration.Minutes": "{0} perc {1:D2} mp",
   "Prebuild.Duration.Seconds": "{0} mp",
+  "Prewarm.Title": "Shaderek újrafordítása",
+  "Prewarm.Note": "Megváltozott a SharpEmu vagy a grafikus illesztőprogram: a játék által már használt shaderek újrafordítása a folytatás előtt történik meg. Ez minden frissítés után egyszer fordul elő.",
   "Options.Env.PerformanceProfile.Desc": "Teljesítményidők és FPS naplózása a játék következő indításától.\nEz csökkentheti a teljesítményt.",
   "Options.Env.PerformanceFrameTrace.Desc": "Az utolsó 4096 megjelenítési intervallum megőrzése és naplóba írása kilépéskor.\nTeljesítményprofilozást igényel. A nyomkövetés mentéséhez zárd be a játékot szabályosan.",
   "Options.OverlayEnabled.Label": "Teljesítménykijelzés",

@@ -984,11 +984,14 @@ public static class ResourceMaterializer
                 packedStride &= ~(3u << 16);
             }
 
-            var formatted = info.Buffers[index].Formatted;
+            // The program reads the stride, and a formatted buffer's format and swizzle, from
+            // its shader data, so none of them is a permutation.
+            packedStride &= ~DescriptorConstants.BufferStrideMask;
+            var compiledFormat = info.Buffers[index] is { Formatted: true, RuntimeFormat: false };
             buffers.Add(new BufferSpecialization(
                 packedStride,
-                formatted ? (words[3] >> 12) & 0x7F : DescriptorConstants.InvalidFormat,
-                formatted ? words[3] & 0xFFF : DescriptorConstants.IdentityDestinationSelect));
+                compiledFormat ? (words[3] >> 12) & 0x7F : DescriptorConstants.InvalidFormat,
+                compiledFormat ? words[3] & 0xFFF : DescriptorConstants.IdentityDestinationSelect));
         }
 
         for (var index = 0; index < images.Count; index++)
@@ -1054,7 +1057,11 @@ public static class ResourceMaterializer
 
             var storage = baseImage.ResourceClass == ImageResourceClass.Storage;
             var conversionFormat = ImageConversionFormat(format);
-            var shaderSwizzle = storage || conversionFormat != GuestImageFormat.Invalid ? descriptor[3] & 0xFFF : image.ShaderSwizzle;
+            // A converted format applies its swizzle where it unpacks; a storage image reads
+            // its swizzle from the shader data (ImageResource.RuntimeSwizzle).
+            var shaderSwizzle = conversionFormat != GuestImageFormat.Invalid ? descriptor[3] & 0xFFF
+                : storage ? DescriptorConstants.IdentityImageSwizzle
+                : image.ShaderSwizzle;
             var rawSintStorage = storage && format == GuestImageFormat.Format32Sint && baseImage.Written && !baseImage.Read && !baseImage.Atomic;
             var numericClass = GuestImageFormat.SampledNumericClass(format);
             if (storage)
@@ -1277,6 +1284,7 @@ public static class ResourceMaterializer
                     packedStride &= ~(3u << 16);
                 }
 
+                packedStride &= ~DescriptorConstants.BufferStrideMask;
                 buffers.Add(new BufferSpecialization(packedStride, (words[3] >> 12) & 0x7F, words[3] & 0xFFF));
             }
 

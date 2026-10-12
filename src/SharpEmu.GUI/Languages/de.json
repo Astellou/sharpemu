@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Shader-Vorbereitung abgebrochen (Exitcode {0}); das Spiel startet trotzdem.",
   "Prebuild.Duration.Minutes": "{0} min {1:D2} s",
   "Prebuild.Duration.Seconds": "{0} s",
+  "Prewarm.Title": "Shader werden neu kompiliert",
+  "Prewarm.Note": "SharpEmu oder der Grafiktreiber hat sich geändert: Die in diesem Spiel bereits verwendeten Shader werden neu kompiliert, bevor es weitergeht. Das geschieht einmal nach jedem Update.",
   "Options.Env.PerformanceProfile.Desc": "Leistungszeiten und FPS ab dem nächsten Spielstart protokollieren.\nDies kann die Leistung verringern.",
   "Options.Env.PerformanceFrameTrace.Desc": "Die letzten 4.096 Präsentationsintervalle speichern und beim Beenden ins Protokoll schreiben.\nErfordert Leistungsprofilierung. Das Spiel normal schließen, um die Aufzeichnung zu speichern.",
   "Options.OverlayEnabled.Label": "Leistungsanzeige",

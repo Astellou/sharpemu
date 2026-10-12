@@ -641,7 +641,7 @@ public static class KernelPthreadExtendedCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
-        ctx[CpuRegister.Rax] = state.AffinityMask;
+        ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -699,7 +699,7 @@ public static class KernelPthreadExtendedCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
-        ctx[CpuRegister.Rax] = state.GuardSize;
+        ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -728,7 +728,7 @@ public static class KernelPthreadExtendedCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
-        ctx[CpuRegister.Rax] = state.StackAddress;
+        ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -788,7 +788,7 @@ public static class KernelPthreadExtendedCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
-        ctx[CpuRegister.Rax] = state.StackSize;
+        ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 

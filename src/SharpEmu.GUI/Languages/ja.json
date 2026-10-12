@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "シェーダーの準備が中断されました (終了コード {0})。ゲームはそのまま起動します。",
   "Prebuild.Duration.Minutes": "{0} 分 {1:D2} 秒",
   "Prebuild.Duration.Seconds": "{0} 秒",
+  "Prewarm.Title": "シェーダーを再コンパイル中",
+  "Prewarm.Note": "SharpEmu またはグラフィックドライバーが変更されたため、このゲームで使用済みのシェーダーを再開前に再コンパイルしています。更新ごとに一度だけ行われます。",
   "Options.Env.PerformanceProfile.Desc": "次回のゲーム起動から処理時間とFPSを記録します。\nパフォーマンスが低下する場合があります。",
   "Options.Env.PerformanceFrameTrace.Desc": "直近4,096件の表示間隔を保持し、終了時にログへ書き込みます。\nパフォーマンス計測が必要です。記録を保存するにはゲームを通常の手順で終了してください。",
   "Options.OverlayEnabled.Label": "パフォーマンス表示",

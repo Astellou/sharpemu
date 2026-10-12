@@ -745,6 +745,8 @@ public sealed partial class ResourceTracker
             FirstUsePc = pc,
             ResourceClass = resourceClass,
             Dimension = memory.ImageDimension,
+            // Only a prediction reads it: a dispatch takes the cube from its descriptor.
+            Cube = memory.ImageCube,
             MipMode = mip,
             DepthCompare = depth,
             R128 = memory.ImageR128,
@@ -763,6 +765,7 @@ public sealed partial class ResourceTracker
         image.Read |= !write || atomic;
         image.Written |= write;
         image.Atomic |= atomic;
+        image.Cube |= memory.ImageCube;
     }
 
     private uint AddSampler(uint source, uint pc)

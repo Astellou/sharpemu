@@ -90,7 +90,11 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             var work = new ConcurrentQueue<(ComputePrewarmRecord Record, ShaderCodeCapture Code)>(pending);
-            var workerCount = Math.Clamp(Environment.ProcessorCount / 4, 1, 4);
+            // While the prewarm holds the game, compiling is all the process does, so it takes
+            // every core but two; running beside the game, it keeps to a quarter of them.
+            var workerCount = _shaderPrewarmWaitDisabled
+                ? Math.Clamp(Environment.ProcessorCount / 4, 1, 4)
+                : Math.Max(1, Environment.ProcessorCount - 2);
             var remaining = workerCount;
             var host = (IShaderPipelineHost)this;
             var sharedInt64Atomics = host.SharedInt64AtomicsEnabled;
@@ -100,6 +104,7 @@ internal static unsafe partial class VulkanVideoPresenter
             Console.Error.WriteLine(
                 $"[LOADER][INFO] Shader prewarm started: compute={pending.Count} resumed={completed.Count} workers={workerCount}");
             SetShaderPrewarmState(true);
+            StartShaderPrewarmProgress();
             _shaderPrewarmThreads = new Thread[workerCount];
             for (var index = 0; index < workerCount; index++)
             {
@@ -164,7 +169,8 @@ internal static unsafe partial class VulkanVideoPresenter
             if (!ShaderProgramCache.TryCompilePrewarm(
                     record, code, compiler, sharedInt64Atomics, execGuardElision,
                     _supportsShaderSignedZeroInfNanPreserveFloat32, out var compiled, out var layout, out var error,
-                    ((IShaderPipelineHost)this).ComputeWave64SubgroupNative, imageInt64Atomics: ImageInt64AtomicsEnabled))
+                    ((IShaderPipelineHost)this).ComputeWave64SubgroupNative, imageInt64Atomics: ImageInt64AtomicsEnabled,
+                    nativeFloat16: _supportsNativeFloat16Conversions))
             {
                 NoteShaderPrewarmFailure(record, error);
                 return;

@@ -634,6 +634,7 @@ internal sealed class ShaderProgramCache
         var sharedInt64Atomics = _host.SharedInt64AtomicsEnabled;
         var imageInt64Atomics = _host.ImageInt64AtomicsEnabled;
         var signedZeroInfNanPreserve = _host.ShaderSignedZeroInfNanPreserveFloat32Supported;
+        var nativeFloat16 = _host.NativeFloat16ConversionsSupported;
         switch (source.Stage)
         {
             case ShaderStage.Vertex:
@@ -648,6 +649,7 @@ internal sealed class ShaderProgramCache
                     SupportsSharedInt64Atomics = sharedInt64Atomics,
                     SupportsImageInt64Atomics = imageInt64Atomics,
                     ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
+                    NativeFloat16Conversions = nativeFloat16,
                     RequiredVertexOutputCount = options.RequiredVertexOutputCount,
                     VertexInputs = entry.VertexInputs,
                     PositionExportControl = info.PositionExportControl,
@@ -677,6 +679,7 @@ internal sealed class ShaderProgramCache
                     SupportsSharedInt64Atomics = sharedInt64Atomics,
                     SupportsImageInt64Atomics = imageInt64Atomics,
                     ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
+                    NativeFloat16Conversions = nativeFloat16,
                     PixelOutputs = options.PixelOutputs,
                     PixelInputEnable = options.PixelInputEnable,
                     PixelCustomInterpolationMask = info.CustomInterpolationMask,
@@ -688,7 +691,7 @@ internal sealed class ShaderProgramCache
 
             default:
                 return BuildComputeRequest(entry.Plan, resources, layout, options.ComputeInfo!, options.ComputeSystemRegisters,
-                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative, imageInt64Atomics);
+                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative, imageInt64Atomics, nativeFloat16);
         }
     }
 
@@ -705,7 +708,7 @@ internal sealed class ShaderProgramCache
 
     private static ShaderCompileRequest BuildComputeRequest(ShaderResourcePlan plan, SpecializedResourceInfo resources, BindingLayout layout,
         ComputeInputInfo info, Gen5ComputeSystemRegisters? systemRegisters, bool sharedInt64Atomics, bool execGuardElision,
-        bool signedZeroInfNanPreserve, bool hostWave64Supported = false, bool imageInt64Atomics = false) =>
+        bool signedZeroInfNanPreserve, bool hostWave64Supported = false, bool imageInt64Atomics = false, bool nativeFloat16 = false) =>
         new(plan, resources, layout)
         {
             WaveSize = info.WaveSize,
@@ -716,6 +719,7 @@ internal sealed class ShaderProgramCache
             SupportsSharedInt64Atomics = sharedInt64Atomics,
             SupportsImageInt64Atomics = imageInt64Atomics,
             ShaderSignedZeroInfNanPreserveFloat32Supported = signedZeroInfNanPreserve,
+            NativeFloat16Conversions = nativeFloat16,
             ComputeSystemRegisters = systemRegisters,
             LocalDataShareDwords = info.LocalDataShareDwords,
             LocalSizeX = Math.Max(info.ThreadsX, 1),
@@ -725,8 +729,8 @@ internal sealed class ShaderProgramCache
 
     internal static bool TryCompilePrewarm(ComputePrewarmRecord record, ShaderCodeCapture code, IGuestGpuBackend compiler,
         bool sharedInt64Atomics, bool execGuardElision, bool signedZeroInfNanPreserve, out IGuestCompiledShader? compiled,
-        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool defaultSpecialization = false,
-        bool imageInt64Atomics = false)
+        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool predictSpecializations = false,
+        bool imageInt64Atomics = false, bool nativeFloat16 = false)
     {
         compiled = null;
         layout = null;
@@ -739,15 +743,25 @@ internal sealed class ShaderProgramCache
 
             var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, record.Hash, record.UserDataBase, record.UserDataCount,
                 waveSize: record.Info.WaveSize);
-            // A shader extracted from the title's files has seen no draw; it compiles
-            // against the plan's own resource classes.
-            var specialization = defaultSpecialization ? ResourceSpecialization.Default(plan.Info) : record.Specialization;
-            var resources = ResourceMaterializer.ApplyTo(plan, specialization);
-            layout = AllocateLayout(program, plan, resources, record.UserDataBase, record.UserDataCount, record.PushDataCursor,
-                record.Info.DispatchThreadDimensions);
-            var request = BuildComputeRequest(plan, resources, layout, record.Info, record.SystemRegisters,
-                sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported, imageInt64Atomics);
-            return compiler.TryCompileProgram(request, out compiled, out error) && compiled is not null;
+            // A shader extracted from the title's files has seen no dispatch; it compiles every
+            // specialization its own use of its images predicts.
+            List<ResourceSpecialization> specializations = predictSpecializations
+                ? ResourceSpecialization.Predict(plan.Info, ImageTexelInference.Infer(program, plan.Memory.Entries, plan.Info.Images.Count))
+                : [record.Specialization];
+            foreach (var specialization in specializations)
+            {
+                var resources = ResourceMaterializer.ApplyTo(plan, specialization);
+                layout = AllocateLayout(program, plan, resources, record.UserDataBase, record.UserDataCount, record.PushDataCursor,
+                    record.Info.DispatchThreadDimensions);
+                var request = BuildComputeRequest(plan, resources, layout, record.Info, record.SystemRegisters,
+                    sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported, imageInt64Atomics, nativeFloat16);
+                if (!compiler.TryCompileProgram(request, out compiled, out error) || compiled is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
         catch (Exception exception)
         {

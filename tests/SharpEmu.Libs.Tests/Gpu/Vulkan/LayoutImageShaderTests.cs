@@ -26,6 +26,7 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
     private const uint Format32Sint = 21;
     private const uint Format32Float = 22;
     private const uint Format32x2Uint = 62;
+    private const uint Format8x4Uint = 60;
     private const uint ImageType2D = 9;
     private const uint ResultRegister = 8;
     private const uint ResultBytes = 64;
@@ -35,9 +36,9 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
     private const ulong FirstImageAddress = 0x1000;
     private const ulong SecondImageAddress = 0x2000;
 
-    private static IEnumerable<Gen5ShaderInstruction> ImageWords(ref uint pc, uint register, ulong address, uint format, uint lastLevel = 0)
+    private static IEnumerable<Gen5ShaderInstruction> ImageWords(ref uint pc, uint register, ulong address, uint format, uint lastLevel = 0, uint swizzle = 0xFAC)
     {
-        uint[] words = [(uint)address, format << 20, 3 | (3 << 14), 0xFAC | (lastLevel << 16) | (ImageType2D << 28), 0, 0, 0, 0];
+        uint[] words = [(uint)address, format << 20, 3 | (3 << 14), swizzle | (lastLevel << 16) | (ImageType2D << 28), 0, 0, 0, 0];
         var instructions = new List<Gen5ShaderInstruction>();
         for (uint dword = 0; dword < 8; dword++)
         {
@@ -230,7 +231,8 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
             Harness.Run(() =>
             {
                 prepare(new CommandBuffer(Harness.Scheduler.Current.Handle));
-                Runner.Dispatch(Registers, new Dictionary<DescriptorBindingKind, GpuBuffer[]> { [DescriptorBindingKind.Buffers] = [Result] }, 1, boundImages: images);
+                Runner.Dispatch(Registers, new Dictionary<DescriptorBindingKind, GpuBuffer[]> { [DescriptorBindingKind.Buffers] = [Result] }, 1, boundImages: images,
+                    bufferDescriptors: Snapshot.Buffers, imageDescriptors: Snapshot.Images);
             });
 
         public uint ResultWord(int index) => BinaryPrimitives.ReadUInt32LittleEndian(Runner.ReadBack(Result, 0, ResultBytes).AsSpan(index * 4));
@@ -591,6 +593,55 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
         Assert.Equal(1u, texels[4]);
         run.Harness.AssertNoValidationMessages();
         output.WriteLine($"Verified per-mip storage descriptors on {vulkan.DeviceName}; validation={vulkan.ValidationEnabled}.");
+    }
+
+    // A storage image applies its descriptor's destination selects in the store, read from
+    // the dispatch's shader data: each memory component takes the register the first logical
+    // component selecting it names, or zero. The registers are v4..v7, holding 11, 22, 33, 44.
+    [Theory]
+    [InlineData(0xFACu, 0xFu, 4, 5, 6, 7)]
+    [InlineData(0x9F5u, 0xFu, 7, 4, 5, 6)]
+    [InlineData(0xF2Eu, 0xFu, 6, 5, 4, 7)]
+    [InlineData(0x3ACu, 0xFu, 4, 5, 6, -1)]
+    [InlineData(0xFA4u, 0xFu, 4, -1, 6, 7)]
+    [InlineData(0xFACu, 0x0u, 4, -1, -1, -1)]
+    public void StorageImageStore_AppliesTheRuntimeSwizzle(uint swizzle, uint dmask, int x, int y, int z, int w)
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan))
+        {
+            return;
+        }
+
+        var instructions = new List<Gen5ShaderInstruction>();
+        uint pc = 0;
+        instructions.AddRange(ImageWords(ref pc, FirstImageRegister, FirstImageAddress, Format8x4Uint, swizzle: swizzle));
+        instructions.Add(MoveVector(pc, 0, 0)); pc += 8;
+        instructions.Add(MoveVector(pc, 1, 0)); pc += 8;
+        for (uint register = 4; register < 8; register++)
+        {
+            instructions.Add(MoveVector(pc, register, 11 * (register - 3))); pc += 8;
+        }
+
+        instructions.Add(Image(pc, "ImageStore", FirstImageRegister, dmask: dmask)); pc += 8;
+        instructions.Add(EndProgram(pc));
+        using var run = new Run(vulkan, Program([.. instructions]), UserData(), 1);
+        Assert.True(run.Resources.Info.Images[0].RuntimeSwizzle);
+        Assert.NotEqual(0u, run.Request.Bindings.ImageSwizzleCount);
+
+        var description = Describe(0, Format.R8G8B8A8Uint, GuestPixelFormat.Bits8_8_8_8UInt, 1, 1, 1);
+        var target = run.Harness.CreateImage(description);
+        var copies = ImageTestHarness.WholeImageCopies(description, 0);
+        run.Harness.UploadImage(target, MemoryMarshal.AsBytes<uint>([0xFFFF_FFFFu]), copies);
+        run.Dispatch(run.BindImages(new Dictionary<int, DescriptorImageInfo[]> { [0] = [StorageView(target, 0)] }),
+            command => target.Transition(ImageLayout.General, AccessFlags.ShaderWriteBit, null, command));
+
+        static uint Byte(int register) => register < 0 ? 0u : 11u * (uint)(register - 3);
+        var expected = Byte(x) | (Byte(y) << 8) | (Byte(z) << 16) | (Byte(w) << 24);
+        var texel = MemoryMarshal.Read<uint>(run.Harness.ReadImage(target, copies, 4));
+        Assert.Equal(expected, texel);
+        run.Harness.AssertNoValidationMessages();
+        output.WriteLine($"Verified runtime storage swizzle 0x{swizzle:X3} dmask {dmask} -> 0x{texel:X8} on {vulkan.DeviceName}.");
     }
 
     [Fact]

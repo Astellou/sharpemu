@@ -132,17 +132,38 @@ public static partial class Gen5MslTranslator
                 var x = Temp("int", $"as_type<int>({ImageIntegerAddress(image, 0)})");
                 var y = Temp("int", $"as_type<int>({ImageIntegerAddress(image, 1)})");
                 var components = new string[4];
+                var zero = kind == "float" ? "0.0f" : "0";
                 for (var component = 0; component < 4; component++)
                 {
-                    var sourceIndex = Gen5ShaderTranslator.GetImageStoreSourceIndex(
+                    if (_runtimeImageSwizzle is { } swizzle)
+                    {
+                        // GetImageStoreSourceIndex with the dispatch's selects: the first
+                        // logical component selecting this memory component supplies it.
+                        var effectiveDmask = (image.Dmask & 0xFu) == 0 ? 1u : image.Dmask & 0xFu;
+                        var value = zero;
+                        for (var logical = 3; logical >= 0; logical--)
+                        {
+                            if ((effectiveDmask & (1u << logical)) != 0)
+                            {
+                                var sourceIndex = (uint)System.Numerics.BitOperations.PopCount(effectiveDmask & ((1u << logical) - 1));
+                                value = $"((({swizzle} >> {logical * 3}u) & 7u) == {4 + component}u ? " +
+                                    $"{ImageTexelComponent(kind, ImageStoreComponent(image, kind, sourceIndex))} : {value})";
+                            }
+                        }
+
+                        components[component] = Temp(kind, value);
+                        continue;
+                    }
+
+                    var compiledIndex = Gen5ShaderTranslator.GetImageStoreSourceIndex(
                         dstSelect,
                         image.Dmask,
                         component);
-                    components[component] = sourceIndex >= 0
+                    components[component] = compiledIndex >= 0
                         ? ImageTexelComponent(
                             kind,
-                            ImageStoreComponent(image, kind, (uint)sourceIndex))
-                        : kind == "float" ? "0.0f" : "0";
+                            ImageStoreComponent(image, kind, (uint)compiledIndex))
+                        : zero;
                 }
 
                 // Bounds-checked, EXEC-guarded write.

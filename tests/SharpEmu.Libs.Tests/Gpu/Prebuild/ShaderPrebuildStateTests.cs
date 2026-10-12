@@ -51,6 +51,15 @@ public sealed class ShaderPrebuildStateTests : IDisposable
     }
 
     [Fact]
+    public void BundledShaderContainersArePreparable()
+    {
+        Assert.False(ShaderPrebuildState.HasPreparableShaders(Eboot));
+        Directory.CreateDirectory(Path.Combine(_game, "materials", "_ps5"));
+        File.WriteAllBytes(Path.Combine(_game, "materials", "_ps5", "bundledshaders_1.csdr"), []);
+        Assert.True(ShaderPrebuildState.HasPreparableShaders(Eboot));
+    }
+
+    [Fact]
     public void StampFollowsTheTitleFolderAndTheExecutable()
     {
         if (ShaderAnalysisCache.DirectoryFor(_titleId) is null)

@@ -20,7 +20,9 @@ public sealed class BindingLayoutTests
         var limits = BindingLayout.Allocate(info, [0u], false, false, true, cursor, usesDispatchThreadLimits: true);
         Assert.Equal(3u, limits.MemoryOffsetDword);
         Assert.Equal(5u, limits.DispatchThreadLimitsDword);
-        Assert.Equal(8u, limits.ShaderDataDwordCount);
+        // Five buffers take three stride dwords after the limits.
+        Assert.Equal(8u, limits.BufferStrideDword);
+        Assert.Equal(11u, limits.ShaderDataDwordCount);
         Assert.NotEqual(plain, limits);
         Assert.Equal(cursor == 0, limits.UsesPushData);
         BindingLayoutValidator.Validate(limits, info, [0u], false, false, true, Hash, ShaderStage.Compute);
@@ -137,7 +139,7 @@ public sealed class BindingLayoutTests
         Assert.True(layout.UsesShaderBase);
         Assert.Equal(1u, layout.ShaderBaseDword);
         Assert.Equal(3u, layout.MemoryOffsetDword);
-        Assert.Equal(4u, layout.ShaderDataDwordCount);
+        Assert.Equal(5u, layout.ShaderDataDwordCount);
         BindingLayoutValidator.Validate(layout, plan.Info, registers, false, false, true, Hash, ShaderStage.Compute);
 
         var without = BindingLayout.Allocate(plan.Info, registers, false, false, false);

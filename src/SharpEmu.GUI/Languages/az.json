@@ -192,6 +192,8 @@
   "Prebuild.Console.Failed": "Şeyderlərin hazırlanması dayandı (çıxış kodu {0}); oyun yenə də başlayır.",
   "Prebuild.Duration.Minutes": "{0} dəq {1:D2} san",
   "Prebuild.Duration.Seconds": "{0} san",
+  "Prewarm.Title": "Şeyderlərin yenidən kompilyasiyası",
+  "Prewarm.Note": "SharpEmu və ya qrafik drayveri dəyişib: bu oyunda əvvəl rast gəlinən şeyderlər oyun davam etməzdən əvvəl yenidən kompilyasiya olunur. Bu, hər yeniləmədən sonra bir dəfə baş verir.",
   "Options.OverlayEnabled.Label": "Performans göstəriciləri",
   "Options.OverlayEnabled.Desc": "Performans statistikasını göstər. F1 cari icra üçün göstəriciləri açır və bağlayır. SHARPEMU_OVERLAY=0 onları başlanğıcda gizlədir.",
   "Options.OverlayMode.Label": "Göstərmə rejimi",

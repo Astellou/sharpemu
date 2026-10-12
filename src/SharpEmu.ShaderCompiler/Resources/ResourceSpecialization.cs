@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -85,6 +86,75 @@ public sealed class ResourceSpecialization : IEquatable<ResourceSpecialization>
             image.Dimension == ImageDimension.Unknown ? ImageDimension.Dim2D : image.Dimension,
             image.MipCount, image.ConversionFormat, image.ShaderSwizzle,
             image.IndirectRoot, image.IndirectMappingOffset, image.IndirectSearchIterations, image.Cube)).ToList(),
+    };
+
+    // Beyond this many open choices, only the variant taking every first option and the one
+    // taking every second option are prepared.
+    private const int MaxChoiceCombinations = 2;
+
+    // The specializations a shader seen in no dispatch most likely compiles with: the
+    // defaults, except an image the program uses as integers is Uint. Two things only a
+    // dispatch decides are prepared both ways: the class of an image the program uses both
+    // ways, or only moves and masks, and whether an arrayed access binds an array (a
+    // dispatch narrows it when the descriptor holds one layer).
+    public static List<ResourceSpecialization> Predict(ShaderResourceInfo info, IReadOnlyList<ImageTexelUse> uses)
+    {
+        var predicted = Default(info);
+        var choices = new List<Func<ImageSpecialization, ImageSpecialization>>();
+        var choiceImages = new List<int>();
+        for (var index = 0; index < predicted.Images.Count; index++)
+        {
+            var image = info.Images[index];
+            if (image.NumericClass == ImageNumericClass.Unsupported && !image.Atomic && index < uses.Count)
+            {
+                if (uses[index] == ImageTexelUse.Integer)
+                {
+                    predicted.Images[index] = predicted.Images[index] with { NumericClass = ImageNumericClass.Uint };
+                }
+                else if (uses[index] == ImageTexelUse.Ambiguous)
+                {
+                    choiceImages.Add(index);
+                    choices.Add(specialized => specialized with { NumericClass = ImageNumericClass.Uint });
+                }
+            }
+
+            if (!image.Cube && Narrowed(predicted.Images[index].Dimension) is { } narrowed)
+            {
+                choiceImages.Add(index);
+                choices.Add(specialized => specialized with { Dimension = narrowed });
+            }
+        }
+
+        if (choices.Count == 0)
+        {
+            return [predicted];
+        }
+
+        IEnumerable<Func<int, bool>> takeSecond = choices.Count <= MaxChoiceCombinations
+            ? Enumerable.Range(0, 1 << choices.Count).Select(mask => (Func<int, bool>)(choice => (mask & (1 << choice)) != 0))
+            : [_ => false, _ => true];
+        return takeSecond.Select(second =>
+        {
+            var variant = predicted.Clone();
+            for (var choice = 0; choice < choices.Count; choice++)
+            {
+                if (second(choice))
+                {
+                    variant.Images[choiceImages[choice]] = choices[choice](variant.Images[choiceImages[choice]]);
+                }
+            }
+
+            return variant;
+        }).ToList();
+    }
+
+    // The dimension a single-layer descriptor narrows an arrayed access to.
+    private static ImageDimension? Narrowed(ImageDimension dimension) => dimension switch
+    {
+        ImageDimension.Dim1DArray => ImageDimension.Dim1D,
+        ImageDimension.Dim2DArray => ImageDimension.Dim2D,
+        ImageDimension.Dim2DMsaaArray => ImageDimension.Dim2DMsaa,
+        _ => null,
     };
 }
 

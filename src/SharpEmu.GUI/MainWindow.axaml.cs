@@ -3095,6 +3095,7 @@ public partial class MainWindow : Window
         _emulator?.Dispose();
         _emulator = null;
         _pendingLaunch = null;
+        HideShaderPrewarm();
         UpdateEmbeddedConsoleVisibility();
 
         var meaningKey = exitCode switch
@@ -3200,6 +3201,11 @@ public partial class MainWindow : Window
 
     private void OnEmulatorOutput(string line, bool isError)
     {
+        if (TryHandleShaderPrewarmLine(line))
+        {
+            return;
+        }
+
         _pendingLines.Enqueue((line, isError));
     }
 

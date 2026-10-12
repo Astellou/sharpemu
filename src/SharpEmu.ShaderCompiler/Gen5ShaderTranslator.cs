@@ -2560,7 +2560,8 @@ public static partial class Gen5ShaderTranslator
                         Gen5Operand.Vector(vectorData0),
                         Gen5Operand.Vector(vectorData1),
                     ],
-                    "DsSwizzleB32" => [Gen5Operand.Vector(vectorData0)],
+                    // DS_SWIZZLE_B32 takes one operand, the value to swizzle, in the ADDR field.
+                    "DsSwizzleB32" => [Gen5Operand.Vector(vectorAddress)],
                     "DsPermuteB32" or "DsBpermuteB32" => [
                         Gen5Operand.Vector(vectorAddress),
                         Gen5Operand.Vector(vectorData0),

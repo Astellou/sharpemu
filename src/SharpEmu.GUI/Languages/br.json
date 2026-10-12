@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Preparação de shaders interrompida (código de saída {0}); o jogo será iniciado mesmo assim.",
   "Prebuild.Duration.Minutes": "{0} min {1:D2} s",
   "Prebuild.Duration.Seconds": "{0} s",
+  "Prewarm.Title": "Recompilando os shaders",
+  "Prewarm.Note": "O SharpEmu ou o driver gráfico mudou: os shaders já vistos neste jogo são recompilados antes de ele continuar. Isso acontece uma vez após cada atualização.",
   "Options.Env.PerformanceProfile.Desc": "Registre os tempos de desempenho e FPS a partir da próxima execução do jogo.\nIsso pode reduzir o desempenho.",
   "Options.Env.PerformanceFrameTrace.Desc": "Guarde os últimos 4.096 intervalos de apresentação e grave-os no log ao encerrar.\nRequer o perfil de desempenho. Feche o jogo normalmente para salvar o rastreamento.",
   "Options.OverlayEnabled.Label": "Indicador de desempenho",

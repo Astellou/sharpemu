@@ -14,6 +14,8 @@
   "Prebuild.Console.Failed": "Forberedelse af shaders stoppet (afslutningskode {0}); spillet starter alligevel.",
   "Prebuild.Duration.Minutes": "{0} min {1:D2} s",
   "Prebuild.Duration.Seconds": "{0} s",
+  "Prewarm.Title": "Shaders genkompileres",
+  "Prewarm.Note": "SharpEmu eller grafikdriveren er ændret: shaders, som spillet allerede har brugt, genkompileres, før det fortsætter. Det sker én gang efter hver opdatering.",
   "Options.Env.PerformanceProfile.Desc": "Log ydelsestider og FPS fra næste spilstart.\nDette kan reducere ydelsen.",
   "Options.Env.PerformanceFrameTrace.Desc": "Gem de sidste 4.096 præsentationsintervaller, og skriv dem til loggen ved afslutning.\nKræver ydelsesprofilering. Luk spillet normalt for at gemme sporingen.",
   "Options.OverlayEnabled.Label": "Ydelsesvisning",

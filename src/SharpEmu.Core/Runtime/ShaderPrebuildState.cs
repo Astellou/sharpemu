@@ -17,8 +17,9 @@ public static class ShaderPrebuildState
     private const string StampFileName = "prebuild.stamp";
 
     // Unreal Engine titles cook their shaders into IoStore containers, Unity titles
-    // serialize them into the asset files under Media and engines such as Team Asobi's
-    // compile them into the executable; those are prepared ahead.
+    // serialize them into the asset files under Media, engines such as Team Asobi's
+    // compile them into the executable and Bluepoint's bundle them in .csdr files; those
+    // are prepared ahead.
     public static bool HasPreparableShaders(string ebootPath)
     {
         try
@@ -27,7 +28,8 @@ public static class ShaderPrebuildState
             return root is not null &&
                 (UnityShaderPrebuild.IsUnityTitle(root) ||
                  UnrealShaderPrebuild.IsUnrealTitle(root) ||
-                 ExecutableShaderPrebuild.EmbedsShaders(ebootPath));
+                 ExecutableShaderPrebuild.EmbedsShaders(ebootPath) ||
+                 ChainedShaderBlob.HasContainers(root));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

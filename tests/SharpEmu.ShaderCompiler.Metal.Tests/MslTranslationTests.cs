@@ -14,15 +14,17 @@ namespace SharpEmu.ShaderCompiler.Metal.Tests;
 public sealed class MslTranslationTests
 {
     [Fact]
-    public void ComputeFixturesResolveDescriptorFormatsBeforeCompilation()
+    public void ComputeFixturesReadDescriptorFormatsAtRuntime()
     {
         foreach (var fixture in new[] { Gen5ComputeFixtures.TypedLoad, Gen5ComputeFixtures.TypedStore })
         {
             var request = Gen5ComputeFixtures.CreateComputeRequest(fixture);
             Assert.NotEmpty(request.Resources.Info.Buffers);
+            Assert.True(request.Bindings.UsesBufferFormats);
             Assert.All(request.Resources.Info.Buffers, buffer =>
             {
-                Assert.Equal(56u, buffer.DescriptorFormat);
+                Assert.True(buffer.RuntimeFormat);
+                Assert.Equal(DescriptorConstants.InvalidFormat, buffer.DescriptorFormat);
                 Assert.Equal(DescriptorConstants.IdentityDestinationSelect, buffer.DescriptorSwizzle);
             });
             _ = Gen5ComputeFixtures.CompileRequestOrThrow(fixture);
@@ -277,67 +279,39 @@ public sealed class MslTranslationTests
         Assert.Contains("fragment void depth_only_fs()", MslFixedShaders.CreateDepthOnlyFragment(), StringComparison.Ordinal);
     }
 
+    // A storage image store applies its descriptor's destination selects from the dispatch's
+    // shader data, so its source is the same for every swizzle.
     [Theory]
-    [InlineData(0xFACu, "as_type<float>(v[4]), as_type<float>(v[5]), as_type<float>(v[6]), as_type<float>(v[7])")]
-    [InlineData(0x9F5u, "as_type<float>(v[7]), as_type<float>(v[4]), as_type<float>(v[5]), as_type<float>(v[6])")]
-    [InlineData(0xF2Eu, "as_type<float>(v[6]), as_type<float>(v[5]), as_type<float>(v[4]), as_type<float>(v[7])")]
-    [InlineData(0x3ACu, "as_type<float>(v[4]), as_type<float>(v[5]), as_type<float>(v[6]), 0.0f")]
-    [InlineData(0xFA4u, "as_type<float>(v[4]), 0.0f, as_type<float>(v[6]), as_type<float>(v[7])")]
-    public void ImageStoreAppliesInverseDescriptorSwizzle(
-        uint dstSelect,
-        string expectedComponents)
+    [InlineData("ImageStore")]
+    [InlineData("ImageStoreMip")]
+    public void ImageStoreSourceDoesNotDependOnTheDescriptorSwizzle(string opcode)
     {
-        var shader = CompileImageStore(dstSelect, dmask: 0xF);
-
-        Assert.Contains(
-            $".write(vec<float, 4>({expectedComponents}),",
-            shader.Source,
-            StringComparison.Ordinal);
+        var identity = CompileImageStore(Gen5ShaderTranslator.IdentityImageDstSelect, dmask: 0xF, opcode: opcode);
+        var rotated = CompileImageStore(0x9F5u, dmask: 0xF, opcode: opcode);
+        Assert.Equal(identity.Source, rotated.Source);
+        Assert.Contains("& 0xFFFu", identity.Source, StringComparison.Ordinal);
     }
 
+    // With no dmask bit the store's one source is v[4], whatever the selects route it to.
     [Fact]
     public void ImageStoreTreatsZeroDmaskAsX()
     {
-        var shader = CompileImageStore(
-            Gen5ShaderTranslator.IdentityImageDstSelect,
-            dmask: 0);
-
-        Assert.Contains(
-            ".write(vec<float, 4>(as_type<float>(v[4]), 0.0f, 0.0f, 0.0f),",
-            shader.Source,
-            StringComparison.Ordinal);
+        var shader = CompileImageStore(Gen5ShaderTranslator.IdentityImageDstSelect, dmask: 0);
+        Assert.Contains("as_type<float>(v[4])", shader.Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("v[5]", shader.Source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ImageStoreMipAppliesInverseDescriptorSwizzle()
-    {
-        var shader = CompileImageStore(
-            0x9F5u,
-            dmask: 0xF,
-            opcode: "ImageStoreMip");
-
-        Assert.Contains(
-            ".write(vec<float, 4>(as_type<float>(v[7]), as_type<float>(v[4]), as_type<float>(v[5]), as_type<float>(v[6])),",
-            shader.Source,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void UintImageStoreUsesUintTextureAndInverseDescriptorSwizzle()
+    public void UintImageStoreUsesAUintTexture()
     {
         var shader = CompileImageStore(
             0xF2Eu,
             dmask: 0xF,
             unifiedFormat: 69u); // FORMAT_16_16_16_16_UINT
 
-        Assert.Contains(
-            "texture2d<uint, access::write>",
-            shader.Source,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            ".write(vec<uint, 4>(v[6], v[5], v[4], v[7]),",
-            shader.Source,
-            StringComparison.Ordinal);
+        Assert.Contains("texture2d<uint, access::write>", shader.Source, StringComparison.Ordinal);
+        Assert.Contains(".write(vec<uint, 4>(", shader.Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("as_type<float>(v[", shader.Source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -530,17 +504,21 @@ public sealed class MslTranslationTests
         Assert.DoesNotContain("16u <= sharpemu_resources.buffer_bytes[0] && ", shader.Source, StringComparison.Ordinal);
     }
 
+    // The store encodes every component with the format its dispatch binds: the layout and
+    // encoding come from the prelude at runtime, and one element store keeps the other bits.
     [Fact]
-    public void FormattedBufferStoreUsesDescriptorFormatForPackedNormals()
+    public void FormattedBufferStoreEncodesWithTheRuntimeFormat()
     {
         var shader = CompileTypedBufferAccess("BufferStoreFormatXyzw", 4, 0, typed: false, descriptorFormat: 50);
 
-        // 2_10_10_10 is R10G10B10A2: ten-bit X, Y and Z, then the two-bit W.
-        Assert.Contains("sharpemu_format_encode(v[4], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
-        Assert.Contains("sharpemu_format_encode(v[5], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
-        Assert.Contains("sharpemu_format_encode(v[6], 10u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
-        Assert.Contains("sharpemu_format_encode(v[7], 2u, 0u, 9u)", shader.Source, StringComparison.Ordinal);
-        Assert.Contains("uint4(0xFFFFFFFFu, 0x0u, 0x0u, 0x0u)", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_gfx10_formats[(", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_format_layout(", shader.Source, StringComparison.Ordinal);
+        for (var component = 0; component < 4; component++)
+        {
+            Assert.Contains($"sharpemu_format_encode(v[{4 + component}], ", shader.Source, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("sharpemu_store_element(b", shader.Source, StringComparison.Ordinal);
         Assert.DoesNotContain("sharpemu_store_bytes(b", shader.Source, StringComparison.Ordinal);
     }
 

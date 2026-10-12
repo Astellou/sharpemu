@@ -187,7 +187,6 @@ internal sealed class PipelineTestGuest
 
     // buffer_load_format_x v0, off, s[0:3], 0 then s_endpgm: one formatted buffer from the user data.
     public static readonly uint[] FormatLoadProgram = [0xE0000000, 0x80000000, 0xBF810000];
-
     private readonly Dictionary<ulong, ulong> _headers = new();
 
     public PipelineTestGuest(Func<ShaderCompileRequest, byte[]>? compile = null)
@@ -263,10 +262,12 @@ internal sealed class PipelineTestGuest
     };
 
     // The four words of a raw buffer descriptor with the given format and record count.
-    public static uint[] BufferDescriptor(ulong address, uint stride, uint records, uint format) =>
+    // A swizzled buffer with a stride is a specialization of its own; format and stride
+    // are read at runtime and are not.
+    public static uint[] BufferDescriptor(ulong address, uint stride, uint records, uint format, bool swizzled = false) =>
     [
         (uint)address,
-        (uint)((address >> 32) & 0xFFFF) | (stride << 16),
+        (uint)((address >> 32) & 0xFFFF) | (stride << 16) | (swizzled ? 1u << 31 : 0u),
         records,
         (4u | (5u << 3) | (6u << 6) | (7u << 9)) | (format << 12),
     ];

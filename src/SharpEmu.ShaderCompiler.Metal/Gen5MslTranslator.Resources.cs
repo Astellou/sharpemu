@@ -824,8 +824,15 @@ public static partial class Gen5MslTranslator
             }
 
             dstSelect = imageInfo.ShaderSwizzle;
+            _runtimeImageSwizzle = imageInfo.RuntimeSwizzle
+                ? Temp("uint", $"({ShaderDataDword(request.Bindings.ImageSwizzleDword + (uint)resourceIndex / 2)} >> {(uint)resourceIndex % 2 * 16}u) & 0xFFFu")
+                : null;
             return true;
         }
+
+        // The destination selects a storage image reads at runtime, for the image operation
+        // that follows its resolution; null when they are compiled in.
+        private string? _runtimeImageSwizzle;
 
         // Searches the sorted key mapping of an indirect table for the captured key; the
         // result is the candidate-local index, candidate 0 when the key is absent or out of range.

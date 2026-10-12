@@ -67,13 +67,44 @@ public partial class MainWindow
 
     private void ShowShaderPrebuild(string displayName)
     {
+        ShowProgressPanel(displayName, prewarm: false);
+        PrebuildDetail.Text = Localization.Instance.Get("Prebuild.Starting");
+        PrebuildSkipButton.IsEnabled = true;
+    }
+
+    // The prebuild and the prewarm share one panel; only the prebuild can be skipped.
+    private void ShowProgressPanel(string displayName, bool prewarm)
+    {
         PrebuildGameName.Text = displayName;
+        PrebuildTitle.IsVisible = PrebuildNote.IsVisible = PrebuildSkipButton.IsVisible = !prewarm;
+        PrewarmTitle.IsVisible = PrewarmNote.IsVisible = prewarm;
         PrebuildProgress.IsIndeterminate = true;
         PrebuildProgress.Value = 0;
-        PrebuildDetail.Text = Localization.Instance.Get("Prebuild.Starting");
+        PrebuildDetail.Text = string.Empty;
         PrebuildRemaining.Text = string.Empty;
-        PrebuildSkipButton.IsEnabled = true;
+        _prebuildFirstProgress = 0;
         PrebuildOverlay.IsVisible = true;
+    }
+
+    // "<prefix><done> <total>", the progress line a prebuild and a prewarm print.
+    private static bool TryParseProgressLine(string line, string prefix, out long done, out long total)
+    {
+        done = total = 0;
+        if (!line.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var fields = line[prefix.Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (fields.Length != 2 ||
+            !long.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out done) ||
+            !long.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out total))
+        {
+            return false;
+        }
+
+        done = Math.Min(done, total);
+        return true;
     }
 
     // Progress lines drive the panel; every other line goes to the console as the game's do.
@@ -85,23 +116,22 @@ public partial class MainWindow
             return;
         }
 
-        var fields = line[PrebuildProgressPrefix.Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length == 2 &&
-            long.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var done) &&
-            long.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var total) &&
-            total > 0)
+        if (TryParseProgressLine(line, PrebuildProgressPrefix, out var done, out var total) && total > 0)
         {
-            Dispatcher.UIThread.Post(() => UpdateShaderPrebuild(Math.Min(done, total), total));
+            Dispatcher.UIThread.Post(() => UpdateShaderPrebuild(done, total));
         }
     }
 
     private void UpdateShaderPrebuild(long done, long total)
     {
-        if (_prebuild is null)
+        if (_prebuild is not null)
         {
-            return;
+            UpdateProgressPanel(done, total);
         }
+    }
 
+    private void UpdateProgressPanel(long done, long total)
+    {
         var now = Stopwatch.GetTimestamp();
         if (_prebuildFirstProgress == 0)
         {
@@ -114,7 +144,7 @@ public partial class MainWindow
         PrebuildDetail.Text = Localization.Instance.Format("Prebuild.Progress", done, total, done * 100 / total);
 
         // The remaining time follows the rate since the first progress line, which leaves
-        // the title's boot and the library reads out of the estimate.
+        // a prebuild's boot and library reads out of the estimate.
         var measured = Stopwatch.GetElapsedTime(_prebuildFirstProgress, now);
         var measuredDone = done - _prebuildFirstDone;
         PrebuildRemaining.Text = measured >= PrebuildEstimateDelay && measuredDone > 0 && done < total

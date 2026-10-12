@@ -48,6 +48,9 @@ internal interface IShaderPipelineHost
     // without it their shaders are refused.
     bool ImageInt64AtomicsEnabled => false;
     bool ShaderSignedZeroInfNanPreserveFloat32Supported => false;
+    // shaderFloat16 is enabled and f16/f64 can be pinned to RTE with denormals preserved,
+    // so f16<->f32 conversions compile to native conversions.
+    bool NativeFloat16ConversionsSupported => false;
     bool ExecGuardElisionEnabled => true;
     ShaderPrewarmList? ShaderPrewarm => null;
     bool PerVertexPixelInputsSupported => true;

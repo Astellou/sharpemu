@@ -156,7 +156,7 @@ public sealed class ShaderProgramCacheTests : IDisposable
 
         var first = Compile(CodeA, PipelineTestGuest.BufferDescriptor(DataBase, 16, 4, Format32x4Uint));
         var same = Compile(CodeA, PipelineTestGuest.BufferDescriptor(DataBase + 0x100, 16, 8, Format32x4Uint));
-        var second = Compile(CodeA, PipelineTestGuest.BufferDescriptor(DataBase, 16, 4, Format32x4Float));
+        var second = Compile(CodeA, PipelineTestGuest.BufferDescriptor(DataBase, 16, 4, Format32x4Float, swizzled: true));
 
         Assert.Equal(first.Id, same.Id);
         Assert.NotEqual(first.Id, second.Id);

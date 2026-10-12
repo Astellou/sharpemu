@@ -384,7 +384,9 @@ public sealed partial class RenderExecutor
         var descriptor = BufferDescriptorWords.From(words);
         if (!resource.Formatted || !resource.Written || resource.Read || resource.Atomic || resource.Scalar || resource.MaxByteExtent != ImageClearStride ||
             descriptor.Stride != ImageClearStride || descriptor.Format != BufferDescriptorWords.Format32x4UInt || descriptor.SwizzleEnabled ||
-            descriptor.IndexStride != 0 || descriptor.AddThreadId || resource.PackedStride != descriptor.PackedStride ||
+            descriptor.IndexStride != 0 || descriptor.AddThreadId ||
+            (resource.PackedStride & ~SharpEmu.ShaderCompiler.Resources.DescriptorConstants.BufferStrideMask) !=
+                (descriptor.PackedStride & ~SharpEmu.ShaderCompiler.Resources.DescriptorConstants.BufferStrideMask) ||
             program.UserDataBase != 0 || resources.UserData.Length != ImageClearUserDataCount)
         {
             return null;

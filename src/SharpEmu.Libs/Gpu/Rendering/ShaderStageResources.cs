@@ -93,6 +93,21 @@ public readonly record struct ShaderStageResources(ShaderProgramInfo? Program, R
         shaderData[offset + 1] = limits.Y;
         shaderData[offset + 2] = limits.Z;
     }
+
+    // The descriptor fields the program reads at runtime: every buffer's stride, buffer word 3
+    // (format and swizzle) and storage image swizzles when the program reads them.
+    public void WriteDescriptorFields(Span<uint> shaderData)
+    {
+        if (Program?.Bindings is not { } layout) return;
+        try
+        {
+            layout.WriteDescriptorFields(shaderData, Resources.Buffers, Resources.Images);
+        }
+        catch (ResourcePlanException exception)
+        {
+            throw SubmissionScheduler.Fatal($"The stage's shader data is invalid: {exception.Message}.");
+        }
+    }
 }
 
 public readonly record struct DispatchThreadLimits(uint X, uint Y, uint Z);

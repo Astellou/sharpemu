@@ -123,6 +123,11 @@ public sealed class ShaderResourcePlan
         var tracked = ResourceTracker.Track(plan);
         plan.DescriptorSources = tracked.Sources;
         plan.Info = tracked.Info;
+        foreach (var buffer in plan.Info.Buffers)
+        {
+            buffer.RuntimeFormat = buffer.Formatted && stage == ShaderStage.Compute;
+        }
+
         plan.IndirectImages = tracked.IndirectImages;
         plan.BufferCandidateTables = tracked.BufferCandidateTables;
         plan.DynamicReads = plan.DynamicReads.Where(read => !tracked.IndirectReads.Contains(read)).ToList();

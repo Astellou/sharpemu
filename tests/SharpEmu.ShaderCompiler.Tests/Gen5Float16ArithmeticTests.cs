@@ -46,7 +46,10 @@ public sealed class Gen5Float16ArithmeticTests
         Assert.Contains((ushort)SpirvOp.FAdd, opcodes);
         Assert.Contains((ushort)SpirvOp.FSub, opcodes);
         Assert.Contains((ushort)SpirvOp.FMul, opcodes);
-        Assert.True(opcodes.Count(opcode => opcode == (ushort)SpirvOp.ExtInst) >= 3);
+        Assert.Contains((ushort)SpirvOp.ExtInst, opcodes);
+        // f16 min/max compare ordered keys of the bits instead of widening.
+        Assert.Contains((ushort)SpirvOp.SGreaterThan, opcodes);
+        Assert.Contains((ushort)SpirvOp.SLessThan, opcodes);
         Assert.DoesNotContain((ushort)SpirvCapability.Float16, ReadCapabilities(shader.Spirv));
     }
 
@@ -119,7 +122,7 @@ public sealed class Gen5Float16ArithmeticTests
         Assert.True(
             Gen5SpirvTranslator.TryCompileProgram(request, out var shader, out var error),
             error);
-        Assert.Contains((ushort)SpirvOp.ExtInst, ReadOpcodes(shader.Spirv));
+        Assert.Contains((ushort)SpirvOp.FMul, ReadOpcodes(shader.Spirv));
         Assert.DoesNotContain((ushort)SpirvCapability.Float16, ReadCapabilities(shader.Spirv));
     }
 

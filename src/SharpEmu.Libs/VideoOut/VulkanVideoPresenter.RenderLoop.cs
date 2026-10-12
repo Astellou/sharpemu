@@ -41,10 +41,26 @@ internal static unsafe partial class VulkanVideoPresenter
             }
         }
 
+        // Whether the render loop submits the guest batch it has recorded: once the batch is old
+        // enough (see IdleBatchFlushTicks), or at once when guest commands are left blocked,
+        // since they may be waiting on the work it holds.
+        private bool ShouldSubmitOpenBatch()
+        {
+            if (!_batchOpen)
+            {
+                return false;
+            }
+
+            var blockedCommands = _commandThread is { } thread ? thread.HasWork : _commandStream.HasPending;
+            return IdleBatchFlushTicks == 0 || blockedCommands ||
+                System.Diagnostics.Stopwatch.GetTimestamp() - _batchOpenedTicks >= IdleBatchFlushTicks;
+        }
+
         private void WaitForRenderWork()
         {
             using var profileScope = RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.Idle);
-            var gpuWorkInFlight = _pendingGuestSubmissions.Count > 0 ||
+            // An open batch the loop has not submitted yet counts too: the next tick submits it.
+            var gpuWorkInFlight = _pendingGuestSubmissions.Count > 0 || _batchOpen ||
                 Array.Exists(_frameInFlight, static pending => pending);
             // The command stream thread retries its blocked heads itself and wakes this thread for its
             // items; before it starts, queued submissions start it on the next tick.
@@ -167,7 +183,10 @@ internal static unsafe partial class VulkanVideoPresenter
 
             using (RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.Flush))
             {
-                FlushBatchedGuestCommands();
+                if (ShouldSubmitOpenBatch())
+                {
+                    FlushBatchedGuestCommands();
+                }
             }
 
             PerfOverlay.SetGuestCacheStatistics(

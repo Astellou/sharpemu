@@ -22,7 +22,8 @@ public sealed class Gen5DataShareSwizzleTests
     [InlineData(0x8000u)]
     public void SupportedModesCompileOnBothBackends(uint selection)
     {
-        uint[] words = [0xD8D40000u | selection, (4u << 24) | (4u << 8), 0xBF810000];
+        // VDST v4 and ADDR v6: the swizzled value is read from ADDR; DATA0 (v9 here) is unused.
+        uint[] words = [0xD8D40000u | selection, (4u << 24) | (9u << 8) | 6u, 0xBF810000];
         var bytes = new byte[words.Length * sizeof(uint)];
         for (var index = 0; index < words.Length; index++)
             BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(index * sizeof(uint)), words[index]);
@@ -30,7 +31,7 @@ public sealed class Gen5DataShareSwizzleTests
             0x1000, out var program, out var error), error);
         var instruction = program.Instructions[0];
         Assert.Equal("DsSwizzleB32", instruction.Opcode);
-        Assert.Equal(new[] { Gen5Operand.Vector(4) }, instruction.Sources);
+        Assert.Equal(new[] { Gen5Operand.Vector(6) }, instruction.Sources);
         Assert.Equal(new[] { Gen5Operand.Vector(4) }, instruction.Destinations);
         Assert.Equal(selection, Assert.IsType<Gen5DataShareControl>(instruction.Control).SingleOffsetBytes);
         var request = Request(CreateReadbackProgram(selection, true));

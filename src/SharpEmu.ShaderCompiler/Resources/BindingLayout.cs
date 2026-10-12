@@ -353,7 +353,59 @@ public sealed class BindingLayout : IEquatable<BindingLayout>
 
     public uint DispatchThreadLimitsDword => MemoryOffsetDword + (MemoryOffsetCount + 3) / 4;
 
-    public uint ShaderDataDwordCount => DispatchThreadLimitsDword + (UsesDispatchThreadLimits ? 3u : 0u);
+    // Each buffer's descriptor stride, 16 bits per buffer: a program indexes its buffers
+    // with the stride its dispatch binds, so one compiled program serves every stride.
+    public uint BufferStrideDword => DispatchThreadLimitsDword + (UsesDispatchThreadLimits ? 3u : 0u);
+
+    // Each buffer's descriptor word 3 when a buffer decodes with its runtime format.
+    public uint BufferFormatDword => BufferStrideDword + BufferStrideDwordCount(MemoryOffsetCount);
+
+    public bool UsesBufferFormats { get; init; }
+
+    // Each image's destination selects, 16 bits per image, when a storage image applies them
+    // at runtime (ImageResource.RuntimeSwizzle).
+    public uint ImageSwizzleDword => BufferFormatDword + (UsesBufferFormats ? MemoryOffsetCount : 0u);
+
+    public uint ImageSwizzleCount { get; init; }
+
+    public uint ShaderDataDwordCount => ImageSwizzleDword + (ImageSwizzleCount + 1) / 2;
+
+    public static uint BufferStrideDwordCount(uint buffers) => (buffers + 1) / 2;
+
+    // Fills the descriptor fields the program reads at runtime from the bound descriptors:
+    // every buffer's stride (word 1 bits 16..29) and, when used, buffer word 3 and image
+    // destination selects (word 3 bits 0..11).
+    public void WriteDescriptorFields(Span<uint> shaderData, IReadOnlyList<uint[]> buffers, IReadOnlyList<uint[]> images)
+    {
+        if (shaderData.Length != ShaderDataDwordCount || buffers.Count != MemoryOffsetCount ||
+            (ImageSwizzleCount != 0 && images.Count != ImageSwizzleCount))
+        {
+            throw new ResourcePlanException(
+                $"descriptors do not match the shader data: buffers={buffers.Count}/{MemoryOffsetCount} " +
+                $"images={images.Count}/{ImageSwizzleCount} dwords={shaderData.Length}/{ShaderDataDwordCount}");
+        }
+
+        var swizzles = shaderData.Slice((int)ImageSwizzleDword, (int)((ImageSwizzleCount + 1) / 2));
+        swizzles.Clear();
+        for (var index = 0; index < ImageSwizzleCount; index++)
+        {
+            var swizzle = images[index].Length > 3 ? images[index][3] & 0xFFF : DescriptorConstants.IdentityImageSwizzle;
+            swizzles[index / 2] |= swizzle << (index % 2 * 16);
+        }
+
+        var strides = shaderData.Slice((int)BufferStrideDword, (int)BufferStrideDwordCount(MemoryOffsetCount));
+        strides.Clear();
+        for (var index = 0; index < buffers.Count; index++)
+        {
+            var words = buffers[index];
+            var stride = words.Length > 1 ? (words[1] >> 16) & DescriptorConstants.BufferStrideMask : 0;
+            strides[index / 2] |= stride << (index % 2 * 16);
+            if (UsesBufferFormats)
+            {
+                shaderData[(int)BufferFormatDword + index] = words.Length > 3 ? words[3] : 0;
+            }
+        }
+    }
 
     public bool UsesPushData => PushDataStartDword != PushData.NoStart;
 
@@ -590,7 +642,10 @@ public sealed class BindingLayout : IEquatable<BindingLayout>
         var shaderBaseDword = usesShaderBase ? (uint)userDataRegisters.Count : NoShaderBase;
         var memoryOffsetDword = (uint)userDataRegisters.Count + (usesShaderBase ? ShaderBaseDwordCount : 0);
         var memoryOffsetCount = (uint)info.Buffers.Count;
-        var shaderDataDwords = memoryOffsetDword + (memoryOffsetCount + 3) / 4 + (usesDispatchThreadLimits ? 3u : 0u);
+        var usesBufferFormats = info.Buffers.Any(buffer => buffer.RuntimeFormat);
+        var imageSwizzleCount = info.Images.Any(image => image.RuntimeSwizzle) ? (uint)info.Images.Count : 0u;
+        var shaderDataDwords = memoryOffsetDword + (memoryOffsetCount + 3) / 4 + (usesDispatchThreadLimits ? 3u : 0u) +
+            BufferStrideDwordCount(memoryOffsetCount) + (usesBufferFormats ? memoryOffsetCount : 0u) + (imageSwizzleCount + 1) / 2;
         var pushStart = PushData.StartFor(pushDataStartDword, shaderDataDwords);
         var descriptors = new List<DescriptorBinding>();
         if (info.Buffers.Count != 0)
@@ -668,6 +723,8 @@ public sealed class BindingLayout : IEquatable<BindingLayout>
             MemoryOffsetDword = memoryOffsetDword,
             MemoryOffsetCount = memoryOffsetCount,
             UsesDispatchThreadLimits = usesDispatchThreadLimits,
+            UsesBufferFormats = usesBufferFormats,
+            ImageSwizzleCount = imageSwizzleCount,
             UserDataRegisters = userDataRegisters,
             Descriptors = descriptors,
         };
@@ -681,6 +738,8 @@ public sealed class BindingLayout : IEquatable<BindingLayout>
         MemoryOffsetDword == other.MemoryOffsetDword &&
         MemoryOffsetCount == other.MemoryOffsetCount &&
         UsesDispatchThreadLimits == other.UsesDispatchThreadLimits &&
+        UsesBufferFormats == other.UsesBufferFormats &&
+        ImageSwizzleCount == other.ImageSwizzleCount &&
         UserDataRegisters.SequenceEqual(other.UserDataRegisters) &&
         Descriptors.Count == other.Descriptors.Count &&
         Descriptors.Zip(other.Descriptors).All(pair => pair.First.Kind == pair.Second.Kind && pair.First.Resources.SequenceEqual(pair.Second.Resources));
