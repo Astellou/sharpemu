@@ -42,6 +42,8 @@ public sealed class GuiSettings
 
     public double TitleMusicVolume { get; set; } = 1.0;
 
+    public bool TrophySound { get; set; } = true;
+
     public string LibraryLayout { get; set; } = "Carousel";
 
     public double EmbeddedConsoleHeight { get; set; } = 240;

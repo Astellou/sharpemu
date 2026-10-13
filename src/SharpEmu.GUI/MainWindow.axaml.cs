@@ -155,6 +155,7 @@ public partial class MainWindow : Window
     private readonly SndPreviewPlayer _sndPreview = new();
     private string? _emulatorExePath;
     private PendingLaunch? _pendingLaunch;
+    private string? _runningEbootPath;
     private bool _isRunning;
     private bool _isStopping;
     private int _autoScrollTicks;
@@ -332,6 +333,7 @@ public partial class MainWindow : Window
         CloseConsoleButton.Click += (_, _) => ConsoleToggle.IsChecked = false;
         LibraryTabButton.Click += (_, _) => SetActivePage(0);
         OptionsTabButton.Click += (_, _) => SetActivePage(1);
+        TrophiesTabButton.Click += (_, _) => OpenTrophyHub();
         LibraryLayoutButton.Click += (_, _) => ToggleLibraryLayout();
         TitleMusicMuteButton.Click += (_, _) => TitleMusicToggle.IsChecked = !_settings.PlayTitleMusic;
         TitleMusicVolumeSlider.ValueChanged += (_, _) =>
@@ -425,6 +427,8 @@ public partial class MainWindow : Window
         CtxCopyTitleId.Click += async (_, _) =>
             await CopyToClipboardAsync((GameList.SelectedItem as GameEntry)?.TitleId);
         CtxGameSettings.Click += (_, _) => OpenSelectedGameSettings();
+        CtxTrophies.Click += (_, _) => OpenSelectedGameTrophies();
+        InitializeTrophies();
         CtxRemove.Click += (_, _) => RemoveSelectedFromLibrary();
         CtxPackZar.Click += async (_, _) => await PackSelectedAsZarAsync();
 
@@ -512,6 +516,8 @@ public partial class MainWindow : Window
         _activePageIndex = index;
         SetActiveClass(LibraryTabButton, index == 0);
         SetActiveClass(OptionsTabButton, index == 1);
+        SetActiveClass(TrophiesTabButton, index == 2);
+        TrophyPageHost.IsVisible = index == 2;
         LibraryPage.IsVisible = index == 0;
         LibraryToolbar.IsVisible = index == 0;
         OptionsPageSurface.IsVisible = index == 1;
@@ -885,14 +891,16 @@ public partial class MainWindow : Window
         }
 
         var shoulderPressed = pad.Buttons & ~_previousPadButtons;
+        var shownOrder = new[] { 0, 2, 1 };
+        var shown = Array.IndexOf(shownOrder, _activePageIndex);
         if ((shoulderPressed & HostGamepadButtons.L1) != 0)
         {
-            SetActivePage(0);
+            SetActivePage(shownOrder[Math.Max(0, shown - 1)]);
         }
 
         if ((shoulderPressed & HostGamepadButtons.R1) != 0)
         {
-            SetActivePage(1);
+            SetActivePage(shownOrder[Math.Min(shownOrder.Length - 1, shown + 1)]);
         }
 
         if (_activePageIndex != 0 || _isGameSettingsOpen)
@@ -1453,6 +1461,8 @@ public partial class MainWindow : Window
         _titleMusicVolumeTimer.Stop();
         _sndPreview.Volume = _settings.TitleMusicVolume;
         UpdateTitleMusicMuteButton();
+        TrophySoundToggle.IsChecked = _settings.TrophySound;
+        TrophySound.Enabled = _settings.TrophySound;
         SetLibraryLayout(string.Equals(_settings.LibraryLayout, "Grid", StringComparison.OrdinalIgnoreCase));
         DiscordToggle.IsChecked = _settings.DiscordRichPresence;
         AutoUpdateToggle.IsChecked = _settings.CheckForUpdatesOnStartup;
@@ -2531,6 +2541,7 @@ public partial class MainWindow : Window
         CtxCopyTitleId.IsEnabled = game.TitleId is not null;
         CtxGameSettings.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
         CtxPackZar.IsEnabled = !ZArchive.IsArchivePath(game.Path);
+        CtxTrophies.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
     }
 
     // Packs the selected game's folder into a .zar chosen by the user, beside the folder by default.
@@ -3246,6 +3257,7 @@ public partial class MainWindow : Window
             var arguments = BuildEmulatorArguments(launch);
             _emulator = process;
             _pendingLaunch = null;
+            _runningEbootPath = launch.EbootPath;
             process.Start(
                 _emulatorExePath,
                 arguments,
@@ -3301,6 +3313,11 @@ public partial class MainWindow : Window
     private void OnEmulatorOutput(string line, bool isError)
     {
         _pendingLines.Enqueue((line, isError));
+        if (SharpEmu.Libs.Np.TrophyCatalog.TryParseUnlockLine(line, out var notice))
+        {
+            var ebootPath = _runningEbootPath;
+            Dispatcher.UIThread.Post(() => ShowTrophyToast(notice, ebootPath));
+        }
     }
 
     private void OpenFileLog(string? titleId)
