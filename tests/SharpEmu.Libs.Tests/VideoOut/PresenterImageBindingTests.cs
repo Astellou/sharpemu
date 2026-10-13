@@ -127,6 +127,47 @@ public sealed class PresenterImageBindingTests : IClassFixture<HeadlessVulkanFix
         harness.Shutdown();
     }
 
+    [Fact]
+    public void RepeatedBinding_ReusesTheAcquiredViewUntilTheImageIsDirty()
+    {
+        if (!GatePrerequisites.Ready(_vulkan)) return;
+        using var fatal = new FatalScope();
+        using var presenter = new PresenterUnderTest(_vulkan);
+        var harness = presenter.Harness;
+        var address = harness.MapBacked(0x10000, ReadWrite);
+        harness.Write(address, new byte[0x10000]);
+        presenter.Run(() =>
+        {
+            var resource = new ImageResource
+            {
+                ResourceClass = PlanImageResourceClass.Sampled,
+                NumericClass = ImageNumericClass.Float,
+                Dimension = ImageDimension.Dim2D,
+                Read = true,
+            };
+            var program = new ShaderProgramInfo();
+            var words = RegisterWords.Texture(address, GuestPixelFormat.Bits32Float, 48, 24);
+            var first = presenter.InvokeMethod("ResolveImageBinding", resource, words, program, 0)!;
+            var identifier = (ResourceSlotIdentifier)GetFieldValue(first, "ImageIdentifier");
+            Assert.True(harness.Images.TryGetImage(identifier, out var image));
+            Assert.Equal(default, (ImageView)GetFieldValue(first, "RememberedView"));
+
+            // The full path acquires the view and the lookup remembers it.
+            var view = harness.Images.AcquireTextureView(identifier, (ImageRequest)GetFieldValue(first, "Request"));
+            first.GetType().GetField("View")!.SetValue(first, view);
+            presenter.InvokeMethod("RememberTextureView", program, 0, words, first, image);
+            var second = presenter.InvokeMethod("ResolveImageBinding", resource, words, program, 0)!;
+            Assert.Equal(view, (ImageView)GetFieldValue(second, "RememberedView"));
+
+            // A guest write since then makes the next draw acquire the view again, refreshing the image.
+            image.MarkMaybeCpuDirty();
+            var third = presenter.InvokeMethod("ResolveImageBinding", resource, words, program, 0)!;
+            Assert.Equal(default, (ImageView)GetFieldValue(third, "RememberedView"));
+            presenter.RenderHost.ResetBindings();
+        });
+        harness.Shutdown();
+    }
+
     [Theory]
     [InlineData(true, 1u, false)]
     [InlineData(true, 2u, true)]

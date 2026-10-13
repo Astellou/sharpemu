@@ -39,6 +39,9 @@ public sealed partial class GuestImageCache
     // that remembers a lookup's result can tell when it may have changed.
     public ulong LookupGeneration => _lookupGeneration;
 
+    // The frame the recency queue counts; a remembered lookup touches its image once per value.
+    public ulong CollectionTick => _collectionTick;
+
     // What a remembered lookup still does on reuse: the image counts as used now. False when the
     // image is gone.
     public bool TryTouchRemembered(ResourceSlotIdentifier imageIdentifier)

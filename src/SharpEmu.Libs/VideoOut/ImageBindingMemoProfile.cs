@@ -33,6 +33,17 @@ internal static class ImageBindingMemoProfile
         }
     }
 
+    private static long _rememberedViews;
+
+    // A hit whose image needed nothing the full view acquisition does.
+    public static void CountRememberedView()
+    {
+        if (RenderPhaseProfile.Enabled)
+        {
+            Interlocked.Increment(ref _rememberedViews);
+        }
+    }
+
     public static string TakeReport() => FormattableString.Invariant(
-        $"[PERF][IMAGE_BINDING_MEMO] hits={Interlocked.Exchange(ref _hits, 0)} stale={Interlocked.Exchange(ref _stale, 0)} new={Interlocked.Exchange(ref _new, 0)}");
+        $"[PERF][IMAGE_BINDING_MEMO] hits={Interlocked.Exchange(ref _hits, 0)} stale={Interlocked.Exchange(ref _stale, 0)} new={Interlocked.Exchange(ref _new, 0)} remembered_views={Interlocked.Exchange(ref _rememberedViews, 0)}");
 }

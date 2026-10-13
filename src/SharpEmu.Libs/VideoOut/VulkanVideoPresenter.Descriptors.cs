@@ -124,8 +124,84 @@ internal static unsafe partial class VulkanVideoPresenter
             public ResourceSlotIdentifier Found;
             public uint MetadataBaseLayer;
             public bool CompletesLookup;
+            // The sampled view the full path acquired for this lookup; set once the image proved to
+            // need no lookup completion, owner redirect or mip tail merge on later reads.
+            public CachedImage? Image;
+            public ImageView View;
+            // The submission and recency frame the image was last touched in.
+            public ulong AccessTick;
+            public ulong TouchTick;
 
             public readonly bool SameWords(uint[] words) => Words is not null && words.AsSpan().SequenceEqual(Words);
+        }
+
+        // Compares every remembered texture view with the one the full path acquires.
+        private static readonly bool ValidateIncremental =
+            Environment.GetEnvironmentVariable("SHARPEMU_VALIDATE_INCREMENTAL") == "1";
+
+        private static readonly bool RememberTextureViews =
+            Environment.GetEnvironmentVariable("SHARPEMU_REMEMBER_TEXTURE_VIEWS") != "0";
+
+        // A remembered view serves the draw while its image needs nothing the full acquisition does:
+        // no guest refresh, no new watch range, no rebind. The image still counts as used in the
+        // current submission and frame.
+        private bool TryUseRememberedView(ref ImageBindingMemo memo)
+        {
+            if (!RememberTextureViews || memo.Image is not { } image || memo.View.Handle == 0 ||
+                !image.Registered || image.DepthOwner.IsValid || image.Binding.NeedsRebind ||
+                image.IsCpuDirty || image.IsBufferModified ||
+                image.WatchBegin != image.Description.Data.Address || image.WatchEnd != image.Description.Data.End)
+            {
+                return false;
+            }
+
+            var tick = _scheduler.CurrentTick;
+            var frame = _imageCache.CollectionTick;
+            if (memo.AccessTick != tick || memo.TouchTick != frame)
+            {
+                if (!_imageCache.TryTouchRemembered(memo.Found))
+                {
+                    return false;
+                }
+
+                memo.AccessTick = tick;
+                memo.TouchTick = frame;
+            }
+
+            return true;
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _reportedIncrementalMismatches = new();
+
+        // A divergence between a remembered result and the full path, reported once per site.
+        private static void ReportIncrementalMismatch(string detail, ShaderProgramInfo program, int index)
+        {
+            var line = $"[GPU][WARN][INCREMENTAL_MISMATCH] stage={program.Stage} hash=0x{program.Hash:X16} image={index} {detail}";
+            if (_reportedIncrementalMismatches.TryAdd(line, 0))
+            {
+                Console.Error.WriteLine(line);
+            }
+        }
+
+        // After the full path acquired a sampled view, the lookup that found its image remembers it.
+        private void RememberTextureView(ShaderProgramInfo program, int index, uint[] words, TextureResource binding, CachedImage image)
+        {
+            if (!RememberTextureViews || binding.IsStorage)
+            {
+                return;
+            }
+
+            ref var memo = ref ImageBindingMemoOf(program, index);
+            if (!memo.SameWords(words) || memo.Generation != _imageCache.LookupGeneration || memo.Found != binding.ImageIdentifier ||
+                memo.CompletesLookup || GuestImageCache.MayMergeMipTail(in image.Description))
+            {
+                return;
+            }
+
+            memo.Image = image;
+            memo.View = binding.View;
+            memo.AccessTick = _scheduler.CurrentTick;
+            memo.TouchTick = _imageCache.CollectionTick;
         }
 
         private Dictionary<ShaderProgramInfo, ImageBindingMemo[]>? _imageBindingMemos;
@@ -168,7 +244,14 @@ internal static unsafe partial class VulkanVideoPresenter
             var remembered = memo.SameWords(words);
             var current = remembered && memo.Generation == _imageCache.LookupGeneration;
             ImageBindingMemoProfile.Count(remembered, current);
-            if (current && _imageCache.TryTouchRemembered(memo.Found))
+            var rememberedView = current && !storage && TryUseRememberedView(ref memo);
+            if (rememberedView)
+            {
+                ImageBindingMemoProfile.CountRememberedView();
+                resolution = memo.Resolution;
+                imageIdentifier = memo.Found;
+            }
+            else if (current && _imageCache.TryTouchRemembered(memo.Found))
             {
                 resolution = memo.Resolution;
                 imageIdentifier = memo.Found;
@@ -198,7 +281,18 @@ internal static unsafe partial class VulkanVideoPresenter
                     : default;
             }
 
-            imageIdentifier = ImageRequestBuilders.ValidateTextureOwner(_imageCache, imageIdentifier, resolution);
+            // A remembered view was recorded only for an image that is its own owner.
+            if (!rememberedView || ValidateIncremental)
+            {
+                var owner = ImageRequestBuilders.ValidateTextureOwner(_imageCache, imageIdentifier, resolution);
+                if (rememberedView && owner != imageIdentifier)
+                {
+                    ReportIncrementalMismatch($"texture owner remembered={imageIdentifier} owner={owner}", program, index);
+                }
+
+                imageIdentifier = owner;
+            }
+
             BindImage(imageIdentifier, storage);
             var descriptor = new TextureDescriptorWords(words);
             if (ShouldTraceTextureBindings() &&
@@ -228,6 +322,12 @@ internal static unsafe partial class VulkanVideoPresenter
             texture.ImageIdentifier = imageIdentifier;
             texture.Request = resolution.Request;
             texture.IsStorage = storage;
+            if (rememberedView)
+            {
+                texture.RememberedImage = memo.Image;
+                texture.RememberedView = memo.View;
+            }
+
             texture.DestinationSelect = words[3] & 0xFFFu;
             texture.Width = descriptor.Width;
             texture.Height = descriptor.Height;
@@ -797,6 +897,24 @@ internal static unsafe partial class VulkanVideoPresenter
                     binding.MipViews = mipViews;
                     binding.View = mipViews[0];
                 }
+                else if (binding.RememberedView.Handle != 0 && ReferenceEquals(binding.RememberedImage, image))
+                {
+                    binding.View = binding.RememberedView;
+                    if (ValidateIncremental)
+                    {
+                        var acquired = _imageCache.AcquireTextureView(binding.ImageIdentifier, binding.Request);
+                        if (acquired.Handle != binding.View.Handle)
+                        {
+                            ReportIncrementalMismatch(
+                                $"texture view remembered=0x{binding.View.Handle:X} acquired=0x{acquired.Handle:X} address=0x{image.Description.Data.Address:X16}",
+                                program, index);
+                        }
+
+                        binding.View = acquired;
+                    }
+
+                    binding.MipViews = [];
+                }
                 else
                 {
                     if (binding.IsStorage)
@@ -806,6 +924,7 @@ internal static unsafe partial class VulkanVideoPresenter
 
                     binding.View = _imageCache.AcquireTextureView(binding.ImageIdentifier, binding.Request);
                     binding.MipViews = [];
+                    RememberTextureView(program, index, snapshot.Images[index], binding, image);
                 }
 
                 image.Uses.Storage |= binding.IsStorage;

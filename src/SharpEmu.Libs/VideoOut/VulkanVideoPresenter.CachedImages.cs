@@ -130,6 +130,9 @@ internal static unsafe partial class VulkanVideoPresenter
         // A draw-local copy used when the guest samples a depth aspect while the
         // same image is attached for writes. It retires with the submission.
         public bool IsFeedbackSnapshot;
+        // The view a remembered lookup acquired for an unchanged texture; BindImages takes it as is.
+        public CachedImage? RememberedImage;
+        public ImageView RememberedView;
         // Taken from the presenter's pool; goes back to it when its submission retires.
         public bool Pooled;
         public bool InPool;
@@ -160,6 +163,8 @@ internal static unsafe partial class VulkanVideoPresenter
             DestinationSelect = 0;
             MipViews = [];
             IsFeedbackSnapshot = false;
+            RememberedImage = null;
+            RememberedView = default;
         }
     }
 

@@ -443,15 +443,25 @@ public sealed unsafe partial class GuestImageCache : IGuestImageCache, IGuestIma
     }
 
     // GFX10 packs the mips smaller than half a swizzle block into one block at the start of the chain.
+    // Whether a tail block can exist for the chain at all; a texture that cannot have one needs no merge on any read.
+    public static bool MayMergeMipTail(in ImageDescription description) => MayMergeMipTail(in description, out _, out _);
+
+    private static bool MayMergeMipTail(in ImageDescription description, out int blockWidth, out int blockHeight)
+    {
+        blockWidth = 0;
+        blockHeight = 0;
+        return description.Resources.Levels > 1 && !description.IsBlock && !description.IsDepth && description.Samples <= 1 &&
+            description.Resources.Layers == 1 && !description.IsVolume &&
+            Agc.GnmTiling.TryGetBlockElementDimensions((uint)description.TileMode, (int)description.BytesPerBlock, out blockWidth, out blockHeight);
+    }
+
     // A title can write that block through a single-level view the size of the block (Unity's
     // screen-space reflection blur writes mips 3 and up that way), which the cache keeps as its own
     // image; copy each tail mip out of it before the chain is read.
     private void MergeMipTailBlock(CachedImage chain)
     {
         ref var description = ref chain.Description;
-        if (description.Resources.Levels <= 1 || description.IsBlock || description.IsDepth || description.Samples > 1 ||
-            description.Resources.Layers != 1 || description.IsVolume ||
-            !Agc.GnmTiling.TryGetBlockElementDimensions((uint)description.TileMode, (int)description.BytesPerBlock, out var blockWidth, out var blockHeight))
+        if (!MayMergeMipTail(in description, out var blockWidth, out var blockHeight))
         {
             return;
         }
