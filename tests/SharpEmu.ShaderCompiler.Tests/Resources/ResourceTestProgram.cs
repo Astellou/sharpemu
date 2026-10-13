@@ -173,7 +173,7 @@ internal static class ResourceTestProgram
 
     // The plan, its default specialization applied, and the layout of one program.
     public static (ShaderResourcePlan Plan, SpecializedResourceInfo Resources, BindingLayout Layout) Prepare(
-        Gen5ShaderProgram program, ShaderStage stage = ShaderStage.Compute, uint userDataBase = 0, uint userDataCount = 64, uint pushDataStartDword = 0, bool usesBindlessImages = false)
+        Gen5ShaderProgram program, ShaderStage stage = ShaderStage.Compute, uint userDataBase = 0, uint userDataCount = 64, uint pushDataStartDword = 0)
     {
         var plan = ShaderResourcePlan.Extract(program, stage, Hash, userDataBase, userDataCount);
         var resources = ResourceMaterializer.ApplyTo(plan, ResourceSpecialization.Default(plan.Info));
@@ -183,14 +183,13 @@ internal static class ResourceTestProgram
             BindingLayout.UsesGlobalDataShare(program),
             ShaderCompileRequest.RequiresFlattenedTable(plan, resources),
             BindingLayout.ReadsShaderBase(program),
-            pushDataStartDword,
-            usesBindlessImages: usesBindlessImages);
+            pushDataStartDword);
         return (plan, resources, layout);
     }
 
-    public static ShaderCompileRequest Request(Gen5ShaderProgram program, ShaderStage stage = ShaderStage.Compute, uint userDataBase = 0, uint userDataCount = 64, uint pushDataStartDword = 0, bool usesBindlessImages = false)
+    public static ShaderCompileRequest Request(Gen5ShaderProgram program, ShaderStage stage = ShaderStage.Compute, uint userDataBase = 0, uint userDataCount = 64, uint pushDataStartDword = 0)
     {
-        var (plan, resources, layout) = Prepare(program, stage, userDataBase, userDataCount, pushDataStartDword, usesBindlessImages);
+        var (plan, resources, layout) = Prepare(program, stage, userDataBase, userDataCount, pushDataStartDword);
         return new ShaderCompileRequest(plan, resources, layout)
         {
             PixelOutputs = stage == ShaderStage.Pixel ? [new Gen5PixelOutputBinding(0, 0, Gen5PixelOutputKind.Float)] : [],

@@ -135,7 +135,7 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             while (_pendingGuestSubmissions.TryPeek(out var submission) &&
-                   (waitForOldest ? _scheduler.IsTickComplete(submission.Tick) : _scheduler.IsTickCompletePolled(submission.Tick)))
+                   _scheduler.IsTickComplete(submission.Tick))
             {
                 _pendingGuestSubmissions.Dequeue();
                 RetireGuestSubmission(submission);
@@ -145,7 +145,7 @@ internal static unsafe partial class VulkanVideoPresenter
             // Deferred tick work (buffer erases, one-shot uploads, fault parses) runs here.
             if (_scheduler.Active)
             {
-                _scheduler.RunCompletedOperations(polled: !waitForOldest);
+                _scheduler.RunCompletedOperations();
             }
 
             _commandStream.NotifyCompletedGpuTick(_scheduler.Timeline.CompletedTick);

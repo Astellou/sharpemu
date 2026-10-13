@@ -101,11 +101,7 @@ internal static unsafe partial class VulkanVideoPresenter
         private void CreateImageCache()
         {
             var (memory, _, backing) = RequireGuestMemory("image store");
-            // The guest reads linear GPU-written images back on the CPU (UE's exposure readback
-            // feeds View.PreExposure), so they are published to guest memory after their tick.
-            // SHARPEMU_READBACK_LINEAR_IMAGES=0 keeps them GPU-only.
-            _imageCache = new GuestImageCache(_deviceInfo, _scheduler, memory.Pages, _bufferCache, backing,
-                readbackLinearImages: Environment.GetEnvironmentVariable("SHARPEMU_READBACK_LINEAR_IMAGES") != "0");
+            _imageCache = new GuestImageCache(_deviceInfo, _scheduler, memory.Pages, _bufferCache, backing, readbackLinearImages: false);
             _bufferCache.ImageCache = _imageCache;
             _samplerStore = new SamplerStore(_deviceInfo);
         }
@@ -124,10 +120,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 // Drain accepted submissions before closing the relay.
                 // Cancel blocked submissions if a full retry cycle makes no progress.
                 _commandStream.StopAccepting();
-                // The runtime may tear down guest memory while this drains; stop executing then.
-                var outcome = _commandStream.DrainForShutdown(
-                    cancelBlockedOnNoProgress: true,
-                    abandon: static () => GuestGpuMemoryHook.Current is null);
+                var outcome = _commandStream.DrainForShutdown(cancelBlockedOnNoProgress: true);
                 FlushBatchedGuestCommands();
                 Console.Error.WriteLine(
                     $"[LOADER][PERF] command_stream submissions={_commandStream.SubmissionsStarted} " +

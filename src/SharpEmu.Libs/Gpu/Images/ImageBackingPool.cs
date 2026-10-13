@@ -27,16 +27,13 @@ public sealed unsafe class ImageBackingPool : IDisposable
         ImageCreateFlags Flags,
         ImageUsageFlags Usage);
 
-    private readonly record struct Entry(Image Handle, DeviceMemory Memory, ulong Size,
-        OptimalImageMemoryAllocation? Placement, OptimalImageMemoryPool? Allocator);
+    private readonly record struct Entry(Image Handle, DeviceMemory Memory, ulong Size);
 
     private readonly GpuDeviceInfo _device;
     private readonly Dictionary<Key, Stack<Entry>> _entries = new();
     private readonly LinkedList<(Key Key, Entry Entry)> _order = new();
     private ulong _pooledBytes;
     private bool _disposed;
-
-    internal ulong PooledBytes => _pooledBytes;
 
     public ImageBackingPool(GpuDeviceInfo device) => _device = device;
 
@@ -48,30 +45,23 @@ public sealed unsafe class ImageBackingPool : IDisposable
         new(create.Format, create.ImageType, create.Extent, create.ArrayLayers, create.MipLevels, create.Samples, create.Flags, create.Usage);
 
     public bool TryTake(in Key key, out Image handle, out DeviceMemory memory, out ulong size)
-        => TryTake(key, out handle, out memory, out size, out _);
-
-    internal bool TryTake(in Key key, out Image handle, out DeviceMemory memory, out ulong size,
-        out OptimalImageMemoryAllocation? placement)
     {
         if (_entries.TryGetValue(key, out var stack) && stack.TryPop(out var entry))
         {
             RemoveOrder(key, entry);
             _pooledBytes -= entry.Size;
             (handle, memory, size) = (entry.Handle, entry.Memory, entry.Size);
-            placement = entry.Placement;
             return true;
         }
 
         handle = default;
         memory = default;
         size = 0;
-        placement = null;
         return false;
     }
 
     // False when the pool is full for this key or disposed; the caller then destroys it.
-    public bool TryReturn(in Key key, Image handle, DeviceMemory memory, ulong size,
-        OptimalImageMemoryAllocation? placement = null, OptimalImageMemoryPool? allocator = null)
+    public bool TryReturn(in Key key, Image handle, DeviceMemory memory, ulong size)
     {
         if (_disposed || size > MaxPooledBytes)
         {
@@ -89,7 +79,7 @@ public sealed unsafe class ImageBackingPool : IDisposable
             return false;
         }
 
-        var entry = new Entry(handle, memory, size, placement, allocator);
+        var entry = new Entry(handle, memory, size);
         stack.Push(entry);
         _order.AddLast((key, entry));
         _pooledBytes += size;
@@ -135,8 +125,7 @@ public sealed unsafe class ImageBackingPool : IDisposable
     private void Destroy(Entry entry)
     {
         _device.Vk.DestroyImage(_device.Device, entry.Handle, null);
-        if (entry.Placement is { } placement) entry.Allocator!.Free(placement);
-        else _device.FreeMemory(entry.Memory);
+        _device.FreeMemory(entry.Memory);
     }
 
     public void Dispose()
@@ -147,13 +136,6 @@ public sealed unsafe class ImageBackingPool : IDisposable
         }
 
         _disposed = true;
-        ReleaseRetained();
-    }
-
-    // Entries arrive only after their last GPU submission completes. Trimming
-    // their storage under pressure does not disable subsequent backing reuse.
-    public void ReleaseRetained()
-    {
         foreach (var (_, entry) in _order)
         {
             Destroy(entry);

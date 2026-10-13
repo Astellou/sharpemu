@@ -148,8 +148,6 @@ public static unsafe class RenderDocCapture
         }
     }
 
-    private static readonly string TriggerFile = Path.Combine(AppContext.BaseDirectory, "renderdoc.capture");
-
     public static void RequestCapture()
     {
         if (_api is null)
@@ -182,14 +180,6 @@ public static unsafe class RenderDocCapture
         {
             EndGuestFrame(version);
             return;
-        }
-
-        // Unattended runs request a capture by creating this file next to the executable.
-        if (state == StateIdle && File.Exists(TriggerFile))
-        {
-            try { File.Delete(TriggerFile); } catch (IOException) { }
-            RequestCapture();
-            state = Volatile.Read(ref _state);
         }
 
         if (state != StateRequested)

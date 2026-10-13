@@ -35,7 +35,6 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
     private SDL_Window* _window;
     private nint _metalView;
     private SDL_Gamepad* _gamepad;
-    private readonly Pad.TouchContactIds _touchIds = new();
     private HostGamepadType _gamepadType;
     private byte _leftTriggerRumble;
     private byte _rightTriggerRumble;
@@ -809,12 +808,6 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
     }
 
     private HostTouchPoint ReadTouchPoint(int finger)
-    {
-        var point = ReadRawTouchPoint(finger);
-        return point with { Id = _touchIds.Track(finger, point.Active) };
-    }
-
-    private HostTouchPoint ReadRawTouchPoint(int finger)
     {
         if (SDL_GetNumGamepadTouchpadFingers(_gamepad, 0) <= finger)
         {

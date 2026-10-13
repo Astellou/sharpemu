@@ -145,9 +145,7 @@ internal sealed class ShaderPrewarmList : IDisposable
     public const string ProgressFileName = "shader-prewarm.progress";
 
     private const uint Magic = 0x57504553;
-    // Resource specializations depend on the planner's semantics, not only on the
-    // serialized property layout. Bump this when those semantics change.
-    private const uint FormatVersion = 2;
+    private const uint FormatVersion = 1;
     private const byte CodeKind = 1;
     private const byte ComputeKind = 2;
     private const int RecordHeaderBytes = sizeof(uint) + sizeof(ulong);

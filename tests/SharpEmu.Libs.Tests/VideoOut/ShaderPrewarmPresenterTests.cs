@@ -46,9 +46,6 @@ public sealed class ShaderPrewarmPresenterTests(HeadlessVulkanFixture fixture) :
         using (var list = ShaderPrewarmList.Open(_directory)!)
         {
             var guest = new PipelineTestGuest(Compile);
-            // Match the presenter's runtime buffer metadata policy before comparing
-            // module identities; formatted bounds also consume the packed tail size.
-            guest.Host.RuntimeBufferStridesEnabled = true;
             guest.Host.ShaderPrewarm = list;
             guest.RegisterProgram(CodeAddress, HeaderAddress, PipelineTestGuest.FormatLoadProgram);
             var cursor = 0u;
@@ -65,8 +62,7 @@ public sealed class ShaderPrewarmPresenterTests(HeadlessVulkanFixture fixture) :
         var prewarmed = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
         presenter.SetField("_prewarmedShaderIdentities", prewarmed);
 
-        presenter.InvokeMethod("PrewarmComputePipeline", record, code, new FakeShaderCompiler(Compile),
-            (IShaderPipelineHost)presenter.Instance);
+        presenter.InvokeMethod("PrewarmComputePipeline", record, code, new FakeShaderCompiler(Compile), false, true);
 
         Assert.Equal(0, presenter.GetField<int>("_shaderPrewarmFailed"));
         Assert.Equal(1, presenter.GetField<int>("_shaderPrewarmCompiled"));

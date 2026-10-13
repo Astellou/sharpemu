@@ -290,7 +290,6 @@ internal static unsafe partial class VulkanVideoPresenter
 
         public bool TryReadGuest(ulong address, Span<byte> destination)
         {
-            if (_bufferCache.TryReadCommandBacking(address, destination)) return true;
             using (RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.CommandMemorySync))
             {
                 if (!_bufferCache.TrySynchronizeCpuRead(address, (ulong)destination.Length,
@@ -316,13 +315,8 @@ internal static unsafe partial class VulkanVideoPresenter
             _activeGuestQueue = new VulkanGuestQueueIdentity(_commandQueueNames[queueId], submissionId);
             BindSubmissionContext(_activeGuestQueue);
             _ = CurrentRecordingBuffer();
-            _bufferCache.NoteMemoryVisibilityPoint();
             _translation.BeginSubmission(queueId, submissionId, geometrySnapshots, _commandStream.GetInterpreter(queueId));
         }
-
-        public void NoteMemoryVisibilityPoint() => _bufferCache.NoteMemoryVisibilityPoint();
-
-        public void NoteCommandProcessorWrite(ulong address, ulong size) => _bufferCache.NoteCommandProcessorWrite(address, size);
 
         public void Flush()
         {
@@ -361,20 +355,6 @@ internal static unsafe partial class VulkanVideoPresenter
 
             EndRendering();
             RecordGlobalBarrier(BeginBatchedGuestCommands());
-        }
-
-        // SHARPEMU_DIAG_BARRIER_EVERY_CALL=1 (diagnostic): a full memory barrier before every draw and
-        // dispatch, so no shader can overlap or read past an earlier one's writes. Very slow.
-        private static readonly bool BarrierEveryCall =
-            Environment.GetEnvironmentVariable("SHARPEMU_DIAG_BARRIER_EVERY_CALL") == "1";
-
-        private void DiagnosticBarrier()
-        {
-            if (BarrierEveryCall)
-            {
-                EndRendering();
-                RecordGlobalBarrier(BeginBatchedGuestCommands());
-            }
         }
 
         private void RecordGlobalBarrier(CommandBuffer commandBuffer)
@@ -494,11 +474,8 @@ internal static unsafe partial class VulkanVideoPresenter
 
         public bool IsFlipDone(int handle, int index) => VideoOutExports.IsFlipDone(handle, index);
 
-        public void PrepareCpuFlip(int handle, int index, ulong requestId)
-        {
-            VideoOutExports.MarkFlipOrdered(requestId);
+        public void PrepareCpuFlip(int handle, int index, ulong requestId) =>
             CaptureFlip(handle, index, requestId, flipMode: 0, flipArg: 0);
-        }
 
         public void DrawIndexed(ulong submitId, in DrawIndexedArguments arguments)
         {
@@ -506,7 +483,6 @@ internal static unsafe partial class VulkanVideoPresenter
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
-                DiagnosticBarrier();
                 _translation.DrawIndexed(submitId, in arguments);
             }
             finally
@@ -521,7 +497,6 @@ internal static unsafe partial class VulkanVideoPresenter
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
-                DiagnosticBarrier();
                 _translation.DrawAuto(submitId, in arguments);
             }
             finally
@@ -538,9 +513,6 @@ internal static unsafe partial class VulkanVideoPresenter
         // SHARPEMU_CPU_INDIRECT_DRAW=1 reads the arguments back on the CPU as before.
         public bool ResolvesIndirectDrawOnGpu => !_cpuIndirectDraw;
 
-        // RenderExecutor records non-indexed indirect draws with vkCmdDrawIndirect.
-        public bool ResolvesNonIndexedIndirectDrawOnGpu => !_cpuIndirectDraw;
-
         private static readonly bool _cpuIndirectDraw = string.Equals(
             Environment.GetEnvironmentVariable("SHARPEMU_CPU_INDIRECT_DRAW"), "1", StringComparison.Ordinal);
 
@@ -553,7 +525,6 @@ internal static unsafe partial class VulkanVideoPresenter
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
-                DiagnosticBarrier();
                 _translation.Dispatch(submitId, groupsX, groupsY, groupsZ, dispatchInitiator, indirectArgumentsAddress);
             }
             finally
@@ -782,22 +753,6 @@ internal static unsafe partial class VulkanVideoPresenter
                     _commandStream.RetryBlocked();
                 }
 
-                while (_pendingVideoPresentations.Count > 0 &&
-                       _pendingVideoPresentations.Peek().Sequence <= _presentedSequence)
-                {
-                    _pendingVideoPresentations.Dequeue();
-                }
-
-                // Both queues share a sequence. A later guest flip must not retire
-                // an earlier decoded frame, even while that flip waits for its GPU tick.
-                if (_pendingVideoPresentations.Count > 0 &&
-                    (_pendingGuestImagePresentations.Count == 0 ||
-                     _pendingVideoPresentations.Peek().Sequence < _pendingGuestImagePresentations.Peek().Sequence))
-                {
-                    presentation = _pendingVideoPresentations.Dequeue();
-                    return true;
-                }
-
                 if (_pendingGuestImagePresentations.Count > 0)
                 {
                     var pending = _pendingGuestImagePresentations.Peek();
@@ -810,6 +765,12 @@ internal static unsafe partial class VulkanVideoPresenter
 
                     presentation = default;
                     return false;
+                }
+
+                while (_pendingVideoPresentations.Count > 0 &&
+                       _pendingVideoPresentations.Peek().Sequence <= _presentedSequence)
+                {
+                    _pendingVideoPresentations.Dequeue();
                 }
 
                 if (_pendingVideoPresentations.Count > 0)
@@ -846,13 +807,6 @@ internal static unsafe partial class VulkanVideoPresenter
         // True when a guest frame can be shown now; the wait loop wakes for it.
         private bool HasReadyPresentationLocked()
         {
-            if (_pendingVideoPresentations.Count > 0 &&
-                (_pendingGuestImagePresentations.Count == 0 ||
-                 _pendingVideoPresentations.Peek().Sequence < _pendingGuestImagePresentations.Peek().Sequence))
-            {
-                return true;
-            }
-
             if (_pendingGuestImagePresentations.Count > 0)
             {
                 var pending = _pendingGuestImagePresentations.Peek();

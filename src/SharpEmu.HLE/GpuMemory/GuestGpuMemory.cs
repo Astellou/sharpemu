@@ -61,23 +61,6 @@ public sealed class GuestGpuMemory : IDisposable
         Volatile.Write(ref _images, images);
     }
 
-    // The host GPU detaches its stores after its caches have released every page watch.
-    public bool WaitForStoresDetached(TimeSpan timeout)
-    {
-        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
-        while (Buffers is not null || Images is not null)
-        {
-            if (Environment.TickCount64 >= deadline)
-            {
-                return false;
-            }
-
-            Thread.Sleep(10);
-        }
-
-        return true;
-    }
-
     // Retry after recovery, including a watch removed before the fault reached its store.
     public bool TryResolveFault(FaultKind kind, ulong address)
     {
@@ -311,11 +294,8 @@ public sealed class GuestGpuMemory : IDisposable
         }
     }
 
-    // Enter the GPU worker before the caller takes locks used by GPU memory reads. A change that
-    // only maps addresses no live mapping covers touches nothing the GPU can be using, so it
-    // skips the drain; removing or replacing a mapping must wait for the GPU first. needsDrain is
-    // evaluated where the change runs, after every earlier mapping change has been applied.
-    public void RunMappingChange(Action change, Func<bool>? needsDrain = null)
+    // Enter the GPU worker before the caller takes locks used by GPU memory reads.
+    public void RunMappingChange(Action change)
     {
         using var requestScope = GuestMemoryProfile.Measure(GuestMemoryProfile.Operation.MappingRequest);
         for (;;)
@@ -342,7 +322,7 @@ public sealed class GuestGpuMemory : IDisposable
         void ApplyChange(IGpuTickScheduler? scheduler)
         {
             // Finish callbacks before the mapping transaction takes its locks.
-            if (scheduler is { Active: true } && (needsDrain?.Invoke() ?? true))
+            if (scheduler is { Active: true })
             {
                 using var drainScope = GuestMemoryProfile.Measure(GuestMemoryProfile.Operation.MappingDrain);
                 scheduler.FinishMemoryAccess();

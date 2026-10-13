@@ -61,7 +61,6 @@ internal sealed unsafe class Videodec2Decoder : IDisposable
     private int _swsSourceHeight;
     private AVPixelFormat _swsSourceFormat = AVPixelFormat.AV_PIX_FMT_NONE;
     private bool _disposed;
-    private bool _disposing;
 
     private readonly Channel<byte[]?> _workChannel =
         Channel.CreateBounded<byte[]?>(new BoundedChannelOptions(WorkQueueCapacity)
@@ -83,7 +82,7 @@ internal sealed unsafe class Videodec2Decoder : IDisposable
     private readonly Thread _worker;
     private readonly Thread _scheduler;
 
-    // Kept alive until both threads have finished accepted decode and presentation work.
+    // Cancelled (not just completed) on Dispose so both loops stop promptly instead of draining a backlog.
     private readonly CancellationTokenSource _workerCts = new();
 
     private readonly object _protocolGate = new();
@@ -206,15 +205,7 @@ internal sealed unsafe class Videodec2Decoder : IDisposable
 
     public bool EnqueueAccessUnit(byte[] accessUnit)
     {
-        lock (_gate)
-        {
-            if (_disposed || _disposing)
-            {
-                return false;
-            }
-
-            return _workChannel.Writer.TryWrite(accessUnit);
-        }
+        return _workChannel.Writer.TryWrite(accessUnit);
     }
 
     /// <summary>Queues an end-of-stream drain: flush FFmpeg and emit one more buffered picture, if any.</summary>
@@ -803,28 +794,24 @@ internal sealed unsafe class Videodec2Decoder : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || _disposing)
+            if (_disposed)
             {
                 return;
             }
 
-            _disposing = true;
+            _disposed = true;
         }
 
-        // Stop accepting access units, then finish the work already accepted. The
-        // scheduler must stay alive while the worker drains its bounded frame queue.
-        RequestDrain();
-        _workChannel.Writer.TryComplete();
-        _worker.Join();
-        _frameQueue.Writer.TryComplete();
-        _scheduler.Join();
+        // Outside _gate: the worker needs it to finish whatever item it's mid-call on.
         _workerCts.Cancel();
+        _workChannel.Writer.TryComplete();
+        _frameQueue.Writer.TryComplete();
+        _worker.Join(TimeSpan.FromSeconds(2));
+        _scheduler.Join(TimeSpan.FromSeconds(2));
         _workerCts.Dispose();
 
         lock (_gate)
         {
-            _disposed = true;
-            _disposing = false;
             if (_swsContext != null)
             {
                 ffmpeg.sws_freeContext(_swsContext);

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-using System.Collections.Concurrent;
 using SharpEmu.Libs.Gpu.Buffers;
 using SharpEmu.Libs.Gpu.Scheduling;
 using Silk.NET.Vulkan;
@@ -49,9 +48,7 @@ public enum SamplerBorderColor : uint
 public sealed unsafe class SamplerStore : IDisposable
 {
     private readonly GpuDeviceInfo _device;
-    // Lookups run for every sampler of every draw on more than one queue thread; only a
-    // miss takes the lock, so concurrent draws never wait on each other for a known sampler.
-    private readonly ConcurrentDictionary<(uint, uint, uint, uint, bool), Sampler> _samplers = new();
+    private readonly Dictionary<(uint, uint, uint, uint, bool), Sampler> _samplers = new();
     private readonly object _gate = new();
 
     public SamplerStore(GpuDeviceInfo device) => _device = device;
@@ -60,21 +57,16 @@ public sealed unsafe class SamplerStore : IDisposable
 
     public Sampler GetSampler(in SamplerDescriptorWords words, bool integerView)
     {
-        var key = (words[0], words[1], words[2], words[3], integerView);
-        if (_samplers.TryGetValue(key, out var existing))
-        {
-            return existing;
-        }
-
         lock (_gate)
         {
-            if (_samplers.TryGetValue(key, out existing))
+            var key = (words[0], words[1], words[2], words[3], integerView);
+            if (_samplers.TryGetValue(key, out var existing))
             {
                 return existing;
             }
 
             var sampler = CreateSampler(words, integerView);
-            _samplers[key] = sampler;
+            _samplers.Add(key, sampler);
             return sampler;
         }
     }

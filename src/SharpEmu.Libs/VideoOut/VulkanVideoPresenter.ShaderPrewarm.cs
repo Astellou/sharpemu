@@ -93,6 +93,8 @@ internal static unsafe partial class VulkanVideoPresenter
             var workerCount = Math.Clamp(Environment.ProcessorCount / 4, 1, 4);
             var remaining = workerCount;
             var host = (IShaderPipelineHost)this;
+            var sharedInt64Atomics = host.SharedInt64AtomicsEnabled;
+            var execGuardElision = host.ExecGuardElisionEnabled;
             Volatile.Write(ref _shaderPrewarmTotal, pending.Count);
             Volatile.Write(ref _shaderPrewarmProgress, 0);
             Console.Error.WriteLine(
@@ -105,7 +107,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 {
                     while (!_shaderPrewarmStopping && work.TryDequeue(out var item))
                     {
-                        PrewarmComputePipeline(item.Record, item.Code, compiler, host);
+                        PrewarmComputePipeline(item.Record, item.Code, compiler, sharedInt64Atomics, execGuardElision);
                         _shaderPrewarmCompleted.Enqueue(ShaderPrewarmList.Identity(item.Record));
                         if (Interlocked.Increment(ref _shaderPrewarmProgress) % PrewarmProgressBatch == 0)
                         {
@@ -156,10 +158,12 @@ internal static unsafe partial class VulkanVideoPresenter
             ComputePrewarmRecord record,
             ShaderCodeCapture code,
             IGuestGpuBackend compiler,
-            IShaderPipelineHost host)
+            bool sharedInt64Atomics,
+            bool execGuardElision)
         {
             if (!ShaderProgramCache.TryCompilePrewarm(
-                    record, code, compiler, host, out var compiled, out var layout, out var error))
+                    record, code, compiler, sharedInt64Atomics, execGuardElision,
+                    _supportsShaderSignedZeroInfNanPreserveFloat32, out var compiled, out var layout, out var error))
             {
                 NoteShaderPrewarmFailure(record, error);
                 return;
@@ -175,7 +179,7 @@ internal static unsafe partial class VulkanVideoPresenter
             try
             {
                 setLayout = CreateDescriptorSetLayout(bindings, out _, out _);
-                pipelineLayout = CreatePipelineLayout(setLayout, ShaderStageFlags.ComputeBit, layout!.UsesBindlessImages);
+                pipelineLayout = CreatePipelineLayout(setLayout, ShaderStageFlags.ComputeBit);
                 module = CreateShaderModule(payload);
                 var pipeline = CompileComputePipeline(_vk, _device, _pipelineCache, module, pipelineLayout);
                 _vk.DestroyPipeline(_device, pipeline, null);

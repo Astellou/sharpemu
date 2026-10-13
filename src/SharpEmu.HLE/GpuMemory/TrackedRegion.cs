@@ -72,21 +72,15 @@ public sealed class TrackedRegion
     }
 
     // Count only clean-to-dirty transitions. Repeated reads cannot make a page hot.
-    // Returns whether this write changed ownership from clean to CPU-dirty.
-    // Callers use the result to avoid repeating protection bookkeeping for a
-    // page that was already CPU-owned.
-    public bool MarkCpuWrite(ulong address, ulong size)
+    public void MarkCpuWrite(ulong address, ulong size)
     {
         var (start, end) = GetPageRange(address, size);
-        var changed = false;
         for (var page = start; page < end; page++)
         {
             if (_cpuDirty.Get(page))
             {
                 continue;
             }
-
-            changed = true;
 
             if (_recentCpuUploads.Get(page))
             {
@@ -107,17 +101,7 @@ public sealed class TrackedRegion
             }
         }
 
-        // The page is already writable and CPU-owned. Re-running ChangeState
-        // scans every page in the 4 MiB region and republishes the same summary,
-        // once for every managed guest-store; do neither when ownership did not
-        // change. Callers hold Lock while reading and updating these masks.
-        if (!changed)
-        {
-            return false;
-        }
-
         ChangeState(WriteOrigin.Cpu, enable: true, address, size);
-        return true;
     }
 
     public void ChangeState(WriteOrigin side, bool enable, ulong address, ulong size)
@@ -160,32 +144,20 @@ public sealed class TrackedRegion
         }
     }
 
-    // Receives the runs one upload clears and the runs it copies; a struct visitor keeps the walk allocation-free.
-    public interface ICpuUploadVisitor
-    {
-        void Cleared(TrackedRegion region, ulong address, ulong size);
-
-        void Upload(ulong address, ulong size);
-    }
-
     // Hot read-only pages stay writable and dirty, so each obtain observes current CPU bytes.
-    // skipHotPages leaves them out entirely, for a caller that already copied them since the
-    // last memory visibility point.
-    public void ForEachCpuUploadRange<TVisitor>(bool preserveHotPages, ulong address, ulong size, ref TVisitor visitor,
-        bool skipHotPages = false)
-        where TVisitor : struct, ICpuUploadVisitor
+    public void ForEachCpuUploadRange(
+        bool preserveHotPages,
+        ulong address,
+        ulong size,
+        Action<ulong, ulong> visitCleared,
+        Action<ulong, ulong> visitUpload)
     {
         var (start, end) = GetPageRange(address, size);
         var upload = new PageMask(_cpuDirty, start, end);
-        if (skipHotPages)
-        {
-            upload &= ~_hotCpuWrites;
-        }
-
         var cleared = preserveHotPages ? upload & ~_hotCpuWrites : upload;
         foreach (var (runStart, runEnd) in cleared)
         {
-            visitor.Cleared(this, BaseAddress + (ulong)runStart * PageBytes, (ulong)(runEnd - runStart) * PageBytes);
+            visitCleared(BaseAddress + (ulong)runStart * PageBytes, (ulong)(runEnd - runStart) * PageBytes);
             _cpuDirty.UnsetRange(runStart, runEnd);
             _recentCpuUploads.SetRange(runStart, runEnd);
         }
@@ -193,12 +165,9 @@ public sealed class TrackedRegion
         UpdateCpuProtection(track: true);
         foreach (var (runStart, runEnd) in upload)
         {
-            visitor.Upload(BaseAddress + (ulong)runStart * PageBytes, (ulong)(runEnd - runStart) * PageBytes);
+            visitUpload(BaseAddress + (ulong)runStart * PageBytes, (ulong)(runEnd - runStart) * PageBytes);
         }
     }
-
-    // A racy hint for the per-frame decay; the decay itself runs under Lock.
-    public bool HasCpuWriteHeat => _hotCpuWrites.Any;
 
     public void ResetCpuWriteHeat(ulong address, ulong size)
     {

@@ -329,17 +329,15 @@ public sealed class AgcFusedShaderTests
             program.Instructions.Select(static instruction => instruction.Opcode));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void EmbeddedFusedProgram_RegistersValidatedContinuationDescriptor(bool continuationBeforeEntry)
+    [Fact]
+    public void EmbeddedFusedProgram_RegistersValidatedContinuationDescriptor()
     {
         var memory = new FakeCpuMemory(BaseAddress, 0x1_0000);
         var ctx = new CpuContext(memory, Generation.Gen5);
         var entryHeader = BaseAddress + 0x100;
         var entryCode = BaseAddress + 0x1000;
         var continuationHeader = entryCode + 0x80;
-        var continuationCode = continuationBeforeEntry ? entryCode - 0x200 : entryCode + 0x200;
+        var continuationCode = entryCode + 0x200;
 
         WriteUInt32(memory, entryHeader, 0x34333231u);
         WriteUInt32(memory, entryHeader + sizeof(uint), 0x18u);

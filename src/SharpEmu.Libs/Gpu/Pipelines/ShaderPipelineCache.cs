@@ -40,7 +40,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 
     public ShaderProgramCache Programs => _programs;
 
-
     public int GraphicsPipelineCount => _graphicsPipelines.Count;
 
     public int ComputePipelineCount => _computePipelines.Count;
@@ -81,18 +80,10 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         bool depthBound)
     {
         using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.ProgramPreparation);
-        var tessellated = IsMergedTessellationMask(context.ShaderStages);
-        Gen5TessellationInfo? tessellation = null;
-        if (tessellated)
-        {
-            if (!Gen5TessellationInfo.TryDecode(shaderInterface.TessellationFactorParameter, out var configuration, out var error))
-                throw SubmissionScheduler.Fatal(error);
-            tessellation = configuration;
-        }
         var vertexSource = PrepareSource(
-            vertex.ExportAddress, tessellated ? ShaderStage.TessellationEvaluation : ShaderStage.Vertex, "vertex", vertex.GeometryUserScalars, vertex.GeometryResource2.UserScalarCount,
+            vertex.ExportAddress, ShaderStage.Vertex, "vertex", vertex.GeometryUserScalars, vertex.GeometryResource2.UserScalarCount,
             probeWrittenRegisters: true, VertexUserDataBase);
-        var vertexInfo = tessellated ? new VertexInputInfo { PositionExportControl = shaderInterface.VertexOutputControl } : PrepareVertexInput(vertexSource, shaderInterface, context);
+        var vertexInfo = PrepareVertexInput(vertexSource, shaderInterface, context);
         ShaderSource? pixelSource = null;
         PixelInputInfo? pixelInfo = null;
         Gen5PixelOutputBinding[] pixelOutputs = [];
@@ -121,23 +112,7 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 
             pixelOutputs = ResolveBoundTargets(context, targetExportMapping, depthBound ? pixelProgram.PixelColorExportMasks : null,
                 out var outputModes, out var outputMappings);
-            var customSampleOffsets = new List<(float X, float Y)>();
-            var rasterizationSamples = 1u << context.AntialiasingConfig.SampleCountLog2;
-            var pixelIterations = (context.ScanModeControl1 & (1u << 16)) != 0
-                ? 1u << context.EnhancedQualityAntialiasing.PixelShaderIterationSamples : 1u;
-            if (_host.NativeTwoSampleMixedSupported && rasterizationSamples == 2 &&
-                (shaderInterface.PixelInputEnable & shaderInterface.PixelInputAddress & 0x11u) != 0)
-                for (uint pixelLocation = 0; pixelLocation < 4; pixelLocation++)
-                    for (uint sample = 0; sample < (pixelIterations == 1 ? 1 : rasterizationSamples); sample++)
-                    {
-                        var position = context.SampleLocations.Position(pixelLocation, sample);
-                        customSampleOffsets.Add((position.X - .5f, position.Y - .5f));
-                    }
-            pixelInfo = PixelStageInputResolver.Resolve(_context, pixelSource.Registered, shaderInterface,
-                outputModes, outputMappings, inputCount,
-                1u << context.EnhancedQualityAntialiasing.MaskExportSamples,
-                rasterizationSamples, pixelIterations, context.ShaderSampleExclusionMask, customSampleOffsets,
-                context.DepthRenderOverride.ForceShaderDepthOrder);
+            pixelInfo = PixelStageInputResolver.Resolve(_context, pixelSource.Registered, shaderInterface, outputModes, outputMappings, inputCount);
             // SPI_PS_INPUT_CNTL can map an input to any parameter export, beyond the input count;
             // the vertex program must declare every location the pixel program reads.
             attributeCount = Math.Max(attributeCount, ReadVertexOutputCount(pixelProgram, pixelInfo));
@@ -169,7 +144,7 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 
             if (!TryPrepareProgram(
                 vertexSource,
-                new StageCompileOptions { VertexInfo = vertexInfo, RequiredVertexOutputCount = (int)attributeCount, Tessellation = tessellation },
+                new StageCompileOptions { VertexInfo = vertexInfo, RequiredVertexOutputCount = (int)attributeCount },
                 ref pushDataCursor,
                 out vertexProgram,
                 out vertexStage))
@@ -181,25 +156,10 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         {
             pixelInfo.Stage = pixelStage;
         }
-        TessellationDrawPrograms? tessellationPrograms = null;
-        if (tessellated)
-        {
-            lock (_gate)
-            {
-                tessellationPrograms = PrepareTessellationHull(vertex, shaderInterface, tessellation!.Value);
-                var bridge = _programs.GetTessellationBridge(vertexStage.Program!.Bindings!, tessellation.Value.Domain);
-                vertexInfo = new VertexInputInfo
-                {
-                    PositionExportControl = vertexInfo.PositionExportControl, Stage = vertexStage,
-                    Tessellation = new(bridge.Control, vertexProgram, tessellationPrograms.HullConfiguration.InputControlPoints),
-                };
-                vertexProgram = bridge.Vertex;
-            }
-        }
 
         SolidColorClear? solidClear = null;
         var disableBlending = false;
-        if (pixelInfo is not null && !tessellated)
+        if (pixelInfo is not null)
         {
             var vertexProgramWords = _programs.Decode(vertexSource);
             var pixelProgramWords = _programs.Decode(pixelSource!);
@@ -217,7 +177,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         return new GraphicsPrograms
         {
             Vertex = vertexProgram,
-            Tessellation = tessellationPrograms,
             Pixel = pixelProgramHandle,
             VertexInput = vertexInfo,
             PixelInput = pixelInfo ?? new PixelInputInfo(),
@@ -242,8 +201,8 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
                 viewport.YScale,
                 viewport.XOffset,
                 viewport.YOffset,
-                Images.RenderScalePolicy.ClipSpaceReferenceExtent(Math.Min(limits.MaxViewportWidth, MaxViewportDimension)) * 0.5f,
-                Images.RenderScalePolicy.ClipSpaceReferenceExtent(Math.Min(limits.MaxViewportHeight, MaxViewportDimension)) * 0.5f);
+                Math.Min(limits.MaxViewportWidth, MaxViewportDimension) * 0.5f,
+                Math.Min(limits.MaxViewportHeight, MaxViewportDimension) * 0.5f);
         }
 
         return VertexInputResolver.ResolveVertexInputs(_context, source.Registered, source.UserData,
@@ -251,22 +210,15 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
     }
 
     // One past the highest parameter location the pixel program reads, resolved as its translator does.
-    // The attributes a pixel program interpolates, ascending; scanned once per decoded program
-    // instead of on every draw.
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Gen5ShaderProgram, uint[]> _interpolatedAttributes = new();
-
-    private static uint[] InterpolatedAttributes(Gen5ShaderProgram program) =>
-        _interpolatedAttributes.GetValue(program, static program => program.Instructions
+    private static uint ReadVertexOutputCount(Gen5ShaderProgram pixelProgram, PixelInputInfo info)
+    {
+        var attributes = pixelProgram.Instructions
             .Select(static instruction => instruction.Control)
             .OfType<Gen5InterpolationControl>()
             .Select(static control => control.Attribute)
             .Distinct()
             .Order()
-            .ToArray());
-
-    private static uint ReadVertexOutputCount(Gen5ShaderProgram pixelProgram, PixelInputInfo info)
-    {
-        var attributes = InterpolatedAttributes(pixelProgram);
+            .ToArray();
         if (attributes.Length == 0)
         {
             return 0;
@@ -285,8 +237,16 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 
     private static uint InterpolatedAttributeCount(Gen5ShaderProgram program)
     {
-        var attributes = InterpolatedAttributes(program);
-        return attributes.Length == 0 ? 0u : attributes[^1] + 1;
+        var maxAttribute = -1;
+        foreach (var instruction in program.Instructions)
+        {
+            if (instruction.Control is Gen5InterpolationControl interpolation)
+            {
+                maxAttribute = Math.Max(maxAttribute, (int)interpolation.Attribute);
+            }
+        }
+
+        return (uint)(maxAttribute + 1);
     }
 
     // The bound colour slots in order; each output mode names the kind the pixel program exports.
@@ -333,41 +293,10 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
             outputs.Add(new Gen5PixelOutputBinding(slot, location++, kind, mapping)
             {
                 ExportTarget = exportTarget >= 0 ? (uint)exportTarget : ContextRegisters.ColorTargetCount + slot,
-                ExportFormat = exportTarget >= 0
-                    ? (Gen5PixelExportFormat)context.ShaderInterface.TargetOutputModes[exportTarget]
-                    : Gen5PixelExportFormat.Float16,
             });
-        }
-
-        // Dual-source blending reads its second source from the export after target 0's,
-        // as the hardware pairs MRT0 and MRT1. It shares target 0's location as index 1.
-        if (_host.SupportsDualSourceBlend && UsesSecondBlendSource(context.BlendControls[0]) &&
-            outputs.Count == 1 && outputs[0].GuestSlot == 0 && outputs[0].ExportTarget < ContextRegisters.ColorTargetCount)
-        {
-            var first = outputs[0];
-            outputs.Add(new Gen5PixelOutputBinding(1, first.HostLocation, first.Kind, first.ComponentMapping)
-            {
-                ExportTarget = first.ExportTarget + 1,
-                ExportFormat = first.ExportTarget + 1 < ContextRegisters.ColorTargetCount
-                    ? (Gen5PixelExportFormat)context.ShaderInterface.TargetOutputModes[first.ExportTarget + 1]
-                    : Gen5PixelExportFormat.Float16,
-                Index = 1,
-            });
-            // Key the compiled program by the second source as well.
-            outputModes[1] = DualSourceOutputMode;
         }
 
         return outputs.ToArray();
-    }
-
-    private const byte DualSourceOutputMode = 0xFF;
-
-    // BLEND_SRC1_COLOR, BLEND_ONE_MINUS_SRC1_COLOR, BLEND_SRC1_ALPHA, BLEND_ONE_MINUS_SRC1_ALPHA.
-    internal static bool UsesSecondBlendSource(in BlendRegisters blend)
-    {
-        static bool Second(byte factor) => factor is >= 15 and <= 18;
-        return blend.Enable && (Second(blend.ColorSourceFactor) || Second(blend.ColorDestinationFactor) ||
-            Second(blend.AlphaSourceFactor) || Second(blend.AlphaDestinationFactor));
     }
 
     private static VertexPositionStream? FindPositionStream(VertexInputInfo info)
@@ -490,7 +419,7 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.PipelineCreation);
         var description = BuildGraphicsDescription(
             colors, in depth, vertexInput, pixelInput, context, in rendering, topology, primitiveRestartEnabled, disableBlending,
-            vertexProgram, pixelProgram, _host.NoAttachmentSampleCounts, _host.NativeTwoSampleMixedSupported);
+            vertexProgram, pixelProgram, _host.NoAttachmentSampleCounts);
         var key = KeyOf(description);
         lock (_gate)
         {
@@ -527,7 +456,7 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         bool disableBlending,
         ShaderProgram vertexProgram,
         ShaderProgram pixelProgram,
-        SampleCountFlags noAttachmentSampleCounts, bool nativeTwoSampleMixedSupported = false)
+        SampleCountFlags noAttachmentSampleCounts)
     {
         if (colors.Length > PipelineStaticParameters.ColorAttachmentCount)
         {
@@ -560,7 +489,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
             }
 
             renderingState.ColorFormats[index] = format;
-            renderingState.ColorSamples[index] = color.Resolution.Samples;
             // A target the pixel program never exports keeps its contents, as on hardware; the
             // host output would otherwise write an undefined value (e.g. depth-only passes that
             // leave a color target bound and export only to the null target).
@@ -584,18 +512,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         {
             renderingState.DepthFormat = rendering.DepthFormat;
             renderingState.StencilFormat = rendering.StencilFormat;
-            renderingState.DepthSamples = depth.Target.Target.Samples;
-        }
-
-        if (nativeTwoSampleMixedSupported && rendering.Samples == 2)
-        {
-            // Coverage masks are per pixel in the 2x2 sample-location grid.
-            // The native path currently represents unrestricted coverage only.
-            const uint activeSamples = 0x0003_0003;
-            if ((context.SampleCoverageMaskX0Y0X1Y0 & activeSamples) != activeSamples ||
-                (context.SampleCoverageMaskX0Y1X1Y1 & activeSamples) != activeSamples)
-                throw SubmissionScheduler.Fatal("Two-sample rendering with restricted per-pixel coverage is not supported.");
-            context.SampleLocations.Locations.CopyTo(renderingState.SampleLocationWords, 0);
         }
 
         var samples = rendering.Samples;
@@ -615,9 +531,7 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         }
 
         var depthState = withDepth ? depth.Target.State : default;
-        // A patch list without tessellation stages carries legacy rectangles, which are never
-        // culled. Tessellated patches rasterize as ordinary triangles and keep the guest's culling.
-        var rectangleList = topology == PrimitiveTopology.PatchList && vertexInput.Tessellation is null;
+        var rectangleList = topology == PrimitiveTopology.PatchList;
         var mode = context.RasterMode;
         parameters.NegativeOneToOne = !context.Clip.DirectXClipSpace;
         parameters.DepthClipEnable = context.Clip.IsZClipEnabled;
@@ -627,6 +541,8 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         parameters.SampleShadingEnable = pixelActive && samples > 1 && pixelInput!.SampleShading;
         parameters.WithDepth = withDepth;
         parameters.DepthBoundsTestEnable = depthState.DepthBoundsTestEnabled;
+        parameters.DepthMinBounds = depthState.DepthMinBounds;
+        parameters.DepthMaxBounds = depthState.DepthMaxBounds;
         parameters.StencilTestEnable = depthState.StencilTestEnabled;
         parameters.StencilFront = withDepth ? depthState.FrontOperations : StencilOperations.Default;
         parameters.StencilBack = withDepth ? depthState.BackOperations : StencilOperations.Default;
@@ -650,7 +566,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
 
         return new GraphicsPipelineDescription
         {
-            Tessellation = vertexInput.Tessellation,
             Rendering = renderingState,
             VertexInput = BuildVertexInputState(vertexInput),
             VertexInfo = vertexInput,
@@ -668,7 +583,6 @@ internal sealed partial class ShaderPipelineCache : IShaderPipelineProvider
         Rendering = description.Rendering,
         VertexProgramId = description.VertexProgram.Id,
         PixelProgramId = description.PixelInfo is not null ? description.PixelProgram.Id : 0,
-        Tessellation = description.Tessellation,
         VertexInput = description.VertexInput,
         StaticParameters = description.StaticParameters,
     };
