@@ -125,8 +125,7 @@ internal static unsafe partial class VulkanVideoPresenter
             public uint MetadataBaseLayer;
             public bool CompletesLookup;
 
-            public readonly bool Matches(uint[] words, ulong generation) =>
-                Words is not null && Generation == generation && words.AsSpan().SequenceEqual(Words);
+            public readonly bool SameWords(uint[] words) => Words is not null && words.AsSpan().SequenceEqual(Words);
         }
 
         private Dictionary<ShaderProgramInfo, ImageBindingMemo[]>? _imageBindingMemos;
@@ -166,7 +165,10 @@ internal static unsafe partial class VulkanVideoPresenter
             _ = BeginBatchedGuestCommands();
             TextureRequestResolution resolution;
             ResourceSlotIdentifier imageIdentifier;
-            if (memo.Matches(words, _imageCache.LookupGeneration) && _imageCache.TryTouchRemembered(memo.Found))
+            var remembered = memo.SameWords(words);
+            var current = remembered && memo.Generation == _imageCache.LookupGeneration;
+            ImageBindingMemoProfile.Count(remembered, current);
+            if (current && _imageCache.TryTouchRemembered(memo.Found))
             {
                 resolution = memo.Resolution;
                 imageIdentifier = memo.Found;
