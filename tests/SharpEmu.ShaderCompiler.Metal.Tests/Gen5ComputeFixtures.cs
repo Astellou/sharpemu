@@ -239,16 +239,61 @@ internal static class Gen5ComputeFixtures
     public static ShaderCompileRequest CreateComputeRequest(Gen5ComputeFixture fixture, uint waveLaneCount = 32, uint localSizeX = 32)
     {
         var program = DecodeOrThrow(fixture);
-        var hasBufferDescriptor = program.Instructions.Any(instruction => instruction.Control is Gen5BufferMemoryControl);
+        return RequestOrThrow(program, ShaderStage.Compute, waveLaneCount, localSizeX, runtimeInputs: RuntimeInputs(fixture, program));
+    }
+
+    // The push data a host binds for the fixture's dispatch: zero user data and the descriptor
+    // fields (buffer strides and formats) the program reads at runtime, as the Metal host
+    // writes them from the dispatch's descriptors.
+    public static byte[] PushDataOrThrow(Gen5ComputeFixture fixture, ShaderCompileRequest request)
+    {
+        var pushData = new byte[PushData.ByteSize];
+        var layout = request.Bindings;
+        if (!layout.UsesPushData)
+        {
+            return pushData;
+        }
+
+        var program = DecodeOrThrow(fixture);
+        var snapshot = new ResourceSnapshot();
+        if (RuntimeInputs(fixture, program) is { } inputs)
+        {
+            var plan = ShaderResourcePlan.Extract(program, ShaderStage.Compute, RequestHash, 0, UserDataCount);
+            var specialization = ResourceSpecialization.Default(plan.Info);
+            if (!ResourceMaterializer.Materialize(plan, inputs, ref snapshot, ref specialization, out var failure))
+                throw new InvalidOperationException($"[{fixture.Name}] fixture resource resolution failed: {failure}");
+        }
+
+        var shaderData = new uint[layout.ShaderDataDwordCount];
+        layout.WriteDescriptorFields(
+            shaderData,
+            snapshot.Buffers.Length == layout.MemoryOffsetCount ? snapshot.Buffers : new uint[layout.MemoryOffsetCount][],
+            snapshot.Images);
+        for (var index = 0; index < shaderData.Length; index++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+                pushData.AsSpan((int)(layout.PushDataStartDword + index) * sizeof(uint)), shaderData[index]);
+        }
+
+        return pushData;
+    }
+
+    private static ResourceRuntimeInputs? RuntimeInputs(Gen5ComputeFixture fixture, Gen5ShaderProgram program)
+    {
+        if (!program.Instructions.Any(instruction => instruction.Control is Gen5BufferMemoryControl))
+        {
+            return null;
+        }
+
         var userData = new uint[UserDataCount];
-        if (hasBufferDescriptor && fixture.StoreBackingBytes != 0)
+        if (fixture.StoreBackingBytes != 0)
         {
             userData[fixture.StoreScalarResourceBase] = 0x200000;
             userData[fixture.StoreScalarResourceBase + 2] = (uint)fixture.StoreBackingBytes;
             userData[fixture.StoreScalarResourceBase + 3] = DescriptorConstants.IdentityDestinationSelect;
         }
-        return RequestOrThrow(program, ShaderStage.Compute, waveLaneCount, localSizeX,
-            runtimeInputs: hasBufferDescriptor ? new ResourceRuntimeInputs { UserData = userData } : null);
+
+        return new ResourceRuntimeInputs { UserData = userData };
     }
 
     public static Gen5MslShader CompileStageRequestOrThrow(uint[] words, ShaderStage stage, int requiredVertexOutputCount = 0)

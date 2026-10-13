@@ -136,8 +136,10 @@ public static partial class Gen5MslTranslator
                 {
                     _usesLds |= instruction.Control is Gen5DataShareControl { Gds: false } &&
                         instruction.Opcode is not ("DsSwizzleB32" or "DsPermuteB32" or "DsBpermuteB32");
+                    // A BUFFER_STORE_FORMAT of a runtime format encodes through the prelude too.
                     _usesFormatLoads |= IsFormatBufferLoad(instruction.Opcode) ||
-                        instruction.Opcode.StartsWith("TBufferStoreFormat", StringComparison.Ordinal);
+                        instruction.Opcode.StartsWith("TBufferStoreFormat", StringComparison.Ordinal) ||
+                        instruction.Opcode.StartsWith("BufferStoreFormat", StringComparison.Ordinal);
                     if (instruction.Control is Gen5InterpolationControl interpolationControl)
                     {
                         _pixelAttributes.Add(interpolationControl.Attribute);

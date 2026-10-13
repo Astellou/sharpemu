@@ -31,6 +31,26 @@ public sealed class MslTranslationTests
         }
     }
 
+    // The runtime tests bind this push data on a Mac; it must carry the descriptor word 3
+    // the program reads (push_data[5] in the typed goldens), or every format reads as invalid.
+    [Fact]
+    public void FixturePushDataCarriesTheDescriptorFieldsTheProgramReads()
+    {
+        foreach (var fixture in Gen5ComputeFixtures.All)
+        {
+            _ = Gen5ComputeFixtures.PushDataOrThrow(fixture, Gen5ComputeFixtures.CreateComputeRequest(fixture));
+        }
+
+        foreach (var fixture in new[] { Gen5ComputeFixtures.TypedLoad, Gen5ComputeFixtures.TypedStore })
+        {
+            var request = Gen5ComputeFixtures.CreateComputeRequest(fixture);
+            var pushData = Gen5ComputeFixtures.PushDataOrThrow(fixture, request);
+            var word3 = (request.Bindings.PushDataStartDword + request.Bindings.BufferFormatDword) * sizeof(uint);
+            Assert.Equal(5u * sizeof(uint), word3);
+            Assert.Equal(0x38FACu, System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(pushData.AsSpan((int)word3)));
+        }
+    }
+
     [Fact]
     public void SadU32UsesUnsignedAbsoluteDifferenceAndAccumulator()
     {
@@ -511,6 +531,9 @@ public sealed class MslTranslationTests
     {
         var shader = CompileTypedBufferAccess("BufferStoreFormatXyzw", 4, 0, typed: false, descriptorFormat: 50);
 
+        // The prelude defining them is emitted, or the Metal compiler rejects the library.
+        Assert.Contains("static constant uint sharpemu_gfx10_formats[128]", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("static inline void sharpemu_format_layout(", shader.Source, StringComparison.Ordinal);
         Assert.Contains("sharpemu_gfx10_formats[(", shader.Source, StringComparison.Ordinal);
         Assert.Contains("sharpemu_format_layout(", shader.Source, StringComparison.Ordinal);
         for (var component = 0; component < 4; component++)

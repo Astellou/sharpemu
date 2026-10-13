@@ -348,8 +348,10 @@ public sealed class MetalRuntimeTests(ITestOutputHelper output)
             throw new InvalidOperationException($"[{fixture.Name}] {compileError}\n{shader.Source}");
         }
 
-        // The user data registers hold zero; bounds come from the argument buffer lengths.
-        var pushData = new byte[Resources.PushData.ByteSize];
+        // The user data registers hold zero and the descriptor fields come from the fixture's
+        // descriptors; bounds come from the argument buffer lengths.
+        var pushData = Gen5ComputeFixtures.PushDataOrThrow(
+            fixture, Gen5ComputeFixtures.CreateComputeRequest(fixture, waveLaneCount, localSizeX));
         if (!MetalNative.TryExecuteWithArgumentBuffer(
                 library,
                 shader.EntryPoint,
