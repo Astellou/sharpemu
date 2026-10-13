@@ -526,7 +526,8 @@ internal static unsafe partial class VulkanVideoPresenter
         {
             if (OnCommandThread)
             {
-                _commandThread!.Post(EmitGlobalBarrier);
+                // Recording a barrier changes no guest memory or cache state a resolution reads.
+                _commandThread!.PostResolutionNeutral(EmitGlobalBarrier);
                 return;
             }
 

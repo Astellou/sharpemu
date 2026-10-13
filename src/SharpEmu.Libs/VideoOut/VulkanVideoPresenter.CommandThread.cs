@@ -42,6 +42,9 @@ internal static partial class VulkanVideoPresenter
             public ulong RangeSize;
             // Resolution jobs submitted before this non-draw item; they finish before it runs.
             public long JobsBefore;
+            // Reads and changes nothing a resolution reads: it neither waits for the worker nor
+            // holds the jobs after it.
+            public bool ResolutionNeutral;
             public bool Sync;
             public volatile bool Done;
             public Exception? Failure;
@@ -110,6 +113,11 @@ internal static partial class VulkanVideoPresenter
             Enqueue(new Item { Kind = Kind.Deferred, Work = work, IsDraw = isDraw });
 
         public void Post(Action action) => Enqueue(new Item { Kind = Kind.Call, Action = action });
+
+        // For host work that touches neither guest memory nor the caches a resolution reads, such as
+        // recording a barrier: the draws after it resolve ahead of it.
+        public void PostResolutionNeutral(Action action) =>
+            Enqueue(new Item { Kind = Kind.Call, Action = action, ResolutionNeutral = true });
 
         public void Run(Action action)
         {
@@ -216,7 +224,7 @@ internal static partial class VulkanVideoPresenter
         private void Enqueue(Item item)
         {
             ThrowIfFailed();
-            if (!item.IsDraw)
+            if (!item.IsDraw && !item.ResolutionNeutral)
             {
                 item.JobsBefore = _prefetch?.Submitted ?? 0;
                 _enqueuedNonDraw++;
@@ -365,6 +373,21 @@ internal static partial class VulkanVideoPresenter
             if (item.IsDraw)
             {
                 _runDeferred(item.Work!);
+                return;
+            }
+
+            if (item.ResolutionNeutral)
+            {
+                try
+                {
+                    item.Action!();
+                }
+                catch (Exception exception)
+                {
+                    _failure ??= exception;
+                    throw;
+                }
+
                 return;
             }
 

@@ -48,6 +48,16 @@ public sealed class ParallelProgramPrefetch : IProgramPrefetch, IDisposable
         _thread.Start();
     }
 
+    // Render-thread waits on the worker, for the performance report: draws whose job was not
+    // resolved when taken, and non-draw items that waited for the jobs before them.
+    private static long _takes;
+    private static long _takesWaited;
+    private static long _finishChecks;
+    private static long _finishWaits;
+
+    public static string TakeReport() => FormattableString.Invariant(
+        $"[PERF][PROGRAM_PREFETCH] takes={Interlocked.Exchange(ref _takes, 0)} takes_waited={Interlocked.Exchange(ref _takesWaited, 0)} finish_checks={Interlocked.Exchange(ref _finishChecks, 0)} finish_waits={Interlocked.Exchange(ref _finishWaits, 0)}");
+
     // The job of the draw the render thread runs now; set around each deferred draw.
     public Job? Current { get; set; }
 
@@ -106,9 +116,20 @@ public sealed class ParallelProgramPrefetch : IProgramPrefetch, IDisposable
     // with no resolution of the draws before it still reading.
     public void WaitFinished(long count)
     {
+        var profiled = VideoOut.RenderPhaseProfile.Enabled;
+        if (profiled)
+        {
+            _finishChecks++;
+        }
+
         if (Volatile.Read(ref _finished) >= count)
         {
             return;
+        }
+
+        if (profiled)
+        {
+            _finishWaits++;
         }
 
         lock (_lock)
@@ -152,6 +173,15 @@ public sealed class ParallelProgramPrefetch : IProgramPrefetch, IDisposable
         }
 
         Current = null;
+        if (VideoOut.RenderPhaseProfile.Enabled)
+        {
+            _takes++;
+            if (job.State == 0)
+            {
+                _takesWaited++;
+            }
+        }
+
         WaitFor(job);
         if (job.State != 1 || !job.Inputs.Equals(inputs) || !_concurrent.IsStillCurrent(job.Assumptions!))
         {
