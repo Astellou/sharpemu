@@ -13,6 +13,59 @@ public sealed partial class RenderExecutor
     // Every draw resolves its targets against layer zero of the view range.
     private const uint DrawLayerOffset = 0;
 
+    // The request a target's registers build, remembered per color slot and for depth: a draw
+    // binds the previous draw's targets almost always, and the builders read nothing else. The
+    // lookup, metadata clears and bindings still run for every draw.
+    private struct ColorTargetMemo
+    {
+        public bool Valid;
+        public ColorTargetWords Words;
+        public uint TargetMask;
+        public ColorTargetResolution? Resolution;
+    }
+
+    private struct DepthTargetMemo
+    {
+        public bool Valid;
+        public DepthTargetWords Words;
+        public DepthTargetResolution? Resolution;
+    }
+
+    private readonly ColorTargetMemo[] _colorTargetMemos = new ColorTargetMemo[ContextRegisters.ColorTargetCount];
+    private DepthTargetMemo _depthTargetMemo;
+
+    private ColorTargetResolution? ResolveColorTarget(ContextRegisters context, uint slot)
+    {
+        ref readonly var words = ref context.ColorTargets[slot];
+        var targetMask = context.RenderTargetMaskForSlot(slot);
+        ref var memo = ref _colorTargetMemos[slot];
+        if (!memo.Valid || memo.TargetMask != targetMask || memo.Words != words)
+        {
+            memo.Resolution = ImageRequestBuilders.ColorTarget(in words, targetMask, DrawLayerOffset, ignoreTargetMask: false);
+            memo.Words = words;
+            memo.TargetMask = targetMask;
+            memo.Valid = true;
+        }
+
+        return memo.Resolution;
+    }
+
+    private DepthTargetState? ResolveDepthTarget(ContextRegisters context)
+    {
+        ref readonly var words = ref context.DepthTarget;
+        ref var memo = ref _depthTargetMemo;
+        if (!memo.Valid || memo.Words != words)
+        {
+            memo.Resolution = ImageRequestBuilders.DepthTarget(in words, _host.FormatSupport);
+            memo.Words = words;
+            memo.Valid = true;
+        }
+
+        return memo.Resolution is { } target
+            ? new DepthTargetState(target, DepthTargetResolver.ResolveState(context, target.HasStencil, _host.Fatal))
+            : null;
+    }
+
     // Finds the color and depth targets; false when the draw has nothing to render into.
     private bool TryResolveDrawTargets(RegisterBanks banks, in DrawCall draw, ref DrawState state)
     {
@@ -37,7 +90,7 @@ public sealed partial class RenderExecutor
                 continue;
             }
 
-            if (ColorTargetResolver.Resolve(context, slot, DrawLayerOffset, ignoreTargetMask: false, out var resolvedSlot) is not { } resolution)
+            if (ResolveColorTarget(context, slot) is not { } resolution)
             {
                 continue;
             }
@@ -45,10 +98,10 @@ public sealed partial class RenderExecutor
             var request = resolution.Request;
             var image = _host.FindImage(ref request, exactFormat: false);
             _host.BindRenderTarget(image);
-            state.Colors[(int)state.ColorCount++] = new ColorTargetState(in resolution, resolvedSlot, image);
+            state.Colors[(int)state.ColorCount++] = new ColorTargetState(in resolution, slot, image);
         }
 
-        if (DepthTargetResolver.Resolve(context, _host.FormatSupport, _host.Fatal) is { } depthTarget)
+        if (ResolveDepthTarget(context) is { } depthTarget)
         {
             var request = depthTarget.Target.Request;
             var image = _host.FindImage(ref request, exactFormat: false);
