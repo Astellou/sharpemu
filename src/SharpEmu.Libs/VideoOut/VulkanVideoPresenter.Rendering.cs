@@ -982,10 +982,50 @@ internal static unsafe partial class VulkanVideoPresenter
             if (_globalBarrierAfterRendering)
             {
                 _globalBarrierAfterRendering = false;
+                _drawWritesAfterRendering = PipelineStageFlags.None;
                 RecordGlobalBarrier(command);
             }
 
+            if (_drawWritesAfterRendering != PipelineStageFlags.None)
+            {
+                var barrier = new MemoryBarrier2
+                {
+                    SType = StructureType.MemoryBarrier2,
+                    SrcAccessMask = VulkanSynchronization.Access(AccessFlags.ShaderWriteBit),
+                    DstAccessMask = VulkanSynchronization.Access(ShaderWriteReaders),
+                };
+                VulkanSynchronization.PipelineBarrier(_vk, command, _drawWritesAfterRendering, ShaderWriteReaderStages, 0, 1, &barrier, 0, null, 0, null);
+                _drawWritesAfterRendering = PipelineStageFlags.None;
+            }
+
             _renderingWritesMemory = false;
+        }
+
+        // Draws that store to memory keep the scope; their stores are ordered at its end.
+        private static readonly bool DeferDrawWriteBarriers =
+            Environment.GetEnvironmentVariable("SHARPEMU_DEFER_DRAW_WRITE_BARRIERS") != "0";
+
+        // The shader stages whose stores the scope's draws made, ordered when the scope ends.
+        private PipelineStageFlags _drawWritesAfterRendering;
+
+        void IRenderHost.DrawWriteBarrier(PipelineStageFlags sourceStages)
+        {
+            if (DeferDrawWriteBarriers && _renderingActive)
+            {
+                _drawWritesAfterRendering |= sourceStages;
+                return;
+            }
+
+            EndRendering();
+            ShaderWriteBarrier(sourceStages);
+        }
+
+        void IRenderHost.PrepareIndirectDraw()
+        {
+            if (_drawWritesAfterRendering != PipelineStageFlags.None)
+            {
+                EndRendering();
+            }
         }
 
         void IRenderHost.PrepareMemoryWritingDraw()
@@ -1193,15 +1233,18 @@ internal static unsafe partial class VulkanVideoPresenter
             VulkanSynchronization.PipelineBarrier(_vk,command, sourceStages, destinationStages, 0, 1, &barrier, 0, null, 0, null);
         }
 
+        // Every later access a shader store must be ordered before.
+        private const PipelineStageFlags ShaderWriteReaderStages =
+            PipelineStageFlags.ComputeShaderBit | PipelineStageFlags.VertexInputBit | PipelineStageFlags.VertexShaderBit |
+            PipelineStageFlags.FragmentShaderBit | PipelineStageFlags.TransferBit | PipelineStageFlags.ColorAttachmentOutputBit;
+
+        private const AccessFlags ShaderWriteReaders =
+            AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit | AccessFlags.VertexAttributeReadBit | AccessFlags.IndexReadBit |
+            AccessFlags.UniformReadBit | AccessFlags.TransferReadBit | AccessFlags.TransferWriteBit |
+            AccessFlags.ColorAttachmentReadBit | AccessFlags.ColorAttachmentWriteBit;
+
         public void ShaderWriteBarrier(PipelineStageFlags sourceStages) =>
-            RecordMemoryBarrier(
-                sourceStages,
-                PipelineStageFlags.ComputeShaderBit | PipelineStageFlags.VertexInputBit | PipelineStageFlags.VertexShaderBit |
-                PipelineStageFlags.FragmentShaderBit | PipelineStageFlags.TransferBit | PipelineStageFlags.ColorAttachmentOutputBit,
-                AccessFlags.ShaderWriteBit,
-                AccessFlags.ShaderReadBit | AccessFlags.ShaderWriteBit | AccessFlags.VertexAttributeReadBit | AccessFlags.IndexReadBit |
-                AccessFlags.UniformReadBit | AccessFlags.TransferReadBit | AccessFlags.TransferWriteBit |
-                AccessFlags.ColorAttachmentReadBit | AccessFlags.ColorAttachmentWriteBit);
+            RecordMemoryBarrier(sourceStages, ShaderWriteReaderStages, AccessFlags.ShaderWriteBit, ShaderWriteReaders);
 
         public void ShaderWriteHazardBarrier() =>
             RecordMemoryBarrier(

@@ -162,6 +162,19 @@ public interface IRenderHost
     // Orders the buffer writes of the given shader stages before every later access.
     void ShaderWriteBarrier(PipelineStageFlags sourceStages);
 
+    // Orders the buffer writes of the draw just recorded before every later access. A host may
+    // keep the rendering scope and order them when the scope ends: the draws of one scope are
+    // not ordered against each other's stores, as on the guest without a cache flush.
+    void DrawWriteBarrier(PipelineStageFlags sourceStages)
+    {
+        EndRendering();
+        ShaderWriteBarrier(sourceStages);
+    }
+
+    // The next draw reads its counts from guest memory; called before its BeginRendering, so the
+    // stores DrawWriteBarrier left to the end of the scope are ordered before that read.
+    void PrepareIndirectDraw() { }
+
     void ShaderWriteHazardBarrier();
 
     void ShaderAccessBarrier();

@@ -304,6 +304,11 @@ public sealed partial class RenderExecutor
             _host.PrepareMemoryWritingDraw();
         }
 
+        if (emission.IndirectArgumentsAddress != 0)
+        {
+            _host.PrepareIndirectDraw();
+        }
+
         _host.BeginRendering(in state.Rendering);
         _host.BindPipeline(PipelineBindPoint.Graphics, in pipeline);
         if (setAutoDebug)
@@ -339,8 +344,7 @@ public sealed partial class RenderExecutor
 
         if (writeStages != PipelineStageFlags.None)
         {
-            _host.EndRendering();
-            _host.ShaderWriteBarrier(writeStages);
+            _host.DrawWriteBarrier(writeStages);
         }
 
         if (setAutoDebug)
