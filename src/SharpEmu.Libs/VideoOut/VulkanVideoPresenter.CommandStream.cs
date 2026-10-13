@@ -541,6 +541,12 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             EndRendering();
+            if (BatchBarriers)
+            {
+                RequestGuestMemoryBarrier(GlobalMemoryBarrier);
+                return;
+            }
+
             RecordGlobalBarrier(BeginBatchedGuestCommands());
         }
 

@@ -358,6 +358,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 PipelineBindPoint.Graphics,
                 isHdr ? _hdrPqPipeline : _hdrPipeline);
             SharpEmu.Libs.Gpu.Vulkan.GraphicsDynamicStateEpoch.Advance();
+            SharpEmu.Libs.Gpu.Vulkan.NativeBindingEpoch.Advance();
             var descriptorSet = isHdr
                 ? _hdrPqDescriptorSets[imageIndex]
                 : _hdrDescriptorSets[imageIndex];

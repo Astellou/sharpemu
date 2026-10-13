@@ -686,12 +686,14 @@ internal sealed class ShaderProgramCache
                     SupportsPerVertexPixelInputs = _host.PerVertexPixelInputsSupported,
                     PixelInputAddress = options.PixelInputAddress,
                     PixelInputCntl = interpolators,
+                    MipStatisticsSubgroupReduction = _host.MipStatisticsSubgroupReduction,
                 };
             }
 
             default:
                 return BuildComputeRequest(entry.Plan, resources, layout, options.ComputeInfo!, options.ComputeSystemRegisters,
-                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative, imageInt64Atomics, nativeFloat16);
+                    sharedInt64Atomics, _host.ExecGuardElisionEnabled, signedZeroInfNanPreserve, _host.ComputeWave64SubgroupNative,
+                    _host.ComputeRunsOn32LaneSubgroups(options.ComputeInfo!), imageInt64Atomics, nativeFloat16);
         }
     }
 
@@ -708,11 +710,13 @@ internal sealed class ShaderProgramCache
 
     private static ShaderCompileRequest BuildComputeRequest(ShaderResourcePlan plan, SpecializedResourceInfo resources, BindingLayout layout,
         ComputeInputInfo info, Gen5ComputeSystemRegisters? systemRegisters, bool sharedInt64Atomics, bool execGuardElision,
-        bool signedZeroInfNanPreserve, bool hostWave64Supported = false, bool imageInt64Atomics = false, bool nativeFloat16 = false) =>
+        bool signedZeroInfNanPreserve, bool hostWave64Supported = false, bool hostComputeSubgroup32 = false, bool imageInt64Atomics = false,
+        bool nativeFloat16 = false) =>
         new(plan, resources, layout)
         {
             WaveSize = info.WaveSize,
             HostWave64Supported = info.WaveSize == 64 && hostWave64Supported,
+            HostComputeSubgroup32 = info.WaveSize == 64 && !hostWave64Supported && hostComputeSubgroup32,
             EnableExecGuardElision = info.WaveSize != 64 || execGuardElision,
             TraceDeviceAddressFaults = SharpEmu.HLE.GpuMemory.GuestGpuMemoryHook.TraceEnabled,
             ScratchDwords = info.ScratchDwords,
@@ -729,8 +733,8 @@ internal sealed class ShaderProgramCache
 
     internal static bool TryCompilePrewarm(ComputePrewarmRecord record, ShaderCodeCapture code, IGuestGpuBackend compiler,
         bool sharedInt64Atomics, bool execGuardElision, bool signedZeroInfNanPreserve, out IGuestCompiledShader? compiled,
-        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool predictSpecializations = false,
-        bool imageInt64Atomics = false, bool nativeFloat16 = false)
+        out BindingLayout? layout, out string error, bool hostWave64Supported = false, bool hostComputeSubgroup32 = false,
+        bool predictSpecializations = false, bool imageInt64Atomics = false, bool nativeFloat16 = false)
     {
         compiled = null;
         layout = null;
@@ -754,7 +758,8 @@ internal sealed class ShaderProgramCache
                 layout = AllocateLayout(program, plan, resources, record.UserDataBase, record.UserDataCount, record.PushDataCursor,
                     record.Info.DispatchThreadDimensions);
                 var request = BuildComputeRequest(plan, resources, layout, record.Info, record.SystemRegisters,
-                    sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported, imageInt64Atomics, nativeFloat16);
+                    sharedInt64Atomics, execGuardElision, signedZeroInfNanPreserve, hostWave64Supported, hostComputeSubgroup32,
+                    imageInt64Atomics, nativeFloat16);
                 if (!compiler.TryCompileProgram(request, out compiled, out error) || compiled is null)
                 {
                     return false;

@@ -1048,6 +1048,8 @@ internal static unsafe partial class VulkanVideoPresenter
                     continue;
                 }
 
+                _commandBuffer = BeginBatchedGuestCommands();
+
                 var initialized = texture.HostMoviePlane == 0 ? _hostMovieImageInitialized : _hostMovieChromaImageInitialized;
                 var toTransfer = new ImageMemoryBarrier2
                 {

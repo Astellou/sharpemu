@@ -8,34 +8,52 @@ using SharpEmu.Libs.Gpu.Scheduling;
 
 internal static unsafe partial class VulkanVideoPresenter
 {
+    internal enum ConcurrentQuery : byte
+    {
+        DirtyBytes,
+        CleanWord,
+        Resident,
+        ResidentClean,
+    }
+
+    internal sealed class ConcurrentAssumptions(long bufferVersion, long writebackEpoch)
+    {
+        public readonly long BufferVersion = bufferVersion;
+        public readonly long WritebackEpoch = writebackEpoch;
+        public readonly List<(ConcurrentQuery Query, ulong Address, ulong Size, bool Answer)> Answers = new();
+        public bool ReadsImageOwnership;
+
+        public void Record(ConcurrentQuery query, ulong address, ulong size, bool answer)
+        {
+            ReadsImageOwnership |= query is ConcurrentQuery.CleanWord or ConcurrentQuery.ResidentClean;
+            for (var index = Answers.Count - 1; index >= Math.Max(0, Answers.Count - 8); index--)
+            {
+                var previous = Answers[index];
+                if (previous.Query != query || previous.Answer != answer)
+                    continue;
+                if (previous.Address == address && previous.Size == size)
+                    return;
+                // No owned bytes in either range proves the union, but an owned byte does not.
+                if (!answer && size <= ulong.MaxValue - address && previous.Size <= ulong.MaxValue - previous.Address &&
+                    address <= previous.Address + previous.Size && previous.Address <= address + size)
+                {
+                    var start = Math.Min(address, previous.Address);
+                    var end = Math.Max(address + size, previous.Address + previous.Size);
+                    Answers[index] = (query, start, end - start, false);
+                    return;
+                }
+            }
+
+            Answers.Add((query, address, size, answer));
+        }
+    }
+
     private sealed partial class Presenter : IConcurrentResolveHost
     {
         // This partial serves the guest readers of program resolution on a thread resolving draws
         // ahead of the render thread. That thread never synchronizes GPU-owned memory: a word the
         // GPU owns abandons the resolution, which the render thread then does itself. Every
         // ownership answer it relied on is recorded and checked again when the result is taken.
-
-        private enum ConcurrentQuery : byte
-        {
-            DirtyBytes,
-            CleanWord,
-            Resident,
-            ResidentClean,
-        }
-
-        private sealed class ConcurrentAssumptions(long bufferVersion, long writebackEpoch)
-        {
-            public readonly long BufferVersion = bufferVersion;
-            public readonly long WritebackEpoch = writebackEpoch;
-            public readonly List<(ConcurrentQuery Query, ulong Address, ulong Size, bool Answer)> Answers = new();
-            public bool ReadsImageOwnership;
-
-            public void Record(ConcurrentQuery query, ulong address, ulong size, bool answer)
-            {
-                Answers.Add((query, address, size, answer));
-                ReadsImageOwnership |= query is ConcurrentQuery.CleanWord or ConcurrentQuery.ResidentClean;
-            }
-        }
 
         // Set only on the resolving thread, around one resolution.
         [ThreadStatic]

@@ -427,6 +427,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     PipelineBindPoint.Graphics,
                     _barycentricPipeline);
                 SharpEmu.Libs.Gpu.Vulkan.GraphicsDynamicStateEpoch.Advance();
+                SharpEmu.Libs.Gpu.Vulkan.NativeBindingEpoch.Advance();
                 _vk.CmdDraw(_commandBuffer, 3, 1, 0, 0);
                 _vk.CmdEndRenderPass(_commandBuffer);
                 waitStage = PipelineStageFlags.ColorAttachmentOutputBit;

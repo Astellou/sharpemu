@@ -97,6 +97,8 @@ public sealed class ImageResource
     // converts the format, where they stay compiled in with the conversion.
     public bool RuntimeSwizzle => ResourceClass == ImageResourceClass.Storage && ConversionFormat == DescriptorConstants.InvalidFormat;
 
+    public bool MipStatistics { get; set; }
+
     public ImageResource Clone()
     {
         var clone = (ImageResource)MemberwiseClone();

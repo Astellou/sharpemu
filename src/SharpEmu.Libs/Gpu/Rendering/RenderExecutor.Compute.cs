@@ -72,6 +72,7 @@ public sealed partial class RenderExecutor
         if (Diagnostics.DccWriterTrace.Enabled)
         {
             Diagnostics.DccWriterTrace.CurrentProgram = program.Hash;
+            Diagnostics.DccWriterTrace.CurrentKind = "compute";
         }
 
         if (RenderTrace.Enabled)

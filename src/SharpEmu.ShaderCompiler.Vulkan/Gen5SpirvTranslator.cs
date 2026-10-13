@@ -67,6 +67,10 @@ public static partial class Gen5SpirvTranslator
         private readonly Gen5SpirvStage _stage;
         private readonly IReadOnlyList<Gen5PixelOutputBinding> _pixelOutputBindings;
         private readonly bool _usesPixelValidMask;
+        private readonly bool _pixelExecExcludesHelpers;
+
+        private static readonly bool PixelLiveExec = !string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_PS_LIVE_EXEC"), "0", StringComparison.Ordinal);
         private readonly bool _enableGraphicsSubgroupOperations;
         private readonly uint _waveLaneCount;
         private readonly IWaveLowering _waveLowering;
@@ -228,7 +232,8 @@ public static partial class Gen5SpirvTranslator
             uint ConversionFormat = 0,
             uint ShaderSwizzle = 0,
             int EmulatedCompareFunction = -1,
-            uint RuntimeSwizzle = 0);
+            uint RuntimeSwizzle = 0,
+            int ResourceIndex = -1);
 
         private readonly record struct SpirvVertexInput(
             uint Variable,
@@ -546,12 +551,19 @@ public static partial class Gen5SpirvTranslator
                         physicalSizes[_physicalAxisOfLogical[logical]] = logicalSizes[logical];
                     }
 
-                    _module.AddExecutionMode(
-                        main,
-                        SpirvExecutionMode.LocalSize,
-                        physicalSizes[0],
-                        physicalSizes[1],
-                        physicalSizes[2]);
+                    if (_pairedLanes)
+                    {
+                        _module.AddExecutionMode(main, SpirvExecutionMode.LocalSize, PairedHostThreadCount(), 1, 1);
+                    }
+                    else
+                    {
+                        _module.AddExecutionMode(
+                            main,
+                            SpirvExecutionMode.LocalSize,
+                            physicalSizes[0],
+                            physicalSizes[1],
+                            physicalSizes[2]);
+                    }
                 }
 
                 var attributeCount = _stage == Gen5SpirvStage.Vertex
@@ -639,6 +651,7 @@ public static partial class Gen5SpirvTranslator
             _scc = Flag(false);
             _vcc = Flag(false);
             _exec = Flag(true);
+            DeclarePairedLaneFlags(_vcc, _exec, Flag);
             // Only the title-shader trace reads it; elsewhere it would be a write-only Private
             // global, and AMD's driver crashes linking stages that carry an unused one.
             if (TraceTitleShaderState)
@@ -716,6 +729,7 @@ public static partial class Gen5SpirvTranslator
                 _module.ConstantNull(arrayType));
             _interfaces.Add(_scratch);
             _module.AddName(_scratch, "scratch");
+            DeclarePairedScratch(arrayPointer, arrayType);
         }
 
         private uint ComputeLdsGuestDwordCount()
@@ -848,6 +862,8 @@ public static partial class Gen5SpirvTranslator
                         (uint)SpirvBuiltIn.LocalInvocationIndex);
                     _interfaces.Add(_localInvocationIndexInput);
                 }
+
+                DeclarePairedLaneInputs();
             }
 
             if (_stage == Gen5SpirvStage.Vertex)
@@ -1165,6 +1181,10 @@ public static partial class Gen5SpirvTranslator
                 Store(_pixelValidMaskActive, _module.ConstantBool(true));
             }
             _waveLowering.InitializeMasks();
+            if (_pixelExecExcludesHelpers)
+            {
+                _waveLowering.StoreWaveMask(126, _module.AddInstruction(SpirvOp.LogicalNot, _boolType, Load(_boolType, HelperInvocationInput())));
+            }
 
             // Primitive (NGG) vertex programs rebuild EXEC from the merged wave info in s3:
             // vertex count in bits 0-7, primitive count in bits 8-15. Left at zero, EXEC
@@ -1228,6 +1248,10 @@ public static partial class Gen5SpirvTranslator
                 {
                     Store(output.Variable, _module.ConstantNull(output.Type));
                 }
+            }
+            else if (_pairedLanes)
+            {
+                EmitPairedComputeInitialState();
             }
             else
             {
@@ -1435,8 +1459,12 @@ public static partial class Gen5SpirvTranslator
                 }
 
                 _execKnownFull = IsExecKnownFull(instruction.Pc);
-                var emitted = TryEmitInstruction(instruction, out error);
+                _unobservedWrites = ObservationPlan()?.UnobservedWrites(instruction.Pc) ?? default;
+                var emitted = _pairedLanes && IsPairedLaneInstruction(instruction)
+                    ? TryEmitPairedLaneInstruction(instruction, out error)
+                    : TryEmitInstruction(instruction, out error);
                 _execKnownFull = false;
+                _unobservedWrites = default;
                 if (!emitted)
                 {
                     error = $"pc=0x{instruction.Pc:X} {instruction.Opcode}: {error}";
@@ -2542,6 +2570,19 @@ public static partial class Gen5SpirvTranslator
                 sizeBytes);
             var pointer = LdsPointer(baseAddress, offset);
             var destination = instruction.Destinations[0].Value;
+            if (_pairedLanes)
+            {
+                EmitPairedWaveCounter(destination, inBounds, count => EmitAtomic(
+                    instruction.Opcode == "DsAppend" ? SpirvOp.AtomicIAdd : SpirvOp.AtomicISub,
+                    _uintType,
+                    pointer,
+                    scope: 2,
+                    semantics: 0x108,
+                    value: () => count,
+                    comparator: () => UInt(0)));
+                return true;
+            }
+
             var active = Load(_boolType, _exec);
 
             var activeMask = BooleanToWaveMask(active);
@@ -5751,6 +5792,13 @@ public static partial class Gen5SpirvTranslator
                         [.. operands]);
                     sampled = UnpackImageTexel(resource, sampled);
                 }
+
+                RecordMipStatistics(
+                    resource,
+                    imageObject,
+                    coordinates,
+                    hasZeroLod || hasLod ? lod : null,
+                    hasBias ? lodOrBias : Float(0));
             }
             else if (instruction.Opcode.StartsWith(
                          "ImageGather4",
@@ -7861,7 +7909,7 @@ public static partial class Gen5SpirvTranslator
         private List<(uint Register, uint Lane)> FindLaneSpillSlots()
         {
             var slots = new List<(uint Register, uint Lane)>();
-            if (_stage == Gen5SpirvStage.Compute && _waveLowering is EmulatedWave64Lowering)
+            if (_stage == Gen5SpirvStage.Compute && (_waveLowering is EmulatedWave64Lowering || _pairedLanes))
             {
                 return slots;
             }
@@ -7995,7 +8043,7 @@ public static partial class Gen5SpirvTranslator
                 throw new InvalidOperationException($"Vector register v{register} is outside the register file.");
             }
 
-            return RegisterVariable(_vectorRegisterVariables, register, "v");
+            return RegisterVariable(CurrentVectorRegisterVariables(), register, CurrentVectorRegisterPrefix());
         }
 
         // The V_MOVREL* opcodes address the VGPR file with a register number that
@@ -8106,7 +8154,10 @@ public static partial class Gen5SpirvTranslator
             return _packedHalfRegisters;
         }
 
-        private uint LoadS(uint register) => Load(_uintType, ScalarPointer(register));
+        private uint LoadS(uint register) =>
+            _scalarSnapshot is { } snapshot && snapshot.TryGetValue(register, out var value)
+                ? value
+                : Load(_uintType, ScalarPointer(register));
 
         private uint LoadV(uint register) => Load(_uintType, VectorPointer(register));
 
@@ -8117,14 +8168,14 @@ public static partial class Gen5SpirvTranslator
             {
                 if (_waveLaneCount != 32 || register == 106)
                 {
-                    Store(_vcc, IsLaneSetInMaskRegisters(106));
+                    UpdateLaneMaskFlag(106);
                 }
             }
             else if (register is 126 or 127)
             {
                 if (_waveLaneCount != 32 || register == 126)
                 {
-                    Store(_exec, IsLaneSetInMaskRegisters(126));
+                    UpdateLaneMaskFlag(126);
                 }
             }
         }
@@ -8133,15 +8184,21 @@ public static partial class Gen5SpirvTranslator
         // so the lane's bit is tested on one dword instead of a composed 64-bit mask.
         private uint IsLaneSetInMaskRegisters(uint lowRegister)
         {
+            var low = Load(_uintType, ScalarPointer(lowRegister));
             if (_waveLaneCount != 32)
             {
-                return IsWaveMaskActive(LoadS64(lowRegister));
+                var high = Load(_uintType, ScalarPointer(lowRegister + 1));
+                return IsWaveMaskActive(BitwiseOr64(
+                    _module.AddInstruction(SpirvOp.UConvert, _ulongType, low),
+                    ShiftLeftLogical64(
+                        _module.AddInstruction(SpirvOp.UConvert, _ulongType, high),
+                        _module.Constant64(_ulongType, 32))));
             }
 
             var laneBit = _subgroupInvocationIdInput == 0
                 ? UInt(1)
                 : ShiftLeftLogical(UInt(1), GuestWaveLane());
-            return IsNotZero(BitwiseAnd(LoadS(lowRegister), laneBit));
+            return IsNotZero(BitwiseAnd(low, laneBit));
         }
 
         // SHARPEMU_EXEC_GUARD_ELISION=0 guards every vector register write with EXEC again.
@@ -8156,7 +8213,7 @@ public static partial class Gen5SpirvTranslator
 
         private bool IsExecKnownFull(uint pc)
         {
-            if (!ExecGuardElision || !_request.EnableExecGuardElision)
+            if (!ExecGuardElision || !_request.EnableExecGuardElision || _pairedLanes || _pixelExecExcludesHelpers)
             {
                 return false;
             }
@@ -8165,9 +8222,29 @@ public static partial class Gen5SpirvTranslator
             return _execFullPcs.Contains(pc);
         }
 
+        private static readonly bool ExecSelectElimination = !string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_EXEC_SELECT_ELIMINATION"), "0", StringComparison.Ordinal);
+
+        private Ir.VectorRegisterSet _unobservedWrites;
+        private Ir.Gen5VectorObservationPlan? _observationPlan;
+        private bool _observationPlanBuilt;
+
+        private Ir.Gen5VectorObservationPlan? ObservationPlan()
+        {
+            if (!_observationPlanBuilt)
+            {
+                _observationPlanBuilt = true;
+                _observationPlan = ExecSelectElimination && !_pixelExecExcludesHelpers
+                    ? Ir.Gen5VectorObservationAnalysis.Analyze(_request.Program, wave32: _waveLaneCount == 32)
+                    : null;
+            }
+
+            return _observationPlan;
+        }
+
         private void StoreV(uint register, uint value, bool guardWithExec = true)
         {
-            if (guardWithExec && !_execKnownFull)
+            if (guardWithExec && !_execKnownFull && !_unobservedWrites.Contains(register))
             {
                 var active = Load(_boolType, _exec);
                 var oldValue = LoadV(register);
@@ -8363,6 +8440,11 @@ public static partial class Gen5SpirvTranslator
 
         private uint GuestWaveLane()
         {
+            if (_pairedLanes)
+            {
+                return PairedGuestLane();
+            }
+
             // A native wave64 is one host subgroup: its lane is the subgroup lane, the same one
             // ballot and shuffle address, whatever order the driver gave the invocations.
             if (_waveLaneCount == 64 && _guestLaneFromSubgroup && _subgroupInvocationIdInput != 0)
@@ -8419,7 +8501,14 @@ public static partial class Gen5SpirvTranslator
         private uint ShuffleLane(uint value, uint lane) =>
             _subgroupInvocationIdInput == 0
                 ? value
-                : _module.AddInstruction(SpirvOp.GroupNonUniformShuffle, _uintType, UInt(3), value, lane);
+                : _module.AddInstruction(
+                    SpirvOp.GroupNonUniformShuffle,
+                    _uintType,
+                    UInt(3),
+                    value,
+                    _pairedLanes || _waveLowering is HalfWave64Lowering
+                        ? BitwiseAnd(lane, UInt(PairedHalfLaneCount - 1))
+                        : lane);
 
         private uint CurrentLaneBit() =>
             _waveLowering.CurrentLaneBit();
@@ -8542,6 +8631,7 @@ public static partial class Gen5SpirvTranslator
                 instruction.Destinations.Any(IsWaveMaskOperand));
 
         private bool UsesSubgroupOperations() =>
+            _pairedLanes ||
             _enableGraphicsSubgroupOperations &&
             (UsesSubgroupShuffle() ||
              UsesSubgroupBroadcast() ||

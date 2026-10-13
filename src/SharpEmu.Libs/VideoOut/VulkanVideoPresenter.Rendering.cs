@@ -381,6 +381,11 @@ internal static unsafe partial class VulkanVideoPresenter
         {
             if (bindings.IsEmpty) return;
             var command = BeginBatchedGuestCommands();
+            if (VertexBuffersAlreadyBound(command, bindings))
+            {
+                return;
+            }
+
             var buffers = stackalloc VkBuffer[bindings.Length];
             var offsets = stackalloc ulong[bindings.Length];
             for (var index = 0; index < bindings.Length; index++)
@@ -392,8 +397,14 @@ internal static unsafe partial class VulkanVideoPresenter
             _vk.CmdBindVertexBuffers(command, 0, (uint)bindings.Length, buffers, offsets);
         }
 
-        public void BindIndexBuffer(BufferBinding binding, IndexType type) =>
-            _vk.CmdBindIndexBuffer(BeginBatchedGuestCommands(), new VkBuffer(binding.Handle), binding.Offset, type);
+        public void BindIndexBuffer(BufferBinding binding, IndexType type)
+        {
+            var command = BeginBatchedGuestCommands();
+            if (!IndexBufferAlreadyBound(command, new VkBuffer(binding.Handle), binding.Offset, type))
+            {
+                _vk.CmdBindIndexBuffer(command, new VkBuffer(binding.Handle), binding.Offset, type);
+            }
+        }
 
         public IResourcePreparation BeginPreparation()
         {
@@ -407,6 +418,11 @@ internal static unsafe partial class VulkanVideoPresenter
 
             if (_batchDrawCount >= (_renderingActive ? DrawsPerBatchInRenderPass : DrawsPerBatch))
             {
+                if (GpuSyncProfile.Enabled)
+                {
+                    GpuSyncProfile.CountBatchFlush();
+                }
+
                 EndRendering();
                 FlushBatchedGuestCommands();
             }
@@ -851,12 +867,17 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             EndRendering();
-            var command = BeginBatchedGuestCommands();
-            _commandBuffer = command;
-            if (DeferGlobalBarriers)
+            if (DeferGlobalBarriers && BatchBarriers)
             {
                 // A guest cache flush inside this scope may be deferred to its end; this keeps
                 // everything recorded before the scope ordered before its draws either way.
+                RequestGuestMemoryBarrier(GlobalMemoryBarrier);
+            }
+
+            var command = BeginBatchedGuestCommands();
+            _commandBuffer = command;
+            if (DeferGlobalBarriers && !BatchBarriers)
+            {
                 RecordGlobalBarrier(command);
             }
 
@@ -927,6 +948,11 @@ internal static unsafe partial class VulkanVideoPresenter
             };
             _vk.CmdBeginRendering(command, &rendering);
             _renderingScopesBegun++;
+            if (GpuSyncProfile.Enabled)
+            {
+                GpuSyncProfile.CountRenderingScope();
+            }
+
             _renderingActive = true;
             _renderingState = state;
         }
@@ -976,19 +1002,19 @@ internal static unsafe partial class VulkanVideoPresenter
         public void BindPipeline(PipelineBindPoint bindPoint, in PipelineHandle pipeline)
         {
             var entry = RequirePipelineEntry(in pipeline);
-            var command = BeginBatchedGuestCommands();
+            var command = BeginBatchedGuestStateCommands();
             if (bindPoint == PipelineBindPoint.Graphics)
             {
                 _boundGraphicsPipeline = entry;
                 if (!entry.RectangleList)
                 {
-                    _vk.CmdBindPipeline(command, bindPoint, entry.Pipeline);
+                    BindPipelineShadowed(command, bindPoint, entry.Pipeline);
                 }
 
                 return;
             }
 
-            _vk.CmdBindPipeline(command, bindPoint, entry.Pipeline);
+            BindPipelineShadowed(command, bindPoint, entry.Pipeline);
             _profileComputePipeline = entry.Id;
         }
 
@@ -1012,7 +1038,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 variant = CreateRenderPipeline(entry.Description!, strip ? PrimitiveTopology.TriangleStrip : PrimitiveTopology.TriangleList, entry.Layout);
             }
 
-            _vk.CmdBindPipeline(command, PipelineBindPoint.Graphics, variant);
+            BindPipelineShadowed(command, PipelineBindPoint.Graphics, variant);
         }
 
         private void BindNativeRectangleList(RenderPipelineEntry entry, CommandBuffer command)
@@ -1023,7 +1049,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     entry.Layout, PolygonMode.FillRectangleNV);
             }
 
-            _vk.CmdBindPipeline(command, PipelineBindPoint.Graphics, entry.RectangleVariant);
+            BindPipelineShadowed(command, PipelineBindPoint.Graphics, entry.RectangleVariant);
         }
 
         // Rectangle2D consumes three vertices and fills their projected bounding box.
@@ -1139,9 +1165,24 @@ internal static unsafe partial class VulkanVideoPresenter
             return true;
         }
 
+        private static readonly bool BatchBarriers =
+            Environment.GetEnvironmentVariable("SHARPEMU_BATCH_BARRIERS") != "0";
+
+        private static readonly MemoryBarrierRequest GlobalMemoryBarrier = new(
+            PipelineStageFlags.AllCommandsBit,
+            PipelineStageFlags.AllCommandsBit,
+            AccessFlags.MemoryWriteBit,
+            AccessFlags.MemoryReadBit | AccessFlags.MemoryWriteBit);
+
         private void RecordMemoryBarrier(PipelineStageFlags sourceStages, PipelineStageFlags destinationStages, AccessFlags sourceAccess, AccessFlags destinationAccess)
         {
             EndRendering();
+            if (BatchBarriers)
+            {
+                RequestGuestMemoryBarrier(new MemoryBarrierRequest(sourceStages, destinationStages, sourceAccess, destinationAccess));
+                return;
+            }
+
             var command = BeginBatchedGuestCommands();
             var barrier = new MemoryBarrier2
             {
@@ -1258,13 +1299,23 @@ internal static unsafe partial class VulkanVideoPresenter
 
         public bool TryFillDccMetadata(ulong address, ulong size, uint fillValue)
         {
-            if (!_imageCache.OverlapsDccMetadata(address, size))
+            if (!_imageCache.OverlapsDccMetadata(address, size) && !IsMetadataShapedFill(address, size, fillValue))
             {
                 return false;
             }
 
             _bufferCache.FillDccMetadata(address, size, fillValue);
             return true;
+        }
+
+        private bool IsMetadataShapedFill(ulong address, ulong size, uint fillValue)
+        {
+            const ulong metadataBlockSize = 0x1000;
+            const ulong maxMetadataFill = 0x100000;
+            return address != 0 && size != 0 && size <= maxMetadataFill &&
+                   address % metadataBlockSize == 0 && size % metadataBlockSize == 0 &&
+                   fillValue == (fillValue & 0xFF) * 0x01010101u &&
+                   !_imageCache.QueryRegion(address, size).ImageBytes;
         }
 
         public bool TryCopyWordsOnHost(ulong destination, ulong source, ulong sourceWords, ulong words) =>

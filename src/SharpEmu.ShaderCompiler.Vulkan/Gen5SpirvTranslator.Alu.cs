@@ -51,8 +51,9 @@ public static partial class Gen5SpirvTranslator
                     return false;
                 }
 
-                var value = GetRawSource(instruction, 0);
-                value = BroadcastFirstWaveActive(value);
+                var value = _pairedLanes
+                    ? PairedReadFirstLane(instruction)
+                    : BroadcastFirstWaveActive(GetRawSource(instruction, 0));
 
                 StoreS(instruction.Destinations[0].Value, value);
                 return true;
@@ -2963,7 +2964,7 @@ public static partial class Gen5SpirvTranslator
 
             if (instruction.Opcode.EndsWith("SaveexecB32", StringComparison.Ordinal))
             {
-                var oldExec64 = BooleanToWaveMask(Load(_boolType, _exec));
+                var oldExec64 = CurrentExecMask();
                 var oldExec = _module.AddInstruction(
                     SpirvOp.UConvert,
                     _uintType,
@@ -4570,6 +4571,12 @@ public static partial class Gen5SpirvTranslator
 
         private void StoreS64(uint register, uint value)
         {
+            if (_pairedLanes && _inLanePass)
+            {
+                StorePairedLaneMaskWord(register, value);
+                return;
+            }
+
             StoreS(
                 register,
                 _module.AddInstruction(SpirvOp.UConvert, _uintType, value));
@@ -5172,8 +5179,14 @@ public static partial class Gen5SpirvTranslator
             }
 
             var destination = instruction.Destinations[0].Value;
-            var sourceValue = GetRawSource(instruction, 0);
             var selectedLane = BitwiseAnd(GetRawSource(instruction, 1), UInt(LaneSelectMask));
+            if (_pairedLanes)
+            {
+                StoreS(destination, PairedReadLane(instruction, selectedLane));
+                return true;
+            }
+
+            var sourceValue = GetRawSource(instruction, 0);
 
             if (_stage == Gen5SpirvStage.Compute && _waveLowering is EmulatedWave64Lowering)
             {

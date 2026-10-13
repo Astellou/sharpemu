@@ -74,6 +74,8 @@ public static partial class Gen5SpirvTranslator
         private readonly Dictionary<int, uint> _indirectKeyScratch = [];
         private uint _pushData;
         private uint _shaderData;
+        private uint _mipStatistics;
+        private uint _helperInvocationInput;
         private uint _flattenedTable;
         private uint _pageTable;
         private uint _faultBuffer;
@@ -116,6 +118,9 @@ public static partial class Gen5SpirvTranslator
             _usesPixelValidMask =
                 _stage == Gen5SpirvStage.Pixel &&
                 request.Program.Instructions.Any(static instruction => instruction.Control is Gen5ExportControl { ValidMask: true });
+            _pixelExecExcludesHelpers =
+                _stage == Gen5SpirvStage.Pixel && PixelLiveExec &&
+                request.Program.Instructions.Any(static instruction => instruction.Opcode is "DsAppend" or "DsConsume");
             _enableGraphicsSubgroupOperations = _stage == Gen5SpirvStage.Compute || request.EnableGraphicsSubgroupOperations;
             _waveLaneCount = request.WaveSize == 64 ? 64u : 32u;
             _localSizeX = Math.Max(request.LocalSizeX, 1);
@@ -133,6 +138,17 @@ public static partial class Gen5SpirvTranslator
             {
                 _waveLowering = new NativeWave64Lowering(this);
                 _guestLaneFromSubgroup = true;
+            }
+            else if (_stage == Gen5SpirvStage.Compute &&
+                     request.HostComputeSubgroup32 &&
+                     CanRunHalfWaves(request, _physicalAxisOfLogical))
+            {
+                _waveLowering = new HalfWave64Lowering(this);
+            }
+            else if (_stage == Gen5SpirvStage.Compute && request.HostComputeSubgroup32 && PairedWave64Enabled)
+            {
+                _pairedLanes = true;
+                _waveLowering = new PairedWave64Lowering(this);
             }
             else
             {
@@ -195,6 +211,9 @@ public static partial class Gen5SpirvTranslator
                         break;
                     case DescriptorBindingKind.ShaderData:
                         _shaderData = DeclareWordBlock("shaderData", number);
+                        break;
+                    case DescriptorBindingKind.MipStatistics:
+                        _mipStatistics = DeclareWordBlock("mipStatistics", number);
                         break;
                     default:
                         DeclareImageClass(binding, number);
@@ -1622,7 +1641,8 @@ public static partial class Gen5SpirvTranslator
                 imageInfo.ConversionFormat,
                 imageInfo.ShaderSwizzle,
                 imageInfo.EmulatedCompareFunction,
-                imageInfo.RuntimeSwizzle ? LoadImageSwizzle(resourceIndex) : 0);
+                imageInfo.RuntimeSwizzle ? LoadImageSwizzle(resourceIndex) : 0,
+                resourceIndex);
             dstSelect = imageInfo.ShaderSwizzle;
             return true;
         }
@@ -1633,6 +1653,121 @@ public static partial class Gen5SpirvTranslator
         {
             var packed = LoadShaderDataDword(UInt(_request.Bindings.ImageSwizzleDword + (uint)image / 2));
             return BitwiseAnd(ShiftRightLogical(packed, UInt((uint)image % 2 * 16)), UInt(0xFFF));
+        }
+
+        private const uint MipStatisticsEntries = 257;
+        private const uint MipStatisticsNoCounter = 0x8000;
+
+        private void RecordMipStatistics(SpirvImageResource resource, uint imageObject, uint coordinates, uint? explicitLod, uint bias)
+        {
+            if (_mipStatistics == 0 || _stage != Gen5SpirvStage.Pixel || resource.ResourceIndex < 0 ||
+                resource.IsStorage || resource.Multisampled || resource.Cube)
+            {
+                return;
+            }
+
+            var field = LoadShaderDataDword(UInt(_request.Bindings.MipStatisticsDword + (uint)resource.ResourceIndex));
+            uint lod;
+            if (explicitLod is { } value)
+            {
+                lod = value;
+            }
+            else
+            {
+                var queried = _module.AddInstruction(
+                    SpirvOp.ImageQueryLod,
+                    _vec2Type,
+                    imageObject,
+                    SpatialCoordinates(resource, coordinates));
+                lod = _module.AddInstruction(
+                    SpirvOp.FAdd,
+                    _floatType,
+                    _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, queried, 1u),
+                    bias);
+            }
+
+            var counter = BitwiseAnd(field, UInt(0xFF));
+            var baseLevel = _module.AddInstruction(SpirvOp.ConvertUToF, _floatType, BitwiseAnd(ShiftRightLogical(field, UInt(8)), UInt(0xF)));
+            var threshold = _module.AddInstruction(
+                SpirvOp.FMul,
+                _floatType,
+                _module.AddInstruction(SpirvOp.ConvertUToF, _floatType, BitwiseAnd(ShiftRightLogical(field, UInt(16)), UInt(0xFFF))),
+                Float(1f / 256f));
+            var absolute = Ext(43, _floatType, _module.AddInstruction(SpirvOp.FAdd, _floatType, lod, baseLevel), Float(0f), Float(14f));
+            var level = _module.AddInstruction(SpirvOp.ConvertFToU, _uintType, absolute);
+            var clamped = _module.AddInstruction(SpirvOp.FOrdLessThan, _boolType, absolute, threshold);
+            var record = LogicalAnd(
+                Load(_boolType, _exec),
+                _module.AddInstruction(SpirvOp.IEqual, _boolType, BitwiseAnd(field, UInt(MipStatisticsNoCounter)), UInt(0)));
+            record = LogicalAnd(record, _module.AddInstruction(SpirvOp.LogicalNot, _boolType, Load(_boolType, HelperInvocationInput())));
+            var finestPointer = MipStatisticsPointer(counter);
+            var countPointer = MipStatisticsPointer(IAdd(counter, UInt(MipStatisticsEntries)));
+            EmitConditional(record, () =>
+            {
+                if (!_request.MipStatisticsSubgroupReduction)
+                {
+                    _module.AddInstruction(SpirvOp.AtomicUMin, _uintType, finestPointer, UInt(1), UInt(0), level);
+                    EmitConditional(clamped, () =>
+                        _module.AddInstruction(SpirvOp.AtomicIAdd, _uintType, countPointer, UInt(1), UInt(0), UInt(1)));
+                    return;
+                }
+
+                _module.AddCapability(SpirvCapability.GroupNonUniform);
+                _module.AddCapability(SpirvCapability.GroupNonUniformBallot);
+                _module.AddCapability(SpirvCapability.GroupNonUniformArithmetic);
+                var finest = _module.AddInstruction(SpirvOp.GroupNonUniformUMin, _uintType, UInt(3), 0u, level);
+                var ballot = _module.AddInstruction(SpirvOp.GroupNonUniformBallot, _uvec4Type, UInt(3), clamped);
+                var count = _module.AddInstruction(SpirvOp.GroupNonUniformBallotBitCount, _uintType, UInt(3), 0u, ballot);
+                var leader = _module.AddInstruction(SpirvOp.GroupNonUniformElect, _boolType, UInt(3));
+                EmitConditional(leader, () =>
+                {
+                    _module.AddInstruction(SpirvOp.AtomicUMin, _uintType, finestPointer, UInt(1), UInt(0), finest);
+                    EmitConditional(IsNotZero(count), () =>
+                        _module.AddInstruction(SpirvOp.AtomicIAdd, _uintType, countPointer, UInt(1), UInt(0), count));
+                });
+            });
+        }
+
+        private uint MipStatisticsPointer(uint index) =>
+            BlockWordPointer(_mipStatistics, index);
+
+        private uint HelperInvocationInput()
+        {
+            if (_helperInvocationInput == 0)
+            {
+                _helperInvocationInput = _module.AddGlobalVariable(
+                    _module.TypePointer(SpirvStorageClass.Input, _boolType),
+                    SpirvStorageClass.Input);
+                _module.AddDecoration(_helperInvocationInput, SpirvDecoration.BuiltIn, (uint)SpirvBuiltIn.HelperInvocation);
+                _module.AddName(_helperInvocationInput, "helperInvocation");
+                _interfaces.Add(_helperInvocationInput);
+            }
+
+            return _helperInvocationInput;
+        }
+
+        private uint SpatialCoordinates(SpirvImageResource resource, uint coordinates)
+        {
+            var spatial = ImageSpatialComponentCountOf(resource.Dimension);
+            if (!resource.Arrayed)
+            {
+                return coordinates;
+            }
+
+            if (spatial == 1)
+            {
+                return _module.AddInstruction(SpirvOp.CompositeExtract, _floatType, coordinates, 0u);
+            }
+
+            var components = new uint[spatial + 2];
+            components[0] = coordinates;
+            components[1] = coordinates;
+            for (var index = 0u; index < spatial; index++)
+            {
+                components[index + 2] = index;
+            }
+
+            return _module.AddInstruction(SpirvOp.VectorShuffle, _module.TypeVector(_floatType, spatial), components);
         }
 
         private static uint ImageSpatialComponentCountOf(SpirvImageDim dimension) => dimension switch
@@ -1921,7 +2056,25 @@ public static partial class Gen5SpirvTranslator
             var index = GlobalDataShareIndex(baseAddress, offset);
             var inBounds = LogicalAnd(IsNotZero(sizeBytes), IsBlockWordInRange(_globalDataShare, index));
             var destination = instruction.Destinations[0].Value;
+            if (_pairedLanes)
+            {
+                EmitPairedWaveCounter(destination, inBounds, count => EmitAtomic(
+                    instruction.Opcode == "DsAppend" ? SpirvOp.AtomicIAdd : SpirvOp.AtomicISub,
+                    _uintType,
+                    BlockWordPointer(_globalDataShare, index),
+                    scope: 1,
+                    semantics: 0x48,
+                    value: () => count,
+                    comparator: () => UInt(0)));
+                return true;
+            }
+
             var active = Load(_boolType, _exec);
+            if (_stage == Gen5SpirvStage.Pixel)
+            {
+                active = LogicalAnd(active, _module.AddInstruction(SpirvOp.LogicalNot, _boolType, Load(_boolType, HelperInvocationInput())));
+            }
+
             var activeMask = BooleanToWaveMask(active);
             var activeLow = Narrow(activeMask);
             var activeHigh = Narrow(ShiftRightLogical64(activeMask, ULong(32)));

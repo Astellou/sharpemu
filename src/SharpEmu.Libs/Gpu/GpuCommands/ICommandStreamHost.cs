@@ -81,6 +81,8 @@ public interface ICommandStreamHost
 {
     ICpuMemory Memory { get; }
 
+    bool TryRecordLodStatistics(ulong destination, uint size) => false;
+
     // Reads guest memory the GPU may have written; the host synchronizes GPU-owned pages first.
     bool TryReadGuest(ulong address, Span<byte> destination);
 

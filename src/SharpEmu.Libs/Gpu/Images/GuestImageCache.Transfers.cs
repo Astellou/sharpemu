@@ -834,7 +834,7 @@ public sealed unsafe partial class GuestImageCache
         byte stencilClear = 0;
         if (aspect == ImageAspectFlags.ColorBit)
         {
-            if (!PackedClearValue.TryDecodeColor(image.Description.PixelFormat, packedClear, out colorClear))
+            if (!PackedClearValue.TryDecodeBufferColor(image.Description.PixelFormat, packedClear, out colorClear))
             {
                 return false;
             }

@@ -622,6 +622,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 floatControls.RoundingModeIndependence != ShaderFloatControlsIndependence.IndependenceNone,
                 floatControls.DenormBehaviorIndependence != ShaderFloatControlsIndependence.IndependenceNone);
             SetNativeSubgroupCapabilities(subgroup.SubgroupSize, subgroup.SupportedStages);
+            SetMipStatisticsCapabilities(true, subgroup.SupportedOperations, subgroup.SupportedStages);
             _canRequireComputeSubgroup32 =
                 subgroup.SubgroupSize != RdnaSubgroupSize &&
                 subgroupSizeControl.MinSubgroupSize <= RdnaSubgroupSize &&
@@ -769,6 +770,11 @@ internal static unsafe partial class VulkanVideoPresenter
                 queueInfoCount = 2;
             }
             _vk.GetPhysicalDeviceFeatures(_physicalDevice, out var supportedFeatures);
+            if (!supportedFeatures.FragmentStoresAndAtomics)
+            {
+                ShaderCompiler.Resources.ResourceMaterializer.RecordMipStatistics = false;
+            }
+
             _supportsIndependentBlend = supportedFeatures.IndependentBlend;
             _supportsDepthBiasClamp = supportedFeatures.DepthBiasClamp;
             _supportsDepthBounds = supportedFeatures.DepthBounds;

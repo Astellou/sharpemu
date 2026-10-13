@@ -111,6 +111,8 @@ internal static unsafe partial class VulkanVideoPresenter
             Atomic: image.Atomic,
             Atomic64: image.Atomic64);
 
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _tracedTextureBindings = new();
         // The last lookup of one image of one program. A draw binds the same descriptor as the
         // previous draw of its program most of the time; while no image the lookup could find has
         // changed (the cache's lookup generation), the request and the image found are the same.
@@ -120,6 +122,8 @@ internal static unsafe partial class VulkanVideoPresenter
             public ulong Generation;
             public TextureRequestResolution Resolution;
             public ResourceSlotIdentifier Found;
+            public uint MetadataBaseLayer;
+            public bool CompletesLookup;
 
             public readonly bool Matches(uint[] words, ulong generation) =>
                 Words is not null && Generation == generation && words.AsSpan().SequenceEqual(Words);
@@ -149,8 +153,6 @@ internal static unsafe partial class VulkanVideoPresenter
             return ref _lastMemos[index];
         }
 
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _tracedTextureBindings = new();
-
         // Render-state discovery for one shader image; the view is acquired later with the draw.
         private TextureResource ResolveImageBinding(ImageResource image, uint[] words, ShaderProgramInfo program, int index)
         {
@@ -168,22 +170,28 @@ internal static unsafe partial class VulkanVideoPresenter
             {
                 resolution = memo.Resolution;
                 imageIdentifier = memo.Found;
+                if (memo.CompletesLookup)
+                {
+                    _imageCache.CompleteLookup(imageIdentifier, resolution.Request, memo.MetadataBaseLayer);
+                }
             }
             else
             {
                 resolution = ImageRequestBuilders.Texture(words, ShapeOf(image));
                 var request = resolution.Request;
+                var metadataBaseLayer = request.View.BaseLayer;
                 imageIdentifier = _imageCache.FindImage(ref request, resolution.ExactFormat);
                 resolution = resolution with { Request = request };
-                // An empty range or DCC metadata needs the full lookup on every draw.
-                memo = !ImageDescription.IsEmptyRange(request.Description.Data) &&
-                    _imageCache.GetImage(imageIdentifier).Description.DccSliceSize == 0
+                memo = !ImageDescription.IsEmptyRange(request.Description.Data)
                     ? new ImageBindingMemo
                     {
                         Words = (uint[])words.Clone(),
                         Generation = _imageCache.LookupGeneration,
                         Resolution = resolution,
                         Found = imageIdentifier,
+                        MetadataBaseLayer = metadataBaseLayer,
+                        CompletesLookup = request.Description.Metadata.Kind == MetadataKind.Dcc ||
+                            _imageCache.GetImage(imageIdentifier).Description.DccSliceSize != 0,
                     }
                     : default;
             }
@@ -666,6 +674,12 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             prepared.Descriptors.Buffers = views;
+            if (layout.MipStatisticsCount != 0)
+            {
+                LodStatistics().EnsureInitialized();
+                WriteMipStatisticsFields(shaderData, layout, info, snapshot.Images);
+            }
+
             if (layout.Find(DescriptorBindingKind.FlattenedResourceTable) is not null)
             {
                 prepared.Descriptors.FlattenedTable = UploadDwords(snapshot.FlattenedResourceTable, "flattened resource table", program);
@@ -845,7 +859,7 @@ internal static unsafe partial class VulkanVideoPresenter
             using var profileScope = RenderPhaseProfile.MeasureDetail(RenderPhaseProfile.Phase.DescriptorCommit);
             var preparation = RequirePreparation();
             var entry = RequirePipelineEntry(in pipeline);
-            var command = BeginBatchedGuestCommands();
+            var command = BeginBatchedGuestStateCommands();
             _commandBuffer = command;
             var writeCount = 0;
             var bufferCount = 0;
@@ -999,6 +1013,9 @@ internal static unsafe partial class VulkanVideoPresenter
                                     }
 
                                     break;
+                                case DescriptorBindingKind.MipStatistics:
+                                    bufferInfos[bufferIndex++] = MipStatisticsDescriptor();
+                                    break;
                                 case DescriptorBindingKind.DeviceAddressPageTable:
                                 case DescriptorBindingKind.FaultBuffer:
                                 {
@@ -1086,10 +1103,10 @@ internal static unsafe partial class VulkanVideoPresenter
                 if (hasPushData)
                 {
                     var pushStages = bindPoint == PipelineBindPoint.Graphics ? ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit : ShaderStageFlags.ComputeBit;
-                    _vk.CmdPushConstants(command, entry.Layout, pushStages, 0, PushData.ByteSize, pushData);
+                    PushConstantsShadowed(command, entry.Layout, pushStages, pushData);
                 }
 
-                if (writeIndex != 0)
+                if (writeIndex != 0 && !DescriptorsAlreadyBound(command, bindPoint, entry.Layout, writes[..writeIndex]))
                 {
                     fixed (WriteDescriptorSet* writePointer = writes)
                     {
