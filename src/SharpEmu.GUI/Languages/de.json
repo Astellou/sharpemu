@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "Titel-ID",
   "Common.Back": "Zurück",
 
+  "Library.Music.Volume": "Lautstärke der Spielmusik",
+  "Library.Music.Mute": "Spielmusik stummschalten",
+  "Library.Music.Unmute": "Stummschaltung der Spielmusik aufheben",
+
   "Options.General": "Allgemein",
   "Options.Logging": "Protokollierung",
   "Options.Section.Emulation": "EMULATION",

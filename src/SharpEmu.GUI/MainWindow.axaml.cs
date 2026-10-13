@@ -143,6 +143,7 @@ public partial class MainWindow : Window
     private readonly ConcurrentQueue<(string Line, bool IsError)> _pendingLines = new();
     private readonly DispatcherTimer _consoleFlushTimer;
     private readonly DispatcherTimer _libraryLayoutTimer;
+    private readonly DispatcherTimer _titleMusicVolumeTimer;
 
     private GuiSettings _settings = new();
     private IReadOnlyList<HostDisplayOption> _hostDisplays = [];
@@ -260,6 +261,15 @@ public partial class MainWindow : Window
             _libraryLayoutTimer.Stop();
             UpdateLibraryLayoutMetrics();
         };
+        _titleMusicVolumeTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(180),
+        };
+        _titleMusicVolumeTimer.Tick += (_, _) =>
+        {
+            _titleMusicVolumeTimer.Stop();
+            _settings.Save();
+        };
         CarouselAddFolderButton.Click += (_, _) => StartAddFolderFromTile();
         GameList.AddHandler(PointerPressedEvent, OnCarouselPointerPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
         GameList.AddHandler(PointerMovedEvent, OnCarouselPointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -323,6 +333,15 @@ public partial class MainWindow : Window
         LibraryTabButton.Click += (_, _) => SetActivePage(0);
         OptionsTabButton.Click += (_, _) => SetActivePage(1);
         LibraryLayoutButton.Click += (_, _) => ToggleLibraryLayout();
+        TitleMusicMuteButton.Click += (_, _) => TitleMusicToggle.IsChecked = !_settings.PlayTitleMusic;
+        TitleMusicVolumeSlider.ValueChanged += (_, _) =>
+        {
+            _settings.TitleMusicVolume = TitleMusicVolumeSlider.Value / 100.0;
+            _sndPreview.Volume = _settings.TitleMusicVolume;
+            UpdateTitleMusicMuteButton();
+            _titleMusicVolumeTimer.Stop();
+            _titleMusicVolumeTimer.Start();
+        };
         LibraryPage.SizeChanged += (_, _) => ScheduleLibraryLayoutMetricsUpdate();
         LibrarySelectedDetails.SizeChanged += (_, _) => UpdateLibraryMinimumHeight();
         MainContent.SizeChanged += (_, _) => ClampEmbeddedConsoleHeight();
@@ -342,6 +361,7 @@ public partial class MainWindow : Window
         {
             _settings.PlayTitleMusic = TitleMusicToggle.IsChecked == true;
             OnTitleMusicSettingChanged();
+            _settings.Save();
         };
         DiscordToggle.IsCheckedChanged += (_, _) =>
         {
@@ -1133,6 +1153,8 @@ public partial class MainWindow : Window
         RefreshUpdateText();
         UpdateEmptyStateTexts();
         UpdateLibraryLayoutButton();
+        UpdateTitleMusicMuteButton();
+        AutomationProperties.SetName(TitleMusicVolumeSlider, Localization.Instance.Get("Library.Music.Volume"));
         UpdateRunButtons();
     }
 
@@ -1259,6 +1281,7 @@ public partial class MainWindow : Window
         Interlocked.Increment(ref _detailLoadGeneration);
         _consoleFlushTimer.Stop();
         _libraryLayoutTimer.Stop();
+        _titleMusicVolumeTimer.Stop();
         _gamepadTimer.Stop();
     }
 
@@ -1426,6 +1449,10 @@ public partial class MainWindow : Window
         CrashDumpToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_CRASH_CAPTURE");
         OverrideLogFileToggle.IsChecked = _settings.OverrideLogFile;
         TitleMusicToggle.IsChecked = _settings.PlayTitleMusic;
+        TitleMusicVolumeSlider.Value = _settings.TitleMusicVolume * 100.0;
+        _titleMusicVolumeTimer.Stop();
+        _sndPreview.Volume = _settings.TitleMusicVolume;
+        UpdateTitleMusicMuteButton();
         SetLibraryLayout(string.Equals(_settings.LibraryLayout, "Grid", StringComparison.OrdinalIgnoreCase));
         DiscordToggle.IsChecked = _settings.DiscordRichPresence;
         AutoUpdateToggle.IsChecked = _settings.CheckForUpdatesOnStartup;
@@ -2788,6 +2815,7 @@ public partial class MainWindow : Window
 
     private void OnTitleMusicSettingChanged()
     {
+        UpdateTitleMusicMuteButton();
         if (!_settings.PlayTitleMusic)
         {
             _sndPreview.Stop();
@@ -2796,6 +2824,17 @@ public partial class MainWindow : Window
         {
             PlaySelectedGamePreview(game);
         }
+    }
+
+    private void UpdateTitleMusicMuteButton()
+    {
+        TitleMusicMuteGlyph.Text = !_settings.PlayTitleMusic || _settings.TitleMusicVolume == 0
+            ? "volume_off"
+            : _settings.TitleMusicVolume < 0.5 ? "volume_down" : "volume_up";
+        var label = Localization.Instance.Get(
+            _settings.PlayTitleMusic ? "Library.Music.Mute" : "Library.Music.Unmute");
+        ToolTip.SetTip(TitleMusicMuteButton, label);
+        AutomationProperties.SetName(TitleMusicMuteButton, label);
     }
 
     /// <summary>Pauses the preview music while the window is minimized.</summary>

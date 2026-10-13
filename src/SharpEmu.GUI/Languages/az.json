@@ -31,6 +31,10 @@
   "Library.Stat.TitleId": "Oyunun ID-si",
   "Common.Back": "Geri qayıt",
 
+  "Library.Music.Volume": "Oyun musiqisinin səs səviyyəsi",
+  "Library.Music.Mute": "Oyun musiqisini susdur",
+  "Library.Music.Unmute": "Oyun musiqisinin səsini aç",
+
   "Options.General": "Ümumi",
   "Options.Logging": "Jurnala yazma",
   "Options.Env.Tab": "Mühit",

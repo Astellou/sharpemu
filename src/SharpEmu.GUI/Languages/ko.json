@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "타이틀 ID",
   "Common.Back": "뒤로",
 
+  "Library.Music.Volume": "게임 음악 볼륨",
+  "Library.Music.Mute": "게임 음악 음소거",
+  "Library.Music.Unmute": "게임 음악 음소거 해제",
+
   "Options.General": "일반",
   "Options.Logging": "로깅",
   "Options.Section.Emulation": "에뮬레이션",

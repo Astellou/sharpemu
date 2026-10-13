@@ -66,6 +66,10 @@
   "Library.Stat.TitleId": "Title ID",
   "Common.Back": "Back",
 
+  "Library.Music.Volume": "Title music volume",
+  "Library.Music.Mute": "Mute title music",
+  "Library.Music.Unmute": "Unmute title music",
+
   "Options.General": "General",
   "Options.Logging": "Logging",
   "Options.Env.Tab": "Environment",

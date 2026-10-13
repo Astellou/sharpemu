@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "معرّف اللعبة",
   "Common.Back": "رجوع",
 
+  "Library.Music.Volume": "مستوى صوت موسيقى اللعبة",
+  "Library.Music.Mute": "كتم موسيقى اللعبة",
+  "Library.Music.Unmute": "إلغاء كتم موسيقى اللعبة",
+
   "Options.General": "عام",
   "Options.Logging": "التسجيل",
   "Options.Section.Emulation": "المحاكاة",

@@ -47,6 +47,10 @@
   "Library.Stat.TitleId": "Numer seryjny",
   "Common.Back": "Wstecz",
 
+  "Library.Music.Volume": "Głośność muzyki w grze",
+  "Library.Music.Mute": "Wycisz muzykę z gry",
+  "Library.Music.Unmute": "Włącz dźwięk muzyki z gry",
+
   "Options.General": "Ogólne",
   "Options.Logging": "Dziennik zdarzeń",
   "Options.Env.Tab": "Środowisko",

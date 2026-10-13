@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "ID do título",
   "Common.Back": "Voltar",
 
+  "Library.Music.Volume": "Volume da música do jogo",
+  "Library.Music.Mute": "Silenciar música do jogo",
+  "Library.Music.Unmute": "Reativar som da música do jogo",
+
   "Options.General": "Geral",
   "Options.Logging": "Registos",
   "Options.Env.Tab": "Ambiente",

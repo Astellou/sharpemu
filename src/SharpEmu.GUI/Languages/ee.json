@@ -47,6 +47,10 @@
   "Library.Stat.TitleId": "Title ID",
   "Common.Back": "Tagasi",
 
+  "Library.Music.Volume": "Mängumuusika helitugevus",
+  "Library.Music.Mute": "Vaigista mängumuusika",
+  "Library.Music.Unmute": "Lülita mängumuusika heli sisse",
+
   "Options.General": "Üldine",
   "Options.Logging": "Logimine",
   "Options.Env.Tab": "Keskkond",

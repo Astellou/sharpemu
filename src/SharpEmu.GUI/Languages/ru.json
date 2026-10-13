@@ -45,6 +45,10 @@
   "Library.Stat.TitleId": "ID игры",
   "Common.Back": "Назад",
 
+  "Library.Music.Volume": "Громкость музыки игры",
+  "Library.Music.Mute": "Выключить музыку игры",
+  "Library.Music.Unmute": "Включить музыку игры",
+
   "Options.General": "Основные",
   "Options.Logging": "Логгирование",
   "Options.Env.Tab": "Окружение",

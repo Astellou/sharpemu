@@ -46,6 +46,10 @@
   "Library.Stat.TitleId": "Başlık kimliği",
   "Common.Back": "Geri",
 
+  "Library.Music.Volume": "Oyun müziği ses seviyesi",
+  "Library.Music.Mute": "Oyun müziğini kapat",
+  "Library.Music.Unmute": "Oyun müziğini aç",
+
   "Options.General": "Genel",
   "Options.Logging": "Günlükleme",
   "Options.Section.Emulation": "EMÜLASYON",

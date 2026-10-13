@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "ID titolo",
   "Common.Back": "Indietro",
 
+  "Library.Music.Volume": "Volume della musica del gioco",
+  "Library.Music.Mute": "Disattiva audio della musica del gioco",
+  "Library.Music.Unmute": "Riattiva audio della musica del gioco",
+
   "Options.General": "Generale",
   "Options.Logging": "Log",
   "Options.Section.Emulation": "EMULAZIONE",

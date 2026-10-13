@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "Címazonosító",
   "Common.Back": "Vissza",
 
+  "Library.Music.Volume": "Játékzene hangereje",
+  "Library.Music.Mute": "Játékzene némítása",
+  "Library.Music.Unmute": "Játékzene visszakapcsolása",
+
   "Options.General": "Általános",
   "Options.Logging": "Logolás",
   "Options.Env.Tab": "Környezet",

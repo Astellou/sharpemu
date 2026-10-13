@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "タイトルID",
   "Common.Back": "戻る",
 
+  "Library.Music.Volume": "ゲーム音楽の音量",
+  "Library.Music.Mute": "ゲーム音楽をミュート",
+  "Library.Music.Unmute": "ゲーム音楽のミュートを解除",
+
   "Options.General": "一般",
   "Options.Logging": "ロギング",
   "Options.Section.Emulation": "エミュレーション",

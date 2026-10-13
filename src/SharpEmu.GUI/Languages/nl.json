@@ -44,6 +44,10 @@
   "Library.Stat.TitleId": "Titel-ID",
   "Common.Back": "Terug",
 
+  "Library.Music.Volume": "Volume van gamemuziek",
+  "Library.Music.Mute": "Gamemuziek dempen",
+  "Library.Music.Unmute": "Dempen van gamemuziek opheffen",
+
   "Options.General": "Algemeen",
   "Options.Logging": "Logging",
   "Options.Section.Emulation": "EMULATIE",
