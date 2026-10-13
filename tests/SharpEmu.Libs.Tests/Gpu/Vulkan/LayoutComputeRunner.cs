@@ -87,6 +87,14 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
             Require(vk.CreateShaderModule(device, &moduleInfo, null, out module), "vkCreateShaderModule");
         }
 
+        // The module was translated for this host subgroup width; like the presenter, the
+        // pipeline pins it rather than taking the driver's choice (64 lanes on AMD).
+        var pin = RequiredSubgroupSize(harness.Vulkan, request);
+        var requiredSubgroupSize = new PipelineShaderStageRequiredSubgroupSizeCreateInfo
+        {
+            SType = StructureType.PipelineShaderStageRequiredSubgroupSizeCreateInfo,
+            RequiredSubgroupSize = pin,
+        };
         var entry = (byte*)Marshal.StringToHGlobalAnsi("main");
         try
         {
@@ -96,6 +104,7 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
                 Stage = new PipelineShaderStageCreateInfo
                 {
                     SType = StructureType.PipelineShaderStageCreateInfo,
+                    PNext = pin != 0 ? &requiredSubgroupSize : null,
                     Stage = ShaderStageFlags.ComputeBit,
                     Module = module,
                     PName = entry,
@@ -109,6 +118,12 @@ internal sealed unsafe class LayoutComputeRunner : IDisposable
             Marshal.FreeHGlobal((nint)entry);
             vk.DestroyShaderModule(device, module, null);
         }
+    }
+
+    private static uint RequiredSubgroupSize(HeadlessVulkan device, ShaderCompileRequest request)
+    {
+        var size = request.HostWave64Supported ? 64u : request.HostComputeSubgroup32 ? 32u : 0u;
+        return size != 0 && device.CanRequireComputeSubgroupSize(size) ? size : 0u;
     }
 
     private static void Require(Result result, string operation)

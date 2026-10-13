@@ -48,6 +48,23 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
     public bool SupportsImageInt64Atomics { get; private init; }
     // shaderFloat16 is enabled and f16 can be pinned to RTE with denormals and Inf/NaN preserved.
     public bool SupportsNativeFloat16Conversions { get; private init; }
+    // subgroupSizeControl is enabled, so a pipeline stage may require a subgroup size.
+    public bool SupportsSubgroupSizeControl { get; private init; }
+
+    // True when a compute pipeline can be pinned to this many lanes per subgroup.
+    public bool CanRequireComputeSubgroupSize(uint size)
+    {
+        if (!SupportsSubgroupSizeControl)
+        {
+            return false;
+        }
+
+        var control = new PhysicalDeviceSubgroupSizeControlProperties { SType = StructureType.PhysicalDeviceSubgroupSizeControlProperties };
+        var properties = new PhysicalDeviceProperties2 { SType = StructureType.PhysicalDeviceProperties2, PNext = &control };
+        Vk.GetPhysicalDeviceProperties2(Physical, &properties);
+        return control.MinSubgroupSize <= size && size <= control.MaxSubgroupSize &&
+            (control.RequiredSubgroupSizeStages & ShaderStageFlags.ComputeBit) != 0;
+    }
 
     private static readonly string[] RenderingExtensionNames =
     [
@@ -356,6 +373,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
         };
         var features = new PhysicalDeviceFeatures2 { SType = StructureType.PhysicalDeviceFeatures2, PNext = &timelineFeatures };
         vk.GetPhysicalDeviceFeatures2(physical, &features);
+        var subgroupSizeControl = vulkan13Features.SubgroupSizeControl;
         var dynamicRendering = vulkan13Features.DynamicRendering && vulkan13Features.Synchronization2 &&
             HasDeviceExtensions(vk, physical, RenderingExtensionNames);
         if (family == uint.MaxValue || !timelineFeatures.TimelineSemaphore || !addressFeatures.BufferDeviceAddress ||
@@ -390,6 +408,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             SType = StructureType.PhysicalDeviceVulkan13Features,
             DynamicRendering = dynamicRendering,
             Synchronization2 = true,
+            SubgroupSizeControl = subgroupSizeControl,
         };
         addressFeatures = new PhysicalDeviceBufferDeviceAddressFeatures
         {
@@ -460,6 +479,7 @@ internal sealed unsafe class HeadlessVulkan : IDisposable
             SupportsFillRectangle = fillRectangle,
             SupportsImageInt64Atomics = imageInt64Atomics,
             SupportsNativeFloat16Conversions = nativeFloat16,
+            SupportsSubgroupSizeControl = subgroupSizeControl,
         };
         if (validation)
         {
