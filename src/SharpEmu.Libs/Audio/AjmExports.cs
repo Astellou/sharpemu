@@ -630,6 +630,70 @@ public static class AjmExports
     }
 
     [SysAbiExport(
+        Nid = "81HsnXFbWS4",
+        ExportName = "sceAjmBatchJobSetResampleParameters",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceAjm")]
+    public static int AjmBatchJobSetResampleParameters(CpuContext ctx)
+    {
+        var infoAddress = ctx[CpuRegister.Rdi];
+        var instanceId = unchecked((uint)ctx[CpuRegister.Rsi]);
+        var flags = unchecked((uint)ctx[CpuRegister.Rdx]);
+        var resultAddress = ctx[CpuRegister.Rcx];
+        ctx.GetXmmRegister(0, out var ratioBits, out _);
+        var ratio = BitConverter.Int32BitsToSingle(unchecked((int)(uint)ratioBits));
+
+        if (infoAddress == 0)
+        {
+            return ctx.SetReturn(OrbisAjmErrorInvalidParameter);
+        }
+
+        if (!TryAppendBatchJob(ctx, infoAddress, AjmJobSetResampleParametersSize))
+        {
+            return ctx.SetReturn(OrbisAjmErrorJobCreation);
+        }
+
+        const uint ignoreRatio = 1u << 3;
+        var validRatio = (flags & ignoreRatio) != 0 || (float.IsFinite(ratio) && ratio is >= 0 and <= 4);
+        var status = TryGetInstance(instanceId, out var instance) && validRatio
+            ? 0
+            : Atrac9DecodeState.ResultInvalidParameter;
+        if (status == 0)
+            instance.Opus?.SetResampleParameters(ratio, flags);
+        WriteBasicResult(ctx, resultAddress, status);
+        Trace($"batch_job_set_resample_parameters instance=0x{instanceId:X8} ratio={ratio:R} flags=0x{flags:X8} status=0x{status:X8}");
+        return ctx.SetReturn(0);
+    }
+
+    [SysAbiExport(
+        Nid = "JkdNCocpu1M",
+        ExportName = "sceAjmBatchJobGetResampleInfo",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceAjm")]
+    public static int AjmBatchJobGetResampleInfo(CpuContext ctx)
+    {
+        if (ctx[CpuRegister.Rdi] == 0)
+            return ctx.SetReturn(OrbisAjmErrorInvalidParameter);
+        if (!TryAppendBatchJob(ctx, ctx[CpuRegister.Rdi], AjmJobRunSize))
+            return ctx.SetReturn(OrbisAjmErrorJobCreation);
+
+        Span<byte> result = stackalloc byte[48];
+        result.Clear();
+        if (TryGetInstance(unchecked((uint)ctx[CpuRegister.Rsi]), out var instance))
+        {
+            var info = instance.Opus?.ResampleInfo ?? (Ratio: 1f, RemainingSamples: 0);
+            BinaryPrimitives.WriteSingleLittleEndian(result[8..], info.Ratio);
+            BinaryPrimitives.WriteInt32LittleEndian(result[12..], info.RemainingSamples);
+        }
+        else
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(result, Atrac9DecodeState.ResultInvalidParameter);
+        }
+        var address = ctx[CpuRegister.Rdx];
+        return ctx.SetReturn(address == 0 || ctx.Memory.TryWrite(address, result) ? 0 : OrbisAjmErrorInvalidParameter);
+    }
+
+    [SysAbiExport(
         Nid = "3cAg7xN995U",
         ExportName = "sceAjmBatchJobGetStatistics",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -1335,6 +1399,8 @@ public static class AjmExports
     private const ulong AjmBatchInfoLastGoodJobField = 24;
     private const ulong AjmBatchInfoLastGoodJobRaField = 32;
     private const ulong AjmJobControlSize = 48;
+    // SceAjmSidebandResampleParametersEx (12) + command overhead (12) + control job.
+    private const ulong AjmJobSetResampleParametersSize = AjmJobControlSize + 24;
     private const ulong AjmJobRunSize = 64;
     // SCE_AJM_JOB_RUN_SPLIT_SIZE(N) is 32 + 16 bytes per descriptor.
     private const ulong AjmJobRunSplitBaseSize = 32;
