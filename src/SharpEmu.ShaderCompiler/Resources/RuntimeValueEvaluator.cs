@@ -290,7 +290,7 @@ public sealed class RuntimeValueEvaluator
             if (aligned > size || size - aligned < sizeof(uint))
             {
                 // An unbound (empty) V# reads as zero; overrunning a bound buffer stays a failure.
-                return (uint)records == 0 ? RawAddress.Zero : RawAddress.Failed;
+                return (uint)records == 0 || offset >= 0x8000_0000u ? RawAddress.Zero : RawAddress.Failed;
             }
 
             address = ((baseAddress & ~3ul) + byteOffset) & ~3ul;

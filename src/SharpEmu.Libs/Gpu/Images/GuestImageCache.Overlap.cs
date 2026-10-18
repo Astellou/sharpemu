@@ -500,6 +500,16 @@ public sealed partial class GuestImageCache
                 return new OverlapResolution(GrowImage(requested, cachedImageIdentifier));
             }
 
+            if (requested.IsVolume != cachedInfo.IsVolume)
+            {
+                if (safeToDelete)
+                {
+                    ReleaseImage(cachedImageIdentifier);
+                }
+
+                return new OverlapResolution(mergedImageIdentifier);
+            }
+
             throw SubmissionScheduler.Fatal(
                 $"An equal-address image overlap cannot be resolved: address=0x{requested.Data.Address:X16} requested={requested.Resources.Levels}x{requested.Resources.Layers} " +
                 $"cached={cachedInfo.Resources.Levels}x{cachedInfo.Resources.Layers} requestedSize=0x{requested.Data.Size:X16} cachedSize=0x{cachedInfo.Data.Size:X16} " +

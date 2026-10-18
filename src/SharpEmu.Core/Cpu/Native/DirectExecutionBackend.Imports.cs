@@ -1874,7 +1874,7 @@ public sealed partial class DirectExecutionBackend
 			!expectedPrivacyInvalidParameter &&
 			!expectedPlayGoChunkEnumerationEnd)
 		{
-			return true;
+			return ShouldSampleImportResult(nid, resultValue, out mutexOccurrence);
 		}
 
 		if (!ShouldLogExpectedImportResults())

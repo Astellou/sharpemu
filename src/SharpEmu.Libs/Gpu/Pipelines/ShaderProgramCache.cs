@@ -873,7 +873,7 @@ internal sealed class ShaderProgramCache
                     Mesh = new MeshShaderConfiguration(info.Geometry.OutputVertexCapacity, info.Geometry.OutputPrimitiveCapacity,
                         info.Geometry.ProvokingVertex, info.Geometry.InputPrimitiveCountPerWorkgroup, info.Geometry.InputVertexCountPerWorkgroup,
                         info.Geometry.LocalDataShareDwords, info.Geometry.InputTriangleStrip, info.Execution.DeviceSubgroupLaneCount,
-                        info.Geometry.InputPointList),
+                        info.Geometry.InputPointList, info.Geometry.InputLineList),
                 };
             }
 
