@@ -690,7 +690,7 @@ public static partial class Gen5SpirvTranslator
 
         private void DeclareLds()
         {
-            if (!UsesLds())
+            if (!UsesLds() || TryDeclareLaneLdsSlots())
             {
                 return;
             }
