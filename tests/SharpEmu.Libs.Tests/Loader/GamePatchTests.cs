@@ -15,7 +15,7 @@ using Xunit;
 
 namespace SharpEmu.Libs.Tests.Loader;
 
-public sealed class GamePatchTests : IDisposable
+public sealed partial class GamePatchTests : IDisposable
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("sharpemu-patches-").FullName;
     private GamePatchRepository Repository => new(_directory);
@@ -40,11 +40,12 @@ public sealed class GamePatchTests : IDisposable
         return Assert.Single(Repository.Load("PPSA00001"));
     }
 
-    private static ProgramHeader Segment(ulong address = 0, ulong size = 0x100)
+    private static ProgramHeader Segment(ulong address = 0, ulong size = 0x100,
+        ProgramHeaderFlags flags = ProgramHeaderFlags.Read | ProgramHeaderFlags.Write | ProgramHeaderFlags.Execute)
     {
         var bytes = new byte[56];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)ProgramHeaderType.Load);
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), 7);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4), (uint)flags);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(16), address);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(40), size);
         return MemoryMarshal.Read<ProgramHeader>(bytes);
@@ -245,7 +246,12 @@ public sealed class GamePatchTests : IDisposable
     [InlineData(true)]
     public void LoaderAppliesEnabledPatchesOnlyToTheirTargetExecutable(bool fromArchive)
     {
-        WritePatch();
+        WritePatch("""
+            <Line Type="bytes" Address="0x10000010" Value="aabbcc"/>
+            <Line Type="bytes32" Address="0x10000020" Value="0x12345678"/>
+            <Line Type="utf16" Address="0x10000030" Value="Test"/>
+            <Line Type="mask" Address="b0 b1 b2" Value="cc" Offset="+1"/>
+            """);
         var moduleXml = Xml("<Line Type=\"bytes\" Address=\"0x10000010\" Value=\"ddeeff\"/>", executable: "libTest.sprx");
         File.WriteAllText(Path.Combine(_directory, "Module.xml"), moduleXml);
         foreach (var entry in Repository.Load("PPSA00001")) Repository.SetEnabled("PPSA00001", entry, true);
@@ -255,6 +261,7 @@ public sealed class GamePatchTests : IDisposable
             { "titleId": "PPSA00001", "contentVersion": "01.004.000", "titleName": "Test" }
             """);
         var original = Elf();
+        new byte[] { 0xB0, 0xB1, 0xB2 }.CopyTo(original, 0x160);
         File.WriteAllBytes(Path.Combine(game, "eboot.bin"), original);
         File.WriteAllBytes(Path.Combine(game, "libTest.sprx"), original);
         var archivePath = Path.Combine(_directory, "game.zar");
@@ -284,6 +291,10 @@ public sealed class GamePatchTests : IDisposable
         var actual = new byte[3];
         Assert.True(memory.TryRead(image.EntryPoint - image.ElfHeader.EntryPoint + 0x10, actual));
         Assert.Equal(new byte[] { 0xAA, 0xBB, 0xCC }, actual);
+        var imageBase = image.EntryPoint - image.ElfHeader.EntryPoint;
+        Assert.Equal(Convert.FromHexString("78563412"), Read(memory, imageBase + 0x20, 4));
+        Assert.Equal(Convert.FromHexString("54006500730074000000"), Read(memory, imageBase + 0x30, 10));
+        Assert.Equal(0xCC, Read(memory, imageBase + 0x61, 1)[0]);
 
         var module = loader.LoadAdditional(File.ReadAllBytes(Path.Combine(game, "libTest.sprx")),
             memory, modules, new PhysicalFileSystem(), game, "libTest.sprx");

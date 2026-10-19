@@ -10,18 +10,26 @@ using SharpEmu.HLE;
 
 namespace SharpEmu.Core.Patches;
 
-public sealed record GamePatchWrite(ulong Offset, byte[] Bytes);
+public sealed record GamePatchWrite(ulong Offset, byte[] Bytes)
+{
+    internal GamePatchPattern? Pattern { get; init; }
+}
 
-public sealed record GamePatch(
+internal sealed record GamePatchPattern(byte?[] Address, long Offset, byte?[]? Target = null, int JumpSize = 0);
+
+public sealed partial record GamePatch(
     string Id, string FileName, string Name, string Author, string Note,
     string AppVersion, string Executable, IReadOnlyList<GamePatchWrite> Writes, string? Error)
 {
     public string PatchVersion { get; init; } = string.Empty;
+    public bool IsPatternVersion => string.Equals(AppVersion, "mask", StringComparison.OrdinalIgnoreCase);
 
     public bool MatchesVersion(string? version) =>
-        !string.IsNullOrWhiteSpace(version) &&
-        (string.Equals(AppVersion, version, StringComparison.OrdinalIgnoreCase) ||
-         Version.TryParse(AppVersion, out var expected) && Version.TryParse(version, out var actual) && expected == actual);
+        IsPatternVersion
+            ? Error is null && Writes.Count > 0 && Writes.All(write => write.Pattern is not null)
+            : !string.IsNullOrWhiteSpace(version) &&
+              (string.Equals(AppVersion, version, StringComparison.OrdinalIgnoreCase) ||
+               Version.TryParse(AppVersion, out var expected) && Version.TryParse(version, out var actual) && expected == actual);
 
     internal static GamePatch Parse(string fileName, XElement metadata)
     {
@@ -47,30 +55,49 @@ public sealed record GamePatch(
             var totalBytes = 0;
             foreach (var line in list.Elements())
             {
-                if (line.Name != "Line" || line.HasElements || (string?)line.Attribute("Type") != "bytes" ||
-                    line.Attributes().Any(attribute => attribute.Name != "Type" && attribute.Name != "Address" && attribute.Name != "Value"))
+                var type = (string?)line.Attribute("Type") ?? string.Empty;
+                var isPattern = type is "mask" or "mask_jump32";
+                if (line.Name != "Line" || line.HasElements || line.Attributes().Any(attribute =>
+                    attribute.Name != "Type" && attribute.Name != "Address" && attribute.Name != "Value" &&
+                    !(isPattern && attribute.Name == "Offset") &&
+                    !(type == "mask_jump32" && (attribute.Name == "Target" || attribute.Name == "Size"))))
                 {
-                    throw new FormatException("Only bytes lines with Address and Value are supported.");
+                    throw new FormatException("A patch line contains unsupported elements or attributes.");
                 }
 
-                var address = Hex((string?)line.Attribute("Address") ?? string.Empty);
-                var value = (string?)line.Attribute("Value") ?? string.Empty;
-                var bytes = Convert.FromHexString(string.Concat(value.Where(character => !char.IsWhiteSpace(character))));
-                totalBytes = checked(totalBytes + bytes.Length);
+                var addressText = (string?)line.Attribute("Address") ?? throw new FormatException("Address is required.");
+                var value = (string?)line.Attribute("Value") ?? throw new FormatException("Value is required.");
+                var bytes = EncodeValue(type, value);
+                var address = isPattern ? imageBase : Hex(addressText);
+                var pattern = isPattern ? new GamePatchPattern(ParsePattern(addressText),
+                    long.Parse((string?)line.Attribute("Offset") ?? "0", NumberStyles.Integer, CultureInfo.InvariantCulture)) : null;
+                if (type == "mask_jump32")
+                {
+                    var size = int.Parse((string?)line.Attribute("Size") ?? string.Empty, NumberStyles.Integer, CultureInfo.InvariantCulture);
+                    if (size is < 5 or > 256) throw new FormatException("Jump Size must be between 5 and 256 bytes.");
+                    pattern = pattern! with { Target = ParsePattern((string?)line.Attribute("Target") ?? string.Empty), JumpSize = size };
+                }
+
+                totalBytes = checked(totalBytes + bytes.Length + (pattern?.JumpSize > 0 ? pattern.JumpSize + 5 : 0));
                 if (address < imageBase || bytes.Length == 0 || totalBytes > 1 << 20 || writes.Count >= 4096)
                 {
                     throw new FormatException("A patch line has an invalid address or size.");
                 }
 
-                writes.Add(new GamePatchWrite(address - imageBase, bytes));
+                writes.Add(new GamePatchWrite(address - imageBase, bytes) { Pattern = pattern });
             }
 
             if (writes.Count == 0)
             {
                 throw new FormatException("PatchList is empty.");
             }
+
+            if (string.Equals(version, "mask", StringComparison.OrdinalIgnoreCase) && writes.Any(write => write.Pattern is null))
+            {
+                throw new FormatException("AppVer=mask requires every line to use mask or mask_jump32.");
+            }
         }
-        catch (Exception exception) when (exception is FormatException or OverflowException)
+        catch (Exception exception) when (exception is FormatException or OverflowException or EncoderFallbackException)
         {
             error = exception.Message;
             writes.Clear();
@@ -82,9 +109,14 @@ public sealed record GamePatch(
         };
     }
 
-    private static ulong Hex(string value) => ulong.Parse(
-        value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? value[2..] : value,
-        NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
+    private static ulong Hex(string value)
+    {
+        value = value.Trim();
+        return ulong.Parse(value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? value[2..] : value,
+            NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
+    }
+
+    private sealed record PreparedWrite(ulong Address, byte[] Bytes, byte[] Original);
 
     internal bool TryApply(ICpuMemory memory, IReadOnlyList<ProgramHeader> headers, ulong loadBias, out string? error)
     {
@@ -94,8 +126,9 @@ public sealed record GamePatch(
             return false;
         }
 
-        var segments = headers.Where(header => header.HeaderType == ProgramHeaderType.Load && header.MemorySize > 0).ToArray();
-        var prepared = new List<(ulong Address, byte[] Bytes, byte[] Original)>();
+        var segments = headers.Where(header => header.HeaderType == ProgramHeaderType.Load && header.MemorySize > 0)
+            .OrderBy(header => header.VirtualAddress).ToArray();
+        var prepared = new List<PreparedWrite>();
         try
         {
             if (segments.Length == 0)
@@ -106,21 +139,54 @@ public sealed record GamePatch(
             var imageBase = checked(loadBias + segments.Min(header => header.VirtualAddress));
             foreach (var write in Writes)
             {
-                var address = checked(imageBase + write.Offset);
-                var end = checked(address + (ulong)write.Bytes.Length);
+                if (write.Pattern is { } pattern)
+                {
+                    var match = FindPattern(memory, segments, loadBias, pattern.Address, prepared, pattern.JumpSize > 0);
+                    var address = checked((ulong)((Int128)match + pattern.Offset));
+                    if (pattern.Target is null)
+                    {
+                        PrepareWrite(address, write.Bytes);
+                    }
+                    else
+                    {
+                        var target = FindPattern(memory, segments, loadBias, pattern.Target, prepared, executableOnly: true);
+                        var sourceEnd = checked(address + (ulong)pattern.JumpSize);
+                        var targetEnd = checked(target + (ulong)write.Bytes.Length + 5);
+                        if (address < targetEnd && target < sourceEnd)
+                            throw new InvalidDataException("The branch site and code cave overlap.");
+
+                        var branch = new byte[pattern.JumpSize];
+                        branch.AsSpan().Fill(0x90);
+                        EncodeJump(branch, address, target);
+                        var payload = new byte[write.Bytes.Length + 5];
+                        write.Bytes.CopyTo(payload, 0);
+                        EncodeJump(payload.AsSpan(write.Bytes.Length), targetEnd - 5, sourceEnd);
+                        PrepareWrite(address, branch, executableOnly: true);
+                        PrepareWrite(target, payload, executableOnly: true);
+                    }
+                    continue;
+                }
+
+                PrepareWrite(checked(imageBase + write.Offset), write.Bytes);
+            }
+
+            void PrepareWrite(ulong address, byte[] bytes, bool executableOnly = false)
+            {
+                var end = checked(address + (ulong)bytes.Length);
                 if (!segments.Any(segment => address >= checked(loadBias + segment.VirtualAddress) &&
-                    end <= checked(loadBias + segment.VirtualAddress + segment.MemorySize)))
+                    end <= checked(loadBias + segment.VirtualAddress + segment.MemorySize) &&
+                    (!executableOnly || (segment.Flags & ProgramHeaderFlags.Execute) != 0)))
                 {
                     throw new InvalidDataException($"Patch range 0x{address:X}-0x{end:X} is outside the executable's segments.");
                 }
 
-                var original = new byte[write.Bytes.Length];
+                var original = new byte[bytes.Length];
                 if (!memory.TryRead(address, original))
                 {
                     throw new InvalidDataException($"Patch address 0x{address:X} is not readable.");
                 }
 
-                prepared.Add((address, write.Bytes, original));
+                prepared.Add(new PreparedWrite(address, bytes, original));
             }
         }
         catch (Exception exception) when (exception is InvalidDataException or OverflowException)

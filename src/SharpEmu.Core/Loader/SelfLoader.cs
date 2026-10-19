@@ -283,7 +283,7 @@ public sealed class SelfLoader : ISelfLoader
         {
             if (patch.TryApply(virtualMemory, programHeaders, imageBase, out var patchError))
             {
-                Console.Error.WriteLine($"[PATCH] Applied '{patch.Name}' to {executable} ({patch.Writes.Count} writes, {patch.AppVersion}).");
+                Console.Error.WriteLine($"[PATCH] Applied '{patch.Name}' to {executable} ({patch.Writes.Count} lines, {patch.AppVersion}).");
             }
             else
             {
