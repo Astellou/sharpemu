@@ -174,6 +174,11 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
             total.Milliseconds += milliseconds;
             if (marker.Key.Kind == IntervalKind.MeshDraw)
                 total.MeshGroups += (double)marker.First * marker.Second * marker.Third;
+            if (milliseconds >= _heaviestMilliseconds)
+            {
+                _heaviestMilliseconds = milliseconds;
+                _heaviestMarker = marker;
+            }
             if (milliseconds >= total.MaximumMilliseconds)
             {
                 total.MaximumMilliseconds = milliseconds;
@@ -240,7 +245,8 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
         if (_totals.Count != 0 || _skippedMarkers != 0 || _unavailableBuffers != 0)
         {
             _write($"[PERF][GPU_INTERVAL] completed_ms={_totals.Values.Sum(total => total.Milliseconds):F3} intervals={_totals.Values.Sum(total => (long)total.Count)} skipped_markers={_skippedMarkers} unavailable_buffers={_unavailableBuffers}");
-            foreach (var (key, total) in _totals.OrderByDescending(pair => pair.Value.Milliseconds).Take(12))
+            _write($"[PERF][GPU_INTERVAL] heaviest kind={_heaviestMarker.Key.Kind} pipeline={_heaviestMarker.Key.Pipeline} ms={_heaviestMilliseconds:F3} args={_heaviestMarker.First},{_heaviestMarker.Second},{_heaviestMarker.Third} keys={_totals.Count}");
+            foreach (var (key, total) in _totals.OrderByDescending(pair => pair.Value.Milliseconds).Take(ReportedKeys))
             {
                 _write($"[PERF][GPU_INTERVAL] kind={key.Kind} pipeline={key.Pipeline} count={total.Count} total_ms={total.Milliseconds:F3} avg_ms={total.Milliseconds / total.Count:F3} max_ms={total.MaximumMilliseconds:F3} max_args={total.MaximumMarker.First},{total.MaximumMarker.Second},{total.MaximumMarker.Third} mesh_groups={total.MeshGroups:F0}");
                 if (key.Kind == IntervalKind.MeshDraw)
@@ -253,6 +259,8 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
             }
         }
         _totals.Clear();
+        _heaviestMarker = default;
+        _heaviestMilliseconds = 0;
         _skippedMarkers = 0;
         _unavailableBuffers = 0;
         _reportStart = Stopwatch.GetTimestamp();
