@@ -432,6 +432,7 @@ public partial class MainWindow : Window
         CtxCopyTitleId.Click += async (_, _) =>
             await CopyToClipboardAsync((GameList.SelectedItem as GameEntry)?.TitleId);
         CtxGameSettings.Click += (_, _) => OpenSelectedGameSettings();
+        CtxPatches.Click += async (_, _) => await OpenSelectedGamePatchesAsync();
         CtxTrophies.Click += (_, _) => OpenSelectedGameTrophies();
         InitializeTrophies();
         CtxRemove.Click += (_, _) => RemoveSelectedFromLibrary();
@@ -2595,6 +2596,7 @@ public partial class MainWindow : Window
         CtxGameSettings.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
         CtxPackZar.IsEnabled = !ZArchive.IsArchivePath(game.Path);
         CtxTrophies.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
+        CtxPatches.IsEnabled = !string.IsNullOrWhiteSpace(game.TitleId);
     }
 
     // Packs the selected game's folder into a .zar chosen by the user, beside the folder by default.

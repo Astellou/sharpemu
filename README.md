@@ -112,6 +112,22 @@ You can set them per game or globally in the GUI, or pass them directly through 
 A Vulkan-capable GPU and current graphics driver are required. The macOS
 release includes the MoltenVK Vulkan implementation.
 
+### Game Patches
+
+Place PS-Game-Patch XML files in `user/patches/<game-name>.xml` next to SharpEmu.
+Right-click a game in the library and open **Patches** to manage entries in a separate
+window. Only patches matching the installed game version are listed. Search or
+filter by XML file, and select a patch to see its author, notes, version and target
+executable. Selections are saved automatically.
+Patches are off by default and take effect on the next
+launch, including CLI launches. Selections are saved separately per title ID.
+
+The loader matches `TitleID`, `AppVer` and `AppElf`, relocates addresses using
+`ImageBase`, and applies `Type="bytes"` writes to loaded memory, not game files.
+Unsupported line types and mismatched versions are not applied. Updating a patch's
+contents requires enabling it again. Only use patches from sources you trust.
+For a format example, see [PS-Game-Patch's Demon's Souls XML](https://github.com/illusionyy/PS-Game-Patch/blob/main/patches/xml_prospero/DemonSouls.xml).
+
 > [!IMPORTANT]  
 > This project does **not** support or condone piracy.  
 > All games used during development and testing are dumped from consoles that we personally own.  

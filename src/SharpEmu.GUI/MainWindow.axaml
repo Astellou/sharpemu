@@ -275,6 +275,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                   </MenuItem.Icon>
                 </MenuItem>
+                <MenuItem x:Name="CtxPatches"
+                          Header="{Binding [Library.Context.Patches], Source={x:Static local:Localization.Instance}}">
+                  <MenuItem.Icon>
+                    <PathIcon Width="14" Height="14" Foreground="{StaticResource MutedBrush}"
+                              Data="M9,3 H3 V9 H5 A3,3 0 1 1 5,15 H3 V21 H9 V19 A3,3 0 1 1 15,19 V21 H21 V15 H19 A3,3 0 1 0 19,9 H21 V3 H15 V5 A3,3 0 1 1 9,5 Z" />
+                  </MenuItem.Icon>
+                </MenuItem>
                 <Separator />
                 <MenuItem x:Name="CtxRemove"
                           Header="{Binding [Library.Context.Remove], Source={x:Static local:Localization.Instance}}"
