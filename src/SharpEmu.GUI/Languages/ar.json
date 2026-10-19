@@ -269,6 +269,8 @@
   "Options.Scaling.Integer": "عدد صحيح",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "استخدام عرض FIFO لإخراج خالٍ من تمزق الصورة.",
+  "Options.PortableData.Label": "بيانات محمولة",
+  "Options.PortableData.Desc": "الاحتفاظ بالإعدادات والحفظ والذاكرة المؤقتة بجانب الملف التنفيذي بدلًا من ملف التعريف النظامي. يُطبَّق بعد إعادة التشغيل.",
   "Options.Hdr.Label": "إخراج HDR",
   "Options.Hdr.Desc": "استخدام HDR عندما تدعمه الشاشة المحددة وواجهة الرسومات. يعود الوضع التلقائي إلى SDR.",
   "Options.Hdr.Auto": "تلقائي",

@@ -124,6 +124,8 @@
   "Options.Scaling.Integer": "Tam ədəd əmsalı ilə",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Təsvirin parçalanmadan göstərilməsi üçün FIFO təqdimatından istifadə edin.",
+  "Options.PortableData.Label": "Taşınabilir məlumatlar",
+  "Options.PortableData.Desc": "Parametrləri, yaddaşları və keşi sistem profili əvəzinə proqramın yanında saxlayır. Yenidən başlatdıqdan sonra tətbiq olunur.",
   "Options.Hdr.Label": "HDR çıxışı",
   "Options.Hdr.Desc": "Seçilmiş ekran və qrafik alt sistem dəstəklədikdə HDR istifadə edin. Avtomatik rejimdə dəstək yoxdursa, SDR istifadə olunur.",
   "Options.Hdr.Auto": "Avtomatik",

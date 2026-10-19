@@ -274,6 +274,8 @@
   "Options.Scaling.Integer": "Intero",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Usa la presentazione FIFO per evitare lo screen tearing.",
+  "Options.PortableData.Label": "Dati portabili",
+  "Options.PortableData.Desc": "Mantiene impostazioni, salvataggi e cache accanto all'eseguibile invece che nel profilo di sistema. Ha effetto dopo un riavvio.",
   "Options.Hdr.Label": "Output HDR",
   "Options.Hdr.Desc": "Usa HDR quando lo schermo selezionato e il backend grafico lo supportano. La modalità automatica torna a SDR.",
   "Options.Hdr.Auto": "Automatico",

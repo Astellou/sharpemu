@@ -135,6 +135,8 @@
   "Options.Scaling.Integer": "Täisarvuline",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Kasuta FIFO-esitust pildi rebimise vältimiseks.",
+  "Options.PortableData.Label": "Kaasaskantavad andmed",
+  "Options.PortableData.Desc": "Hoiab seaded, salvestused ja vahemälu rakenduse kõrval süsteemiprofiili asemel. Rakendub pärast taaskäivitamist.",
   "Options.Hdr.Label": "HDR-väljund",
   "Options.Hdr.Desc": "Kasuta HDR-i, kui valitud kuvar ja graafikaliides seda toetavad. Automaatrežiim lülitub tagasi SDR-ile.",
   "Options.Hdr.Auto": "Automaatne",

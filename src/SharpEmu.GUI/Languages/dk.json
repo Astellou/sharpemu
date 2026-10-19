@@ -269,6 +269,8 @@
   "Options.Scaling.Integer": "Heltal",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Brug FIFO-præsentation for output uden tearing.",
+  "Options.PortableData.Label": "Bærbare data",
+  "Options.PortableData.Desc": "Gemmer indstillinger, gemmer og cache ved programmet i stedet for i systemprofilen. Anvendes efter en genstart.",
   "Options.Hdr.Label": "HDR-output",
   "Options.Hdr.Desc": "Brug HDR, når den valgte skærm og grafik-backend understøtter det. Automatisk falder tilbage til SDR.",
   "Options.Hdr.Auto": "Automatisk",

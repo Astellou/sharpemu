@@ -270,6 +270,8 @@
   "Options.Scaling.Integer": "Inteira",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Usa apresentação FIFO para evitar cortes na imagem.",
+  "Options.PortableData.Label": "Roadennoù hezoug",
+  "Options.PortableData.Desc": "Mirout an arventennoù, an enrolladurioù hag ar c'hreadurioù-koun e-kichen ar programm e-lec'h profil ar reizhiad. Arveret goude un adloc'hañ.",
   "Options.Hdr.Label": "Saída HDR",
   "Options.Hdr.Desc": "Usa HDR quando a tela selecionada e o backend gráfico oferecem suporte. O modo automático retorna ao SDR.",
   "Options.Hdr.Auto": "Automático",

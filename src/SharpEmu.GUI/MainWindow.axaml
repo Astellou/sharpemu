@@ -1630,6 +1630,14 @@ SPDX-License-Identifier: GPL-2.0-or-later
                                       Classes="optionToggle"
                                       IsChecked="True" />
                       </local:SettingRow>
+                      <local:SettingRow x:Name="PortableDataRow"
+                                        Classes="optionRow"
+                                        Label="{Binding [Options.PortableData.Label], Source={x:Static local:Localization.Instance}}"
+                                        Description="{Binding [Options.PortableData.Desc], Source={x:Static local:Localization.Instance}}">
+                        <ToggleSwitch x:Name="PortableDataToggle"
+                                      Classes="optionToggle"
+                                      IsChecked="False" />
+                      </local:SettingRow>
                       <local:SettingRow x:Name="HdrRow"
                                         Classes="optionRow"
                                         Label="{Binding [Options.Hdr.Label], Source={x:Static local:Localization.Instance}}"

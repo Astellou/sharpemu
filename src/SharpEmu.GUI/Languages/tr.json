@@ -109,6 +109,8 @@
   "Options.Scaling.Desc": "Dahili çözünürlüğü değiştirmeden oyun görüntüsünü ölçekle.",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Yırtılmasız görüntü için FIFO sunumunu kullan.",
+  "Options.PortableData.Label": "Taşınabilir veri",
+  "Options.PortableData.Desc": "Ayarları, kayıtları ve önbelleği sistem profili yerine programın yanında tutar. Yeniden başlatmadan sonra uygulanır.",
   "Options.Hdr.Label": "HDR çıkışı",
   "Options.Hdr.Desc": "Seçili ekran ve grafik backend'i destekliyorsa HDR kullan. Otomatik mod SDR'ye geri döner.",
 

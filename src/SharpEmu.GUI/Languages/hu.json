@@ -270,6 +270,8 @@
   "Options.Scaling.Integer": "Egész szám",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "FIFO megjelenítés használata képtörésmentes kimenethez.",
+  "Options.PortableData.Label": "Hordozható adatok",
+  "Options.PortableData.Desc": "A beállításokat, mentéseket és gyorsítótárakat a program mellett tartja a rendszerprofil helyett. Újraindítás után lép érvénybe.",
   "Options.Hdr.Label": "HDR-kimenet",
   "Options.Hdr.Desc": "HDR használata, ha a kiválasztott kijelző és grafikus backend támogatja. Az automatikus mód SDR-re vált vissza.",
   "Options.Hdr.Auto": "Automatikus",

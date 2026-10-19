@@ -269,6 +269,8 @@
   "Options.Scaling.Integer": "整数倍",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "ティアリングのない表示のためFIFOプレゼンテーションを使用します。",
+  "Options.PortableData.Label": "ポータブルデータ",
+  "Options.PortableData.Desc": "設定・セーブデータ・キャッシュを、システムプロファイルの代わりに実行ファイルの隣に保持します。再起動後に有効になります。",
   "Options.Hdr.Label": "HDR出力",
   "Options.Hdr.Desc": "選択したディスプレイとグラフィックスバックエンドが対応している場合にHDRを使用します。自動ではSDRにフォールバックします。",
   "Options.Hdr.Auto": "自動",

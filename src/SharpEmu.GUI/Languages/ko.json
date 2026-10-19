@@ -269,6 +269,8 @@
   "Options.Scaling.Integer": "정수배",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "티어링 없는 출력을 위해 FIFO 프레젠테이션을 사용합니다.",
+  "Options.PortableData.Label": "포터블 데이터",
+  "Options.PortableData.Desc": "설정, 저장 데이터, 캐시를 시스템 프로필 대신 실행 파일 옆에 유지합니다. 다시 시작한 후에 적용됩니다.",
   "Options.Hdr.Label": "HDR 출력",
   "Options.Hdr.Desc": "선택한 디스플레이와 그래픽 백엔드가 지원하는 경우 HDR을 사용합니다. 자동 모드는 SDR로 대체됩니다.",
   "Options.Hdr.Auto": "자동",

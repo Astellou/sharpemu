@@ -154,6 +154,8 @@
   "Options.Scaling.Integer": "Integer",
   "Options.VSync.Label": "VSync",
   "Options.VSync.Desc": "Use FIFO presentation for tear-free output.",
+  "Options.PortableData.Label": "Portable data",
+  "Options.PortableData.Desc": "Keep settings, saves and caches next to the executable instead of the system profile. Applies after a restart.",
   "Options.Hdr.Label": "HDR output",
   "Options.Hdr.Desc": "Use HDR when the selected display and graphics backend support it. Auto falls back to SDR.",
   "Options.Hdr.Auto": "Auto",
