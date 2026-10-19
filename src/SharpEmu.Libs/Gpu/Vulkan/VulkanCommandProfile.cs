@@ -8,7 +8,9 @@ namespace SharpEmu.Libs.Gpu.Vulkan;
 
 internal sealed unsafe class VulkanCommandProfile : IDisposable
 {
-    internal const int QueryCapacity = 512;
+    internal const int QueryCapacity = 8192;
+    private const int KeyCapacity = 4096;
+    private const int ReportedKeys = 20;
     private const int BufferCapacity = 64;
     private readonly Vk _vulkan;
     private readonly Device _device;
@@ -22,6 +24,9 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
     private ulong _unavailableBuffers;
     internal bool PerCommandMarkers { get; set; } = Environment.GetEnvironmentVariable("SHARPEMU_PROFILE_GPU_DRAWS") == "1";
     private readonly List<(ulong Start, ulong End)> _spans = new();
+    private readonly ulong[] _values = new ulong[QueryCapacity * 2];
+    private Marker _heaviestMarker;
+    private double _heaviestMilliseconds;
 
     internal enum IntervalKind { Preparation, Draw, DrawIndexed, Dispatch, Tail, Overflow, MeshDraw }
     private readonly record struct IntervalKey(IntervalKind Kind, ulong Pipeline);
@@ -135,7 +140,7 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
         if (!queries.Submitted)
             return;
         queries.Submitted = false;
-        Span<ulong> values = stackalloc ulong[QueryCapacity * 2];
+        var values = _values;
         fixed (ulong* pointer = values)
         {
             var result = _vulkan.GetQueryPoolResults(_device, queries.Pool, 0, (uint)queries.Count,
@@ -160,7 +165,7 @@ internal sealed unsafe class VulkanCommandProfile : IDisposable
                 continue;
             var marker = queries.Markers[index];
             var key = marker.Key;
-            if (!_totals.ContainsKey(key) && _totals.Count >= 256)
+            if (!_totals.ContainsKey(key) && _totals.Count >= KeyCapacity)
                 key = new IntervalKey(IntervalKind.Overflow, 0);
             if (!_totals.TryGetValue(key, out var total))
                 _totals.Add(key, total = new IntervalTotal());
