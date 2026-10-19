@@ -116,17 +116,26 @@ release includes the MoltenVK Vulkan implementation.
 
 Place PS-Game-Patch XML files in `user/patches/<game-name>.xml` next to SharpEmu.
 Right-click a game in the library and open **Patches** to manage entries in a separate
-window. Only patches matching the installed game version are listed. Search or
+window. Version-specific patches are listed only when they match the installed
+game version; `AppVer="mask"` entries use pattern matching across versions. Search or
 filter by XML file, and select a patch to see its author, notes, version and target
 executable. Selections are saved automatically.
 Patches are off by default and take effect on the next
 launch, including CLI launches. Selections are saved separately per title ID.
 
 The loader matches `TitleID`, `AppVer` and `AppElf`, relocates addresses using
-`ImageBase`, and applies `Type="bytes"` writes to loaded memory, not game files.
-Unsupported line types and mismatched versions are not applied. Updating a patch's
-contents requires enabling it again. Only use patches from sources you trust.
-For a format example, see [PS-Game-Patch's Demon's Souls XML](https://github.com/illusionyy/PS-Game-Patch/blob/main/patches/xml_prospero/DemonSouls.xml).
+`ImageBase`, and modifies loaded memory, not game files or `.zar` archives.
+Supported types are `byte`, `bytes16`, `bytes32`, `bytes64`, `bytes`, `float32`,
+`float64`, `utf8`, `utf16`, `mask` and `mask_jump32`. Numbers are written in
+little-endian order; text is null-terminated automatically. Pattern searches are
+restricted to the target executable's loadable segments, and branch patches
+require executable segments and valid signed 32-bit displacements.
+
+Invalid lines, unresolved patterns and out-of-range writes reject the whole
+patch. `AppVer="mask"` requires every line to use `mask` or `mask_jump32`.
+Updating a patch's contents requires enabling it again. Only use patches from
+sources you trust. See [PS5 Game Patches](https://github.com/sharpemu/ps5patches)
+for the format reference, examples and available patches.
 
 > [!IMPORTANT]  
 > This project does **not** support or condone piracy.  

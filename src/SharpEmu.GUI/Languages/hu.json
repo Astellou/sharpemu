@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "Javítás verziója (PatchVer)",
   "Library.Patches.InstalledVersion": "Telepített játékverzió: {0}",
   "Library.Patches.TargetVersion": "Ehhez a játékverzióhoz: {0}",
+  "Library.Patches.PatternVersion": "Minden verzió (mintakeresés)",
   "Library.Patches.Executable": "Célzott futtatható fájl",
   "Library.Patches.File": "Javításfájl",
   "Library.Patches.Search": "Keresés a javítások, szerzők vagy megjegyzések között...",

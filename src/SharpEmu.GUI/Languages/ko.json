@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "패치 리비전 (PatchVer)",
   "Library.Patches.InstalledVersion": "설치된 게임 버전: {0}",
   "Library.Patches.TargetVersion": "게임 버전 {0}용",
+  "Library.Patches.PatternVersion": "모든 버전 (패턴 검색)",
   "Library.Patches.Executable": "대상 실행 파일",
   "Library.Patches.File": "패치 파일",
   "Library.Patches.Search": "패치, 제작자 또는 참고 사항 검색...",

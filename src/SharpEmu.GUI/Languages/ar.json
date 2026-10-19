@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "مراجعة التعديل (PatchVer)",
   "Library.Patches.InstalledVersion": "إصدار اللعبة المثبّت: {0}",
   "Library.Patches.TargetVersion": "لإصدار اللعبة {0}",
+  "Library.Patches.PatternVersion": "كل الإصدارات (مطابقة الأنماط)",
   "Library.Patches.Executable": "الملف التنفيذي المستهدف",
   "Library.Patches.File": "ملف التعديلات",
   "Library.Patches.Search": "البحث في التعديلات أو المؤلفين أو الملاحظات...",

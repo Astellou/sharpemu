@@ -43,6 +43,7 @@
   "Library.Patches.PatchVersion": "Révision du correctif (PatchVer)",
   "Library.Patches.InstalledVersion": "Version installée du jeu : {0}",
   "Library.Patches.TargetVersion": "Pour la version {0} du jeu",
+  "Library.Patches.PatternVersion": "Toutes les versions (recherche de motifs)",
   "Library.Patches.Executable": "Exécutable ciblé",
   "Library.Patches.File": "Fichier de correctifs",
   "Library.Patches.Search": "Rechercher des correctifs, auteurs ou notes...",

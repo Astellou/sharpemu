@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "Patchrevision (PatchVer)",
   "Library.Patches.InstalledVersion": "Installeret spilversion: {0}",
   "Library.Patches.TargetVersion": "Til spilversion {0}",
+  "Library.Patches.PatternVersion": "Alle versioner (mønstersøgning)",
   "Library.Patches.Executable": "Målets eksekverbare fil",
   "Library.Patches.File": "Patchfil",
   "Library.Patches.Search": "Søg i patches, forfattere eller noter...",

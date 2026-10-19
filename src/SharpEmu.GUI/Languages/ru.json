@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "Редакция патча (PatchVer)",
   "Library.Patches.InstalledVersion": "Установленная версия игры: {0}",
   "Library.Patches.TargetVersion": "Для версии игры {0}",
+  "Library.Patches.PatternVersion": "Все версии (поиск по шаблону)",
   "Library.Patches.Executable": "Целевой исполняемый файл",
   "Library.Patches.File": "Файл патчей",
   "Library.Patches.Search": "Поиск по патчам, авторам или примечаниям...",

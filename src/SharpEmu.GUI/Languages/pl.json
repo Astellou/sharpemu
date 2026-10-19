@@ -43,6 +43,7 @@
   "Library.Patches.PatchVersion": "Rewizja łatki (PatchVer)",
   "Library.Patches.InstalledVersion": "Zainstalowana wersja gry: {0}",
   "Library.Patches.TargetVersion": "Dla wersji gry {0}",
+  "Library.Patches.PatternVersion": "Wszystkie wersje (wyszukiwanie wzorca)",
   "Library.Patches.Executable": "Docelowy plik wykonywalny",
   "Library.Patches.File": "Plik łatek",
   "Library.Patches.Search": "Szukaj łatek, autorów lub uwag...",

@@ -3,6 +3,7 @@
 
 using SharpEmu.Core.Patches;
 using SharpEmu.GUI;
+using System.Xml.Linq;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.GUI;
@@ -71,6 +72,24 @@ public sealed class GamePatchOptionTests : IDisposable
         Assert.False(option.IsChecked);
         Assert.Empty(Repository.LoadEnabled("PPSA00001"));
         Assert.NotEmpty(option.Status);
+    }
+
+    [Fact]
+    public void PatternVersionCanBeSelectedAndEnabledForDifferentInstalledVersions()
+    {
+        var patch = GamePatch.Parse("Game.xml", XElement.Parse("""
+            <Metadata Name="Pattern patch" AppVer="mask" AppElf="eboot.bin">
+              <PatchList><Line Type="mask" Address="aa bb ?? cc" Value="90"/></PatchList>
+            </Metadata>
+            """));
+        var option = new GamePatchOption(patch, Repository, "PPSA00001", "01.007.000", false, false,
+            _ => Assert.Fail("Valid pattern patch should save."));
+        Assert.True(option.CanToggle);
+        Assert.False(option.HasStatus);
+        Assert.Equal(Localization.Instance.Get("Library.Patches.PatternVersion"), option.AppVersionText);
+        Assert.Equal(option.AppVersionText, option.TargetVersionText);
+        option.IsChecked = true;
+        Assert.Contains(patch.Id, Repository.LoadEnabled("PPSA00001"));
     }
 
     [Fact]

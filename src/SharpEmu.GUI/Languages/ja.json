@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "パッチのリビジョン (PatchVer)",
   "Library.Patches.InstalledVersion": "インストール済みのゲームバージョン: {0}",
   "Library.Patches.TargetVersion": "ゲームバージョン {0} 用",
+  "Library.Patches.PatternVersion": "全バージョン (パターン照合)",
   "Library.Patches.Executable": "対象の実行ファイル",
   "Library.Patches.File": "パッチファイル",
   "Library.Patches.Search": "パッチ、作者、注意事項を検索...",

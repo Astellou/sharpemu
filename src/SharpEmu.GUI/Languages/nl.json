@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "Patchrevisie (PatchVer)",
   "Library.Patches.InstalledVersion": "Geïnstalleerde spelversie: {0}",
   "Library.Patches.TargetVersion": "Voor spelversie {0}",
+  "Library.Patches.PatternVersion": "Alle versies (patroonzoeken)",
   "Library.Patches.Executable": "Uitvoerbaar doelbestand",
   "Library.Patches.File": "Patchbestand",
   "Library.Patches.Search": "Zoek in patches, auteurs of opmerkingen...",

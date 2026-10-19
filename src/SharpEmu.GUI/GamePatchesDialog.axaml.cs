@@ -131,7 +131,7 @@ public partial class GamePatchesDialog : Window
         DetailsName.Text = option?.Patch.Name;
         DetailsAuthor.Text = option?.Patch.Author;
         DetailsNote.Text = option?.Note;
-        DetailsAppVersion.Text = option?.Patch.AppVersion;
+        DetailsAppVersion.Text = option?.AppVersionText;
         DetailsPatchVersion.Text = option?.Patch.PatchVersion;
         DetailsExecutable.Text = option?.Patch.Executable;
         DetailsFile.Text = option?.Patch.FileName;

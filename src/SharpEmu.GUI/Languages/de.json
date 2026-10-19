@@ -41,6 +41,7 @@
   "Library.Patches.PatchVersion": "Patch-Revision (PatchVer)",
   "Library.Patches.InstalledVersion": "Installierte Spielversion: {0}",
   "Library.Patches.TargetVersion": "Für Spielversion {0}",
+  "Library.Patches.PatternVersion": "Alle Versionen (Mustersuche)",
   "Library.Patches.Executable": "Zielprogrammdatei",
   "Library.Patches.File": "Patch-Datei",
   "Library.Patches.Search": "Patches, Autoren oder Hinweise durchsuchen...",

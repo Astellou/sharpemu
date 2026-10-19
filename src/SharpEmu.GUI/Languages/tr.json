@@ -43,6 +43,7 @@
   "Library.Patches.PatchVersion": "Yama revizyonu (PatchVer)",
   "Library.Patches.InstalledVersion": "Kurulu oyun sürümü: {0}",
   "Library.Patches.TargetVersion": "Oyun sürümü: {0}",
+  "Library.Patches.PatternVersion": "Tüm sürümler (imza eşleştirme)",
   "Library.Patches.Executable": "Hedef çalıştırılabilir dosya",
   "Library.Patches.File": "Yama dosyası",
   "Library.Patches.Search": "Yama, yazar veya notlarda ara...",

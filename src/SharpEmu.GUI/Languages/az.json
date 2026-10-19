@@ -27,6 +27,7 @@
   "Library.Patches.PatchVersion": "Yama versiyası (PatchVer)",
   "Library.Patches.InstalledVersion": "Quraşdırılmış oyun versiyası: {0}",
   "Library.Patches.TargetVersion": "Oyun versiyası: {0}",
+  "Library.Patches.PatternVersion": "Bütün versiyalar (imza uyğunlaşdırması)",
   "Library.Patches.Executable": "Hədəf icra faylı",
   "Library.Patches.File": "Yama faylı",
   "Library.Patches.Search": "Yamalarda, müəlliflərdə və ya qeydlərdə axtar...",

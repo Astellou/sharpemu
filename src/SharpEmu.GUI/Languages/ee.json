@@ -43,6 +43,7 @@
   "Library.Patches.PatchVersion": "Paiga versioon (PatchVer)",
   "Library.Patches.InstalledVersion": "Installitud mänguversioon: {0}",
   "Library.Patches.TargetVersion": "Mänguversioonile {0}",
+  "Library.Patches.PatternVersion": "Kõik versioonid (mustriotsing)",
   "Library.Patches.Executable": "Sihtkäivitusfail",
   "Library.Patches.File": "Paigafail",
   "Library.Patches.Search": "Otsi paiku, autoreid või märkusi...",

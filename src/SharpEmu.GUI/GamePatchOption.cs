@@ -32,7 +32,8 @@ internal sealed class GamePatchOption : INotifyPropertyChanged
     public bool CanToggle { get; }
     public string Status { get; }
     public bool HasStatus => Status.Length > 0;
-    public string TargetVersionText => Localization.Instance.Format("Library.Patches.TargetVersion", Patch.AppVersion);
+    public string AppVersionText => Patch.IsPatternVersion ? Localization.Instance.Get("Library.Patches.PatternVersion") : Patch.AppVersion;
+    public string TargetVersionText => Patch.IsPatternVersion ? AppVersionText : Localization.Instance.Format("Library.Patches.TargetVersion", Patch.AppVersion);
     public string Note => Patch.Note.Replace("\\n", "\n");
 
     public bool IsChecked
