@@ -120,6 +120,11 @@ window. Version-specific patches are listed only when they match the installed
 game version; `AppVer="mask"` entries use pattern matching across versions. Search or
 filter by XML file, and select a patch to see its author, notes, version and target
 executable. Selections are saved automatically.
+Use **Download patches** in this window to fetch compatible XML files from
+[PS5 Game Patches](https://github.com/sharpemu/ps5patches). The download index
+matches both title ID and game version; unrelated games and incompatible
+versions are not downloaded. A dialog confirms completion or reports that no
+compatible patch was found. Downloads are not enabled automatically.
 Patches are off by default and take effect on the next
 launch, including CLI launches. Selections are saved separately per title ID.
 

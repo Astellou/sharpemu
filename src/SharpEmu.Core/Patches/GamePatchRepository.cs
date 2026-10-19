@@ -29,27 +29,9 @@ public sealed class GamePatchRepository
         {
             try
             {
-                using var reader = XmlReader.Create(path, new XmlReaderSettings
+                using var stream = File.OpenRead(path);
+                foreach (var patch in Read(Path.GetFileName(path), stream, titleId))
                 {
-                    DtdProcessing = DtdProcessing.Prohibit,
-                    XmlResolver = null,
-                    MaxCharactersInDocument = 4 << 20,
-                });
-                var root = XDocument.Load(reader).Root;
-                if (root?.Name != "Patch")
-                {
-                    throw new FormatException("The XML root must be Patch.");
-                }
-
-                if (root.Element("TitleID")?.Elements("ID").Any(id =>
-                        string.Equals(id.Value.Trim(), titleId, StringComparison.OrdinalIgnoreCase)) != true)
-                {
-                    continue;
-                }
-
-                foreach (var metadata in root.Elements("Metadata"))
-                {
-                    var patch = GamePatch.Parse(Path.GetFileName(path), metadata);
                     if (patch.Error is not null)
                     {
                         warning?.Invoke($"{Path.GetFileName(path)} / {patch.Name}: {patch.Error}");
@@ -68,6 +50,24 @@ public sealed class GamePatchRepository
         }
 
         return patches;
+    }
+
+    public static IReadOnlyList<GamePatch> Read(string fileName, Stream stream, string titleId)
+    {
+        using var reader = XmlReader.Create(stream, new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            MaxCharactersInDocument = 4 << 20,
+        });
+        var root = XDocument.Load(reader).Root;
+        if (root?.Name != "Patch") throw new FormatException("The XML root must be Patch.");
+        if (root.Element("TitleID")?.Elements("ID").Any(id =>
+                string.Equals(id.Value.Trim(), titleId, StringComparison.OrdinalIgnoreCase)) != true)
+            return [];
+
+        return root.Elements("Metadata").Select(metadata => GamePatch.Parse(Path.GetFileName(fileName), metadata))
+            .DistinctBy(patch => patch.Id).ToArray();
     }
 
     public HashSet<string> LoadEnabled(string titleId)

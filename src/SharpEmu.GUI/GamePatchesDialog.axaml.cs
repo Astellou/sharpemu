@@ -3,10 +3,13 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Xml;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using SharpEmu.Core.Patches;
 
@@ -19,7 +22,9 @@ public partial class GamePatchesDialog : Window
     private readonly bool _readOnly;
     private IReadOnlyList<GamePatchOption> _options = [];
     private bool _loading;
+    private bool _downloading;
     private bool _closed;
+    private readonly CancellationTokenSource _downloadCancellation = new();
     private bool _filtering;
     private GamePatchOption? _detailsOption;
     private bool _detailsInitialized;
@@ -30,6 +35,7 @@ public partial class GamePatchesDialog : Window
         CloseButton.Click += (_, _) => Close();
         OpenFolderButton.Click += (_, _) => OpenFolder();
         ReloadButton.Click += async (_, _) => await ReloadAsync();
+        DownloadButton.Click += async (_, _) => await DownloadAsync();
         SearchBox.TextChanged += (_, _) => ApplyFilter();
         FileFilter.SelectionChanged += (_, _) => { if (!_loading) ApplyFilter(); };
         PatchList.SelectionChanged += (_, _) =>
@@ -38,13 +44,19 @@ public partial class GamePatchesDialog : Window
         };
         PatchList.AddHandler(PointerPressedEvent, OnPatchInteraction, RoutingStrategies.Tunnel, handledEventsToo: true);
         PatchList.AddHandler(GotFocusEvent, OnPatchInteraction, RoutingStrategies.Bubble, handledEventsToo: true);
-        Closed += (_, _) => _closed = true;
+        Closed += (_, _) =>
+        {
+            _closed = true;
+            _downloadCancellation.Cancel();
+            _downloadCancellation.Dispose();
+        };
     }
 
     public GamePatchesDialog(GameEntry game, bool readOnly) : this()
     {
         _game = game;
         _readOnly = readOnly;
+        UpdateBusyState();
         GameNameText.Text = game.Name;
         GameInfoText.Text = $"{game.TitleId}\n" + Localization.Instance.Format("Library.Patches.InstalledVersion", game.Version ?? "?");
         GameCover.Source = game.Cover;
@@ -59,8 +71,7 @@ public partial class GamePatchesDialog : Window
     {
         if (_loading || _game?.TitleId is not { } titleId) return;
         _loading = true;
-        ReloadButton.IsEnabled = false;
-        PatchList.IsEnabled = false;
+        UpdateBusyState();
         StatusText.Text = string.Empty;
         EmptyText.Text = Localization.Instance.Get("Library.Patches.Loading");
         ShowDetails(null);
@@ -92,11 +103,90 @@ public partial class GamePatchesDialog : Window
             _loading = false;
             if (!_closed)
             {
-                ReloadButton.IsEnabled = true;
-                PatchList.IsEnabled = true;
+                UpdateBusyState();
                 ApplyFilter();
             }
         }
+    }
+
+    private void UpdateBusyState()
+    {
+        ReloadButton.IsEnabled = !_loading && !_downloading;
+        DownloadButton.IsEnabled = !_readOnly && !_loading && !_downloading && _game?.TitleId is not null;
+        PatchList.IsEnabled = !_loading && !_downloading;
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (_loading || _downloading || _readOnly || _game?.TitleId is not { } titleId) return;
+        _downloading = true;
+        UpdateBusyState();
+        StatusText.Text = string.Empty;
+        HintText.Text = Localization.Instance.Get("Library.Patches.Downloading");
+        try
+        {
+            var count = await GamePatchDownloader.DownloadAsync(titleId, _game.Version, _repository.DirectoryPath, _downloadCancellation.Token);
+            if (_closed) return;
+            StatusText.Text = string.Empty;
+            if (count > 0)
+            {
+                SearchBox.Text = string.Empty;
+                await ReloadAsync();
+            }
+            if (!_closed)
+                await ShowDownloadMessageAsync(count > 0
+                    ? Localization.Instance.Get("Library.Patches.DownloadComplete")
+                    : Localization.Instance.Format("Library.Patches.DownloadNotFound", _game.Name, _game.Version ?? "?"));
+        }
+        catch (OperationCanceledException) when (_closed)
+        {
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or UnauthorizedAccessException or
+            JsonException or XmlException or FormatException or ArgumentException or OperationCanceledException)
+        {
+            if (_closed) return;
+            ReportError(exception.Message);
+            await ShowDownloadMessageAsync(Localization.Instance.Format("Library.Patches.DownloadFailed", exception.Message));
+        }
+        finally
+        {
+            _downloading = false;
+            if (!_closed)
+            {
+                HintText.Text = Localization.Instance.Get(_readOnly ? "Library.Patches.Running" : "Library.Patches.AutoSave");
+                UpdateBusyState();
+            }
+        }
+    }
+
+    private Task ShowDownloadMessageAsync(string message)
+    {
+        var close = new Button
+        {
+            Content = Localization.Instance.Get("Exit.Ok"),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            IsDefault = true,
+            IsCancel = true,
+            Classes = { "accent" },
+        };
+        var dialog = new Window
+        {
+            Title = Localization.Instance.Get("Library.Patches.Download"),
+            Width = 440,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Background,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(24),
+                Spacing = 20,
+                Children = { new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap }, close },
+            },
+        };
+        close.Click += (_, _) => dialog.Close();
+        return dialog.ShowDialog(this);
     }
 
     private void ApplyFilter()

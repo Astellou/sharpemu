@@ -100,12 +100,14 @@ SPDX-License-Identifier: GPL-2.0-or-later
         <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}" />
       </ScrollViewer>
     </StackPanel>
-    <Grid Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="Auto,Auto,*,Auto">
+    <Grid Grid.Row="2" Grid.ColumnSpan="3" ColumnDefinitions="Auto,Auto,*,Auto,Auto">
       <Button x:Name="OpenFolderButton" Classes="ghost"
               Content="{Binding [Library.Patches.OpenFolder], Source={x:Static local:Localization.Instance}}" />
       <Button x:Name="ReloadButton" Grid.Column="1" Classes="ghost" Margin="10,0,0,0"
               Content="{Binding [Library.Patches.Reload], Source={x:Static local:Localization.Instance}}" />
-      <Button x:Name="CloseButton" Grid.Column="3" Classes="accent"
+      <Button x:Name="DownloadButton" Grid.Column="3" Classes="ghost" Margin="0,0,10,0"
+              Content="{Binding [Library.Patches.Download], Source={x:Static local:Localization.Instance}}" />
+      <Button x:Name="CloseButton" Grid.Column="4" Classes="accent"
               Content="{Binding [Library.Patches.Close], Source={x:Static local:Localization.Instance}}" />
     </Grid>
   </Grid>
