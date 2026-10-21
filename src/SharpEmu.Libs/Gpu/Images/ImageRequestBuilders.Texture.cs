@@ -257,12 +257,14 @@ public static partial class ImageRequestBuilders
         var volume = type == GuestImageType.Color3D;
         var layered = type is GuestImageType.Color1DArray or GuestImageType.Color2DArray or GuestImageType.Color2DMsaaArray;
         var imageLayers = layered ? depth : 1;
+        // Cube image_load/store can address a face subset. Our 2D-array views need
+        // valid slice bounds, not the six-face alignment required by native cube views.
         if (shape.Cube &&
-            (volume || multisampled || width != height || descriptor.BaseArray > descriptor.Depth ||
-             (descriptor.Depth - descriptor.BaseArray + 1) % 6 != 0))
+            (volume || multisampled || width != height || descriptor.BaseArray > descriptor.Depth))
         {
             throw SubmissionScheduler.Fatal(
-                $"The cubemap view is invalid: address=0x{address:X16} extent={width}x{height} layers={imageLayers} baseArray={descriptor.BaseArray} samples={samples}.");
+                $"The cubemap view is invalid: address=0x{address:X16} extent={width}x{height} layers={imageLayers} baseArray={descriptor.BaseArray} samples={samples} " +
+                $"type={descriptor.Type} shape={shape} shaderHash=0x{shaderHash:X16} image={imageIndex} words={Convert.ToHexString(System.Runtime.InteropServices.MemoryMarshal.AsBytes(padded))}.");
         }
         uint pitch;
         TileSizeAndAlignment size;

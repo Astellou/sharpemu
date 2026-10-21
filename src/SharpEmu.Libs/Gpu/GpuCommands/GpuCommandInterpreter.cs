@@ -132,6 +132,7 @@ public sealed partial class GpuCommandInterpreter
 
     public void Reset()
     {
+        var before = TypedRegisters.Context;
         _lastWriteLength = 0;
         Registers.Reset();
         TypedRegisters.Reset();
@@ -141,6 +142,8 @@ public sealed partial class GpuCommandInterpreter
         DrawIndirectArgumentsBase = 0;
         DispatchIndirectArgumentsBase = 0;
         Array.Clear(_constantRam);
+        if (Rendering.ScissorTrace.Instance is { Active: true } trace)
+            trace.ContextOperation(SubmitId, QueueId, 0, "Reset", TypedRegisters, before);
     }
 
     // The queue-reset packets also drop the index base, the instance count and the wait condition.

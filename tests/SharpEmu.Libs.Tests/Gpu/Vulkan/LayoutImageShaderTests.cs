@@ -301,6 +301,61 @@ public sealed class LayoutImageShaderTests(HeadlessVulkanFixture fixture, ITestO
     }
 
     [Fact]
+    public void CubeFaceCopy_LoadsAndStoresThroughSingleLayerArrayViews()
+    {
+        var vulkan = fixture.Vulkan;
+        if (!GatePrerequisites.Ready(vulkan)) return;
+        var instructions = new List<Gen5ShaderInstruction>();
+        uint pc = 0;
+        foreach (var (register, address) in new[] { (FirstImageRegister, FirstImageAddress), (SecondImageRegister, SecondImageAddress) })
+        {
+            var words = RegisterWords.Texture(address << 8, GuestPixelFormat.Bits32Float, 8, 8, GuestImageType.Cube);
+            for (uint word = 0; word < 8; word++, pc += 8)
+                instructions.Add(MoveScalar(pc, register + word, words[word]));
+        }
+        for (uint register = 0; register < 3; register++, pc += 8)
+            instructions.Add(MoveVector(pc, register, 0));
+        instructions.Add(Image(pc, "ImageLoad", FirstImageRegister, dimension: 5, dmask: 1)); pc += 8;
+        instructions.Add(Image(pc, "ImageStore", SecondImageRegister, dimension: 5, dmask: 1)); pc += 8;
+        instructions.Add(BufferAccess(pc, "BufferStoreDword", ResultRegister, 0, 1, vectorData: 4)); pc += 8;
+        instructions.Add(EndProgram(pc));
+
+        using var run = new Run(vulkan, Program([.. instructions]), UserData(), 1);
+        var shape = new ShaderImageShape(false, true, true, false, false, TextureNumericClass.Float);
+        var sourceRequest = ImageRequestBuilders.Texture(RegisterWords.Texture(ArrayBackedSpace.Base,
+            GuestPixelFormat.Bits32Float, 8, 8, GuestImageType.Cube), shape).Request;
+        var targetRequest = ImageRequestBuilders.Texture(RegisterWords.Texture(ArrayBackedSpace.Base + 0x10000,
+            GuestPixelFormat.Bits32Float, 8, 8, GuestImageType.Cube), shape with { Storage = true }).Request;
+        var source = run.Harness.CreateImage(sourceRequest.Description);
+        var target = run.Harness.CreateImage(targetRequest.Description);
+        run.Harness.UploadImage(source, MemoryMarshal.AsBytes<float>(Enumerable.Repeat(0.25f, 64).ToArray()),
+            ImageTestHarness.WholeImageCopies(source.Description, 0));
+        var views = new Dictionary<int, DescriptorImageInfo[]>
+        {
+            [run.ResourceAt(FirstImageAddress)] = [new()
+            {
+                ImageView = source.GetOrCreateView(sourceRequest.View),
+                ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+            }],
+            [run.ResourceAt(SecondImageAddress)] = [new()
+            {
+                ImageView = target.GetOrCreateView(targetRequest.View),
+                ImageLayout = ImageLayout.General,
+            }],
+        };
+        run.Dispatch(run.BindImages(views), command =>
+        {
+            source.Transition(ImageLayout.ShaderReadOnlyOptimal, AccessFlags.ShaderReadBit, null, command);
+            target.Transition(ImageLayout.General, AccessFlags.ShaderWriteBit, null, command);
+        });
+
+        Assert.Equal(BitConverter.SingleToUInt32Bits(0.25f), run.ResultWord(0));
+        var copied = run.Harness.ReadImage(target, ImageTestHarness.WholeImageCopies(target.Description, 0), 256);
+        Assert.Equal(BitConverter.SingleToUInt32Bits(0.25f), BinaryPrimitives.ReadUInt32LittleEndian(copied));
+        run.Harness.AssertNoValidationMessages();
+    }
+
+    [Fact]
     public void PointOnlyImage_SamplesThroughTheDuplicatedSampler()
     {
         var vulkan = fixture.Vulkan;

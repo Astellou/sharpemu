@@ -394,6 +394,62 @@ public sealed class ImageRequestBuildersTests : IClassFixture<HeadlessVulkanFixt
         Assert.Equal(1u, single.View.LayerCount);
     }
 
+    [Theory]
+    [InlineData(false, 1u, 0u)]
+    [InlineData(true, 1u, 0u)]
+    [InlineData(false, 6u, 5u)]
+    [InlineData(true, 6u, 5u)]
+    [InlineData(false, 6u, 3u)]
+    [InlineData(true, 6u, 3u)]
+    public void Texture_CubeFaceCopiesAcceptPartialArrayViews(bool storage, uint layers, uint baseArray)
+    {
+        using var fatal = new FatalScope();
+        var words = RegisterWords.Texture(Base, GuestPixelFormat.Bits16_16_16_16Float,
+            8, 8, GuestImageType.Cube, layers: layers, baseArray: baseArray);
+        var shape = Sampled2D with { Cube = true, Arrayed = true, Storage = storage };
+        var request = ImageRequestBuilders.Texture(words, shape).Request;
+
+        Assert.Equal(new SubresourceCount(1, layers), request.Description.Resources);
+        Assert.Equal(ImageViewType.Type2DArray, request.View.Type);
+        Assert.Equal(baseArray, request.View.BaseLayer);
+        Assert.Equal(layers - baseArray, request.View.LayerCount);
+        Assert.Equal(storage ? ImageUsageFlags.StorageBit : ImageUsageFlags.SampledBit, request.View.Usage);
+        Assert.Empty(fatal.Messages);
+
+        if (!GatePrerequisites.Ready(_vulkan)) return;
+        using var harness = new ImageTestHarness(_vulkan);
+        var image = harness.CreateImage(request.Description);
+        Assert.NotEqual(0UL, image.GetOrCreateView(request.View).Handle);
+        harness.AssertNoValidationMessages();
+    }
+
+    [Fact]
+    public void Texture_CapturedSingleFaceCubeDescriptorRemainsOneFace()
+    {
+        using var fatal = new FatalScope();
+        uint[] words = [0x033E4800, 0xC4700000, 0x0001C001, 0xB0900FAC, 0, 0x00700000, 0, 0];
+        var request = ImageRequestBuilders.Texture(words,
+            Sampled2D with { Cube = true, Arrayed = true }, 0x393A86CB7E41375C, 0).Request;
+
+        Assert.Equal(new Extent3D(8, 8, 1), request.Description.Extent);
+        Assert.Equal(new SubresourceCount(1, 1), request.Description.Resources);
+        Assert.Equal(Format.R16G16B16A16Sfloat, request.View.Format);
+        Assert.Equal(ImageViewType.Type2DArray, request.View.Type);
+        Assert.Equal(1u, request.View.LayerCount);
+    }
+
+    [Theory]
+    [InlineData(8u, 16u, 0u)]
+    [InlineData(8u, 8u, 1u)]
+    public void Texture_CubeStillRejectsInvalidExtentOrSliceBounds(uint width, uint height, uint baseArray)
+    {
+        using var fatal = new FatalScope();
+        var words = RegisterWords.Texture(Base, GuestPixelFormat.Bits16_16_16_16Float,
+            width, height, GuestImageType.Cube, layers: 1, baseArray: baseArray);
+        Assert.Throws<SchedulerFatalException>(() =>
+            ImageRequestBuilders.Texture(words, Sampled2D with { Cube = true, Arrayed = true }));
+    }
+
     [Fact]
     public void Texture_NullDescriptorBindsAOneTexelImage()
     {
