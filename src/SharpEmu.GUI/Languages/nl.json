@@ -75,6 +75,7 @@
   "Library.Stat.Version": "Versie",
   "Library.Stat.Installed": "Geïnstalleerd",
   "Library.Stat.TitleId": "Titel-ID",
+  "Library.Stat.CompatibilityMode": "Compatibiliteitsmodus",
   "Common.Back": "Terug",
 
   "Library.Music.Volume": "Volume van gamemuziek",
@@ -274,6 +275,9 @@
   "Options.Hdr.Label": "HDR-uitvoer",
   "Options.Hdr.Desc": "Gebruik HDR wanneer het geselecteerde beeldscherm en de grafische backend dit ondersteunen. Automatisch valt terug op SDR.",
   "Options.Hdr.Auto": "Automatisch",
+  "Options.GpuReadbacks.Label": "GPU-teruglezen",
+  "Options.GpuReadbacks.Desc": "Volledig: de opdrachtprocessor wacht op de waarden die de GPU schrijft. Het nauwkeurigst, maar kan haperingen veroorzaken.\nUit: wachtopdrachten gaan verder met de waarde die al in het geheugen staat als die aan de voorwaarde voldoet. Vloeiender, maar sommige games kunnen grafische fouten tonen.\nGeldt vanaf de volgende keer dat de game start.",
+  "Options.GpuReadbacks.Full": "Volledig",
   "Options.Env.BinkPlayback.Label": "Bink-video afspelen",
   "Options.Env.BinkPlayback.Desc": "Host speelt Bink-video's af via de FFmpeg-brug, maar sommige games kunnen problemen hebben.\nGuest gebruikt de eigen decoder van de game-engine.\nSkip slaat Bink-video's over, wat de ontwikkeling kan vergemakkelijken.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -284,10 +288,16 @@
   "Options.Env.TrophyTest.Desc": "Kies een game en een trofee en toon vervolgens de ontgrendelingsmelding. Er wordt niets ontgrendeld.",
   "Options.Env.TrophyTest.Show": "Melding tonen",
   "Options.Env.TrophySound.Label": "Trofee-geluid",
-  "Options.Env.TrophySound.Desc": "Speelt een kort geluidje af wanneer een trofee wordt ontgrendeld."
-,
+  "Options.Env.TrophySound.Desc": "Speelt een kort geluidje af wanneer een trofee wordt ontgrendeld.",
+
+  "Options.GnmMode.TrophyKey.Label": "Trofeesleutel",
+  "Options.GnmMode.TrophyKey.Desc": "PS4-trofeesleutel voor versleutelde trofeenamen en beschrijvingen. Gebruikt door de trofeelijsten en ontgrendelingsmeldingen van GnmMode. Wordt lokaal opgeslagen; herstart een actief spel na een wijziging.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 hexadecimale tekens",
+  "Options.GnmMode.TrophyKey.Invalid": "Voer precies 32 hexadecimale tekens (0–9, A–F) in of wis het veld om de sleutel te verwijderen. De vorige geldige sleutel blijft behouden totdat de invoer geldig is.",
+
   "Trophies.Title": "Trofeeën",
   "Trophies.None": "Deze game heeft geen trofeeën.",
+  "Trophies.GnmMode.KeyHint": "Voor het laden van PS4-trofeeën kan een trofeesleutel nodig zijn. Voer deze in via {0} → GnmMode → {1}.",
   "Trophies.Loading": "Trofeeën laden…",
   "Trophies.Hidden": "Verborgen trofee",
   "Trophies.HiddenDescription": "Klik om deze trofee te onthullen.",

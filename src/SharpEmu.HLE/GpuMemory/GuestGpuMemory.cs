@@ -11,6 +11,12 @@ public interface IGpuQueueRelay
 
     void Post(Action work);
 
+    bool TryPost(Action work)
+    {
+        Post(work);
+        return true;
+    }
+
     // Return after the work completes. Run it directly when called on the GPU worker.
     void RunOnGpuQueue(Action work);
 
@@ -31,6 +37,9 @@ public sealed class GuestGpuMemory : IDisposable
     private readonly ReaderWriterLockSlim _spansLock = new();
     private readonly SpanSet _spans = new();
     private SpanSnapshot? _spanSnapshot = SpanSnapshot.Empty;
+    private readonly SpanSet _lazySpans = new();
+    private SpanSnapshot _lazySnapshot = SpanSnapshot.Empty;
+    private static long _lazyCoveredWrites;
     private long _spanVersion;
 
     public long SpanVersion => Interlocked.Read(ref _spanVersion);
@@ -71,7 +80,7 @@ public sealed class GuestGpuMemory : IDisposable
         // that reaches into the next page faults again there.
         const ulong accessBytes = 8;
         var faultSize = Math.Min(accessBytes, TrackerLayout.PageBytes - (address & (TrackerLayout.PageBytes - 1)));
-        if (!Covers(address, faultSize))
+        if (!CoversWrites(address, faultSize))
         {
             TraceFault("unregistered");
             return false;
@@ -87,7 +96,11 @@ public sealed class GuestGpuMemory : IDisposable
         bool handled;
         if (kind == FaultKind.Write)
         {
-            handled = (buffers?.MarkCpuWrite(address, faultSize) ?? false) | (images?.MarkCpuWrite(address, faultSize) ?? false);
+            var groupAddress = address & ~(GuestWriteGranule - 1);
+            var (markAddress, markSize) = CoversWrites(groupAddress, GuestWriteGranule) && GuestPermits(kind, groupAddress) && GuestPermits(kind, groupAddress + GuestWriteGranule - 1)
+                ? (groupAddress, GuestWriteGranule)
+                : (address, faultSize);
+            handled = (buffers?.MarkCpuWrite(markAddress, markSize) ?? false) | (images?.MarkCpuWrite(address, faultSize) ?? false);
         }
         else
         {
@@ -139,11 +152,19 @@ public sealed class GuestGpuMemory : IDisposable
         return true;
     }
 
+    private const ulong GuestWriteGranule = 0x4000;
+
+
     public bool MarkCpuWrite(ulong address, ulong size)
     {
-        if (!Covers(address, size))
+        if (!CoversWrites(address, size))
         {
             return false;
+        }
+
+        if (!Covers(address, size))
+        {
+            Interlocked.Increment(ref _lazyCoveredWrites);
         }
 
         _ = Buffers?.MarkCpuWrite(address, size);
@@ -156,7 +177,7 @@ public sealed class GuestGpuMemory : IDisposable
     // without a fault. Both stores mark those pages again.
     public void MarkCpuWriteLanded(ulong address, ulong size)
     {
-        if (!Covers(address, size))
+        if (!CoversWrites(address, size))
         {
             return;
         }
@@ -164,6 +185,38 @@ public sealed class GuestGpuMemory : IDisposable
         // The new bytes must be visible before the store reads its page state.
         Interlocked.MemoryBarrier();
         Buffers?.MarkCpuWriteLanded(address, size);
+        _ = Images?.MarkCpuWrite(address, size);
+    }
+
+    public void PrepareEmulatorWrite(ulong address, ulong size)
+    {
+        if (!CoversWrites(address, size))
+        {
+            return;
+        }
+
+        if (Buffers is { } buffers && buffers.MayHoldGpuData(address, size))
+        {
+            _ = buffers.MarkCpuWrite(address, size);
+        }
+
+        _ = Images?.MarkCpuWrite(address, size);
+    }
+
+    public void NoteEmulatorWrite(ulong address, ulong size)
+    {
+        if (!CoversWrites(address, size))
+        {
+            return;
+        }
+
+        if (!Covers(address, size))
+        {
+            Interlocked.Increment(ref _lazyCoveredWrites);
+        }
+
+        Interlocked.MemoryBarrier();
+        _ = Buffers?.NoteEmulatorWrite(address, size);
         _ = Images?.MarkCpuWrite(address, size);
     }
 
@@ -183,6 +236,44 @@ public sealed class GuestGpuMemory : IDisposable
     {
         var snapshot = Volatile.Read(ref _spanSnapshot) ?? throw new ObjectDisposedException(nameof(GuestGpuMemory));
         return snapshot.TryGetContaining(address, out start, out end);
+    }
+
+    // Lazily backed guest ranges (the PRT aperture) hold GPU cache entries without a registered span.
+    private bool CoversWrites(ulong address, ulong size) =>
+        Covers(address, size) || (new GuestSpan(address, size).IsValid && Volatile.Read(ref _lazySnapshot).Contains(address, size));
+
+    public static long LazyCoveredWrites => Interlocked.Read(ref _lazyCoveredWrites);
+
+    public void RegisterLazyRange(ulong address, ulong size)
+    {
+        if (GuestGpuMemoryHook.Traces(address, size))
+            GuestGpuMemoryHook.Trace(address, size, "lazy-range");
+        _spansLock.EnterWriteLock();
+        try
+        {
+            _lazySpans.Add(address, size);
+            Volatile.Write(ref _lazySnapshot, _lazySpans.Snapshot());
+        }
+        finally
+        {
+            _spansLock.ExitWriteLock();
+        }
+
+        _pages.Permissions.Set(address, size, GuestPageProtection.Read | GuestPageProtection.Write);
+    }
+
+    public void UnregisterLazyRange(ulong address, ulong size)
+    {
+        _spansLock.EnterWriteLock();
+        try
+        {
+            _lazySpans.Remove(address, size);
+            Volatile.Write(ref _lazySnapshot, _lazySpans.Snapshot());
+        }
+        finally
+        {
+            _spansLock.ExitWriteLock();
+        }
     }
 
     public void ForEachSpan(Action<ulong, ulong> visit)
@@ -207,15 +298,7 @@ public sealed class GuestGpuMemory : IDisposable
             return false;
         }
 
-        _spansLock.EnterReadLock();
-        try
-        {
-            return _spans.Overlaps(address, size);
-        }
-        finally
-        {
-            _spansLock.ExitReadLock();
-        }
+        return Volatile.Read(ref _spanSnapshot).Overlaps(address, size);
     }
 
     // The host mapping takes the guest protection here; the views themselves are mapped read-write.
@@ -244,6 +327,40 @@ public sealed class GuestGpuMemory : IDisposable
             _pages.Permissions.Set(address, size, protection);
         using (GuestMemoryProfile.Measure(GuestMemoryProfile.Operation.MappingRegisterReapply))
             _pages.Reapply(address, size);
+        InvalidateMappedContent(address, size);
+    }
+
+    private static long _mappedContentInvalidations;
+    private static long _mappedContentOwned;
+
+    public static long MappedContentInvalidations => Interlocked.Read(ref _mappedContentInvalidations);
+
+    public static long MappedContentOwned => Interlocked.Read(ref _mappedContentOwned);
+
+    private void InvalidateMappedContent(ulong address, ulong size)
+    {
+        var attachment = Volatile.Read(ref _attachment);
+        if (attachment?.Gpu is { } gpu && !gpu.IsGpuQueueThread)
+        {
+            _ = gpu.TryPost(() => MarkMappedContent(address, size));
+            return;
+        }
+
+        MarkMappedContent(address, size);
+    }
+
+    private void MarkMappedContent(ulong address, ulong size)
+    {
+        Interlocked.Increment(ref _mappedContentInvalidations);
+        var buffers = Buffers?.MarkCpuWrite(address, size) ?? false;
+        var images = Images?.MarkCpuWrite(address, size) ?? false;
+        if (buffers || images)
+        {
+            Interlocked.Increment(ref _mappedContentOwned);
+        }
+
+        if (GuestGpuMemoryHook.Traces(address, size))
+            GuestGpuMemoryHook.Trace(address, size, $"map-content buffers={buffers} images={images}");
     }
 
     // A guest mprotect on a covered range: the ledger changes, then every page gets its derived protection.

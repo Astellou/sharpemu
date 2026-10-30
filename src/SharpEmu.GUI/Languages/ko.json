@@ -75,6 +75,7 @@
   "Library.Stat.Version": "버전",
   "Library.Stat.Installed": "설치됨",
   "Library.Stat.TitleId": "타이틀 ID",
+  "Library.Stat.CompatibilityMode": "호환 모드",
   "Common.Back": "뒤로",
 
   "Library.Music.Volume": "게임 음악 볼륨",
@@ -274,6 +275,9 @@
   "Options.Hdr.Label": "HDR 출력",
   "Options.Hdr.Desc": "선택한 디스플레이와 그래픽 백엔드가 지원하는 경우 HDR을 사용합니다. 자동 모드는 SDR로 대체됩니다.",
   "Options.Hdr.Auto": "자동",
+  "Options.GpuReadbacks.Label": "GPU 리드백",
+  "Options.GpuReadbacks.Desc": "전체: 명령 프로세서가 GPU가 기록한 값을 기다립니다. 가장 정확하지만 끊김이 생길 수 있습니다.\n끔: 메모리에 이미 있는 값이 조건을 만족하면 기다리지 않고 계속합니다. 더 부드럽지만 일부 게임에서 그래픽 오류가 나타날 수 있습니다.\n다음 게임 실행부터 적용됩니다.",
+  "Options.GpuReadbacks.Full": "전체",
   "Options.Env.BinkPlayback.Label": "Bink 비디오 재생",
   "Options.Env.BinkPlayback.Desc": "Host는 FFmpeg 브리지를 통해 Bink 비디오를 재생하지만 일부 게임에서 문제가 발생할 수 있습니다.\nGuest는 게임 엔진 자체 디코더를 사용합니다.\nSkip은 Bink 비디오를 건너뛰어 개발을 더 쉽게 할 수 있습니다.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -284,10 +288,16 @@
   "Options.Env.TrophyTest.Desc": "게임과 트로피를 고른 다음 잠금 해제 알림을 표시합니다. 실제로 획득되지는 않습니다.",
   "Options.Env.TrophyTest.Show": "알림 표시",
   "Options.Env.TrophySound.Label": "트로피 소리",
-  "Options.Env.TrophySound.Desc": "트로피를 획득하면 짧은 알림음을 재생합니다."
-,
+  "Options.Env.TrophySound.Desc": "트로피를 획득하면 짧은 알림음을 재생합니다.",
+
+  "Options.GnmMode.TrophyKey.Label": "트로피 키",
+  "Options.GnmMode.TrophyKey.Desc": "암호화된 트로피 이름과 설명에 사용하는 PS4 트로피 키입니다. GnmMode 트로피 목록과 획득 알림에 사용됩니다. 로컬에 저장되며, 변경 후에는 실행 중인 게임을 다시 시작해야 합니다.",
+  "Options.GnmMode.TrophyKey.Placeholder": "16진수 문자 32개",
+  "Options.GnmMode.TrophyKey.Invalid": "16진수 문자(0–9, A–F)를 정확히 32개 입력하거나, 키를 삭제하려면 입력란을 비우세요. 입력값이 유효해질 때까지 이전의 유효한 키가 유지됩니다.",
+
   "Trophies.Title": "트로피",
   "Trophies.None": "이 게임에는 트로피가 없습니다.",
+  "Trophies.GnmMode.KeyHint": "PS4 트로피를 불러오려면 트로피 키가 필요할 수 있습니다. {0} → GnmMode → {1}에서 입력하세요.",
   "Trophies.Loading": "트로피 불러오는 중…",
   "Trophies.Hidden": "숨겨진 트로피",
   "Trophies.HiddenDescription": "클릭하여 이 트로피를 표시합니다.",

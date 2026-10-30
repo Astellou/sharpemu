@@ -62,6 +62,7 @@
   "Library.Stat.Version": "Versiya",
   "Library.Stat.Installed": "Quraşdırılıb",
   "Library.Stat.TitleId": "Oyunun ID-si",
+  "Library.Stat.CompatibilityMode": "Uyğunluq rejimi",
   "Common.Back": "Geri qayıt",
 
   "Library.Music.Volume": "Oyun musiqisinin səs səviyyəsi",
@@ -129,6 +130,9 @@
   "Options.Hdr.Label": "HDR çıxışı",
   "Options.Hdr.Desc": "Seçilmiş ekran və qrafik alt sistem dəstəklədikdə HDR istifadə edin. Avtomatik rejimdə dəstək yoxdursa, SDR istifadə olunur.",
   "Options.Hdr.Auto": "Avtomatik",
+  "Options.GpuReadbacks.Label": "GPU geri oxuma",
+  "Options.GpuReadbacks.Desc": "Tam: əmr prosessoru GPU-nun yazdığı dəyərləri gözləyir. Ən dəqiq ayardır, lakin donmalara səbəb ola bilər.\nDeaktiv: yaddaşdakı mövcud dəyər şərti ödəyirsə, gözləmədən davam edilir. Daha axıcıdır, lakin bəzi oyunlarda qrafik xətaları görünə bilər.\nOyunun növbəti açılışında tətbiq olunur.",
+  "Options.GpuReadbacks.Full": "Tam",
   "Options.Env.BinkPlayback.Label": "Bink video oynadılması",
   "Options.Env.BinkPlayback.Desc": "Host Bink videolarını FFmpeg körpüsü vasitəsilə oynadır, lakin bəzi oyunlarda problemlər yarana bilər.\nGuest oyunun öz dekoderindən istifadə edir.\nSkip Bink videolarını ötürür və bu, inkişaf prosesini asanlaşdıra bilər.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -140,6 +144,11 @@
   "Options.Env.TrophyTest.Show": "Bildirişi göstər",
   "Options.Env.TrophySound.Label": "Kubok səsi",
   "Options.Env.TrophySound.Desc": "Kubok açılanda qısa bir səs çalınır.",
+
+  "Options.GnmMode.TrophyKey.Label": "Kubok açarı",
+  "Options.GnmMode.TrophyKey.Desc": "Şifrələnmiş kubok adları və təsvirləri üçün PS4 kubok açarı. GnmMode kubok siyahılarında və kubok açılma bildirişlərində istifadə olunur. Yerli olaraq saxlanılır; dəyişdirdikdən sonra işləyən oyunu yenidən başladın.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 onaltılıq simvol",
+  "Options.GnmMode.TrophyKey.Invalid": "Dəqiq 32 onaltılıq simvol (0–9, A–F) daxil edin və ya açarı silmək üçün sahəni boşaldın. Daxil edilən dəyər etibarlı olana qədər əvvəlki etibarlı açar saxlanılır.",
 
   "Options.CpuEngine.Label": "CPU icra mühərriki",
   "Options.CpuEngine.Desc": "Oyun kodunu işlətmək üçün istifadə olunan icra mühərriki.",
@@ -288,6 +297,7 @@
 ,
   "Trophies.Title": "Kuboklar",
   "Trophies.None": "Bu oyunda kubok yoxdur.",
+  "Trophies.GnmMode.KeyHint": "PS4 kuboklarını yükləmək üçün kubok açarı lazım ola bilər. Açarı {0} → GnmMode → {1} bölməsində daxil edə bilərsiniz.",
   "Trophies.Loading": "Kuboklar yüklənir…",
   "Trophies.Hidden": "Gizli kubok",
   "Trophies.HiddenDescription": "Bu kuboku göstərmək üçün klikləyin.",

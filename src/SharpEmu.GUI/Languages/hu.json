@@ -75,6 +75,7 @@
   "Library.Stat.Version": "Verzió",
   "Library.Stat.Installed": "Telepítve",
   "Library.Stat.TitleId": "Címazonosító",
+  "Library.Stat.CompatibilityMode": "Kompatibilitási mód",
   "Common.Back": "Vissza",
 
   "Library.Music.Volume": "Játékzene hangereje",
@@ -275,6 +276,9 @@
   "Options.Hdr.Label": "HDR-kimenet",
   "Options.Hdr.Desc": "HDR használata, ha a kiválasztott kijelző és grafikus backend támogatja. Az automatikus mód SDR-re vált vissza.",
   "Options.Hdr.Auto": "Automatikus",
+  "Options.GpuReadbacks.Label": "GPU-visszaolvasás",
+  "Options.GpuReadbacks.Desc": "Teljes: a parancsfeldolgozó megvárja a GPU által írt értékeket. Ez a legpontosabb beállítás, de akadozást okozhat.\nKi: a várakozások a memóriában már meglévő értékkel folytatódnak, ha az teljesíti a feltételt. Gördülékenyebb, de egyes játékokban grafikai hibák jelenhetnek meg.\nA játék következő indításától érvényes.",
+  "Options.GpuReadbacks.Full": "Teljes",
   "Options.Env.BinkPlayback.Label": "Bink videólejátszás",
   "Options.Env.BinkPlayback.Desc": "A Host az FFmpeg hídon keresztül játssza le a Bink videókat, de egyes játékoknál problémák jelentkezhetnek.\nA Guest a játékmotor saját dekóderét használja.\nA Skip kihagyja a Bink videókat, ami megkönnyítheti a fejlesztést.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -285,10 +289,16 @@
   "Options.Env.TrophyTest.Desc": "Válassz egy játékot és egy trófeát, majd mutasd meg a feloldási értesítést. Semmi sem oldódik fel.",
   "Options.Env.TrophyTest.Show": "Értesítés megjelenítése",
   "Options.Env.TrophySound.Label": "Trófeahang",
-  "Options.Env.TrophySound.Desc": "Rövid hangjelzést játszik le, amikor egy trófea feloldódik."
-,
+  "Options.Env.TrophySound.Desc": "Rövid hangjelzést játszik le, amikor egy trófea feloldódik.",
+
+  "Options.GnmMode.TrophyKey.Label": "Trófeakulcs",
+  "Options.GnmMode.TrophyKey.Desc": "PS4-trófeakulcs a titkosított trófeanevekhez és leírásokhoz. A GnmMode trófealistái és feloldási értesítései használják. Helyben kerül mentésre; módosítás után indítsd újra a futó játékot.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 hexadecimális karakter",
+  "Options.GnmMode.TrophyKey.Invalid": "Adj meg pontosan 32 hexadecimális karaktert (0–9, A–F), vagy ürítsd ki a mezőt a kulcs eltávolításához. Az előző érvényes kulcs megmarad, amíg a bevitt érték nem érvényes.",
+
   "Trophies.Title": "Trófeák",
   "Trophies.None": "Ennek a játéknak nincsenek trófeái.",
+  "Trophies.GnmMode.KeyHint": "A PS4-trófeák betöltéséhez trófeakulcsra lehet szükség. Add meg itt: {0} → GnmMode → {1}.",
   "Trophies.Loading": "Trófeák betöltése…",
   "Trophies.Hidden": "Rejtett trófea",
   "Trophies.HiddenDescription": "Kattints a trófea megjelenítéséhez.",

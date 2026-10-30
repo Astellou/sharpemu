@@ -10,7 +10,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 <p align="center">
-  An experimental PlayStation 5 emulator for Windows and Linux.  
+  An experimental PlayStation 5 emulator for Windows and Linux, with experimental backward compatibility support for PlayStation 4 games.
 </p>
 
 ---
@@ -45,7 +45,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
 > [sharpemu/sharpemu-mac](https://github.com/sharpemu/sharpemu-mac).
 
 > [!WARNING]  
-> SharpEmu is an experimental PS5 emulator developed from scratch in C#. The current focus is on accuracy and infrastructure setup rather than game-specific compatibility.
+> SharpEmu is an experimental PS5 and support backwards mode for PS4 emulator developed from scratch in C#. The current focus is on accuracy and infrastructure setup rather than game-specific compatibility.
 
 ## Info
 
@@ -53,8 +53,7 @@ SharpEmu is an emulator project currently in its early stages of development.
 
 This project is developed purely for research and educational purposes. There are no commercial goals associated with it. We enjoy learning about system architecture and reverse engineering.
 
-SharpEmu focuses exclusively on the PlayStation 5.  
-Our goal is **not** to emulate PS4 games, as there is already an excellent emulator dedicated to that platform: **ShadPS4**.
+SharpEmu focuses exclusively on the PlayStation 5 and there is a backward compatibility mode for PS4 games.
 
 ## Selected Games
 
@@ -75,6 +74,12 @@ A selection of games tested with SharpEmu. This is not an exhaustive list of sup
 <p align="center">
   <a href="https://sharpemu.app/compatibility/" target="_blank"><strong><i>And more..</i></strong></a>
 </p>
+
+### Experimental backward compatibility mode
+
+|               Bloodborne                   |                     Uncharted The Nathan Drake Collection                        |
+| :-----------------------------------------------------------: | :--------------------------------------------------------------------------------------------: |
+| ![BB](./.github/images/bloodborne.jpg) | ![Astro Bot](./.github/images/uncharted-1.jpg) |
 
 ## Status
 
@@ -145,6 +150,9 @@ One of the few PS5 emulator projects available and very useful for studying nati
 
 * **Ryujinx**  
 Provided valuable references for filesystem handling and low-level C# implementation patterns.
+
+* **[OpenGNM](https://github.com/PS4-OpenGNM/opengnm)**
+Used as a reference for the general GCN architecture.
 
 # License
 

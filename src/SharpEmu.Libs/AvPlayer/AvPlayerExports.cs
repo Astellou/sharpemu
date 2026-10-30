@@ -437,6 +437,8 @@ public static class AvPlayerExports
         public uint TransferCharacteristics { get; set; }
         public ulong DurationMilliseconds { get; set; }
         public bool HasAudio { get; set; }
+        public FfmpegMediaStream.MediaStreamEntry[] Streams { get; set; } = [];
+        public int AudioStreamIndex { get; set; } = -1;
         public uint AvSyncMode { get; set; } = AvSyncModeDefault;
         public bool IsGen5 { get; init; }
         public bool Started { get; set; }
@@ -923,6 +925,16 @@ public static class AvPlayerExports
         TraceOnce(
             $"enable_stream_{ctx[CpuRegister.Rsi]}",
             $"enable_stream index={ctx[CpuRegister.Rsi]}");
+        lock (StateGate)
+        {
+            if (Players.TryGetValue(ctx[CpuRegister.Rdi], out var player) &&
+                player.AudioDecoderOutput is null &&
+                ctx[CpuRegister.Rsi] < (ulong)player.Streams.Length &&
+                player.Streams[(int)ctx[CpuRegister.Rsi]] is { Kind: FfmpegMediaStream.MediaStreamKind.Audio } stream)
+            {
+                player.AudioStreamIndex = stream.Index;
+            }
+        }
         return ValidatePlayer(ctx);
     }
 
@@ -1198,7 +1210,7 @@ public static class AvPlayerExports
             return SetReturn(
                 ctx,
                 Players.TryGetValue(ctx[CpuRegister.Rdi], out var player)
-                    ? player.HasAudio ? 2 : 1
+                    ? StreamCountOf(player)
                     : InvalidParameters);
         }
     }
@@ -1285,6 +1297,9 @@ public static class AvPlayerExports
     public static int AvPlayerGetStreamInfo(CpuContext ctx) =>
         GetStreamInfoCore(ctx);
 
+    private static int StreamCountOf(PlayerState player) =>
+        player.Streams.Length != 0 ? player.Streams.Length : player.HasAudio ? 2 : 1;
+
     private static int GetStreamInfoCore(CpuContext ctx)
     {
         var streamIndex = unchecked((uint)ctx[CpuRegister.Rsi]);
@@ -1292,28 +1307,37 @@ public static class AvPlayerExports
         lock (StateGate)
         {
             if (!Players.TryGetValue(ctx[CpuRegister.Rdi], out var player) ||
-                streamIndex > (player.HasAudio ? 1u : 0u) ||
+                streamIndex >= (uint)StreamCountOf(player) ||
                 infoAddress == 0 || player.Width <= 0 || player.Height <= 0)
             {
                 return SetReturn(ctx, InvalidParameters);
             }
 
+            var listed = player.Streams.Length != 0;
+            var kind = listed
+                ? player.Streams[streamIndex].Kind
+                : streamIndex == 0 ? FfmpegMediaStream.MediaStreamKind.Video : FfmpegMediaStream.MediaStreamKind.Audio;
             var infoSize = GetLegacyStreamInfoSize(ctx.TargetGeneration);
             Span<byte> info = stackalloc byte[infoSize];
             info.Clear();
             BinaryPrimitives.WriteUInt32LittleEndian(
                 info[0..],
-                GetStreamType(ctx.TargetGeneration, streamIndex));
-            if (streamIndex == 0)
+                listed ? (uint)kind : GetStreamType(ctx.TargetGeneration, streamIndex));
+            if (kind == FfmpegMediaStream.MediaStreamKind.Video)
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(info[8..], checked((uint)player.Width));
                 BinaryPrimitives.WriteUInt32LittleEndian(info[12..], checked((uint)player.Height));
                 BinaryPrimitives.WriteSingleLittleEndian(info[16..], player.AspectRatio);
             }
-            else
+            else if (kind == FfmpegMediaStream.MediaStreamKind.Audio)
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(info[8..], 2);
                 BinaryPrimitives.WriteUInt32LittleEndian(info[12..], 48_000);
+            }
+            if (listed)
+            {
+                var language = player.Streams[streamIndex].Language;
+                Encoding.ASCII.GetBytes(language.AsSpan(0, Math.Min(language.Length, 3)), info.Slice(kind == FfmpegMediaStream.MediaStreamKind.TimedText ? 8 : 20, 4));
             }
             BinaryPrimitives.WriteUInt64LittleEndian(info[24..], player.DurationMilliseconds);
             if (!ctx.Memory.TryWrite(infoAddress, info))
@@ -1324,7 +1348,7 @@ public static class AvPlayerExports
             TraceOnce(
                 $"stream_info_{streamIndex}_{infoSize}",
                 $"stream_info index={streamIndex} size={infoSize} " +
-                $"type={(streamIndex == 0 ? "video" : "audio")} duration_ms={player.DurationMilliseconds}");
+                $"type={kind.ToString().ToLowerInvariant()} duration_ms={player.DurationMilliseconds}");
             return SetReturn(ctx, 0);
         }
     }
@@ -1424,6 +1448,10 @@ public static class AvPlayerExports
             return SetReturn(ctx, OperationFailed);
         }
 
+        var streams = !player.IsGen5 && FfmpegMediaStream.TryListStreams(hostPath, out var listedStreams)
+            ? listedStreams
+            : [];
+
         string? previousOwnedSource;
         lock (StateGate)
         {
@@ -1450,6 +1478,8 @@ public static class AvPlayerExports
             player.TransferCharacteristics = transferCharacteristics;
             player.DurationMilliseconds = duration;
             player.HasAudio = hasAudio;
+            player.Streams = streams;
+            player.AudioStreamIndex = -1;
             player.Started = player.AutoStart;
             player.Stopped = false;
             autoStart = player.AutoStart;
@@ -1457,7 +1487,8 @@ public static class AvPlayerExports
                 $"source guest='{guestPath}' host='{hostPath}' {width}x{height} " +
                 $"fps={fps:F3} aspect={aspectRatio:F3} full_range={videoFullRange} " +
                 $"primaries={colorPrimaries} transfer={transferCharacteristics} " +
-                $"duration_ms={duration} audio={hasAudio} auto_start={player.AutoStart}");
+                $"duration_ms={duration} audio={hasAudio} auto_start={player.AutoStart}" +
+                (streams.Length == 0 ? string.Empty : $" streams={string.Join(",", streams.Select(stream => $"{stream.Kind}:{stream.Language}"))}"));
         }
         if (previousOwnedSource is not null && previousOwnedSource != hostPath)
         {
@@ -1949,7 +1980,7 @@ public static class AvPlayerExports
             return false;
         }
 
-        if (!FfmpegMediaStream.TryOpenAudio(player.SourcePath, out var audioStream) ||
+        if (!FfmpegMediaStream.TryOpenAudio(player.SourcePath, player.AudioStreamIndex, out var audioStream) ||
             audioStream is null)
         {
             return false;

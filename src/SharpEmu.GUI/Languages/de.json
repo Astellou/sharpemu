@@ -75,6 +75,7 @@
   "Library.Stat.Version": "Version",
   "Library.Stat.Installed": "Installiert",
   "Library.Stat.TitleId": "Titel-ID",
+  "Library.Stat.CompatibilityMode": "Kompatibilitätsmodus",
   "Common.Back": "Zurück",
 
   "Library.Music.Volume": "Lautstärke der Spielmusik",
@@ -274,6 +275,9 @@
   "Options.Hdr.Label": "HDR-Ausgabe",
   "Options.Hdr.Desc": "HDR verwenden, wenn die ausgewählte Anzeige und das Grafik-Backend es unterstützen. Automatisch fällt auf SDR zurück.",
   "Options.Hdr.Auto": "Automatisch",
+  "Options.GpuReadbacks.Label": "GPU-Rücklesen",
+  "Options.GpuReadbacks.Desc": "Vollständig: Der Befehlsprozessor wartet auf die von der GPU geschriebenen Werte. Am genauesten, kann aber Ruckler verursachen.\nAus: Wartevorgänge laufen mit dem bereits im Speicher stehenden Wert weiter, wenn er die Bedingung erfüllt. Flüssiger, aber in manchen Spielen können Grafikfehler auftreten.\nWirkt ab dem nächsten Spielstart.",
+  "Options.GpuReadbacks.Full": "Vollständig",
   "Options.Env.BinkPlayback.Label": "Bink-Videowiedergabe",
   "Options.Env.BinkPlayback.Desc": "Host spielt Bink-Videos über die FFmpeg-Brücke ab, bei einigen Spielen können jedoch Probleme auftreten.\nGuest verwendet den spieleigenen Decoder.\nSkip überspringt Bink-Videos, was die Entwicklung erleichtern kann.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -284,10 +288,16 @@
   "Options.Env.TrophyTest.Desc": "Wähle ein Spiel und eine Trophäe und zeige dann deren Freischalt-Benachrichtigung. Es wird nichts freigeschaltet.",
   "Options.Env.TrophyTest.Show": "Benachrichtigung anzeigen",
   "Options.Env.TrophySound.Label": "Trophäen-Sound",
-  "Options.Env.TrophySound.Desc": "Spielt einen kurzen Ton ab, wenn eine Trophäe freigeschaltet wird."
-,
+  "Options.Env.TrophySound.Desc": "Spielt einen kurzen Ton ab, wenn eine Trophäe freigeschaltet wird.",
+
+  "Options.GnmMode.TrophyKey.Label": "Trophäenschlüssel",
+  "Options.GnmMode.TrophyKey.Desc": "PS4-Trophäenschlüssel für verschlüsselte Trophäennamen und -beschreibungen. Wird von den Trophäenlisten und Freischaltbenachrichtigungen in GnmMode verwendet. Wird lokal gespeichert; nach einer Änderung ein laufendes Spiel neu starten.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 hexadezimale Zeichen",
+  "Options.GnmMode.TrophyKey.Invalid": "Genau 32 hexadezimale Zeichen (0–9, A–F) eingeben oder das Feld leeren, um den Schlüssel zu entfernen. Der bisherige gültige Schlüssel bleibt erhalten, bis die Eingabe gültig ist.",
+
   "Trophies.Title": "Trophäen",
   "Trophies.None": "Dieses Spiel hat keine Trophäen.",
+  "Trophies.GnmMode.KeyHint": "Zum Laden von PS4-Trophäen kann ein Trophäenschlüssel erforderlich sein. Gib ihn unter {0} → GnmMode → {1} ein.",
   "Trophies.Loading": "Trophäen werden geladen…",
   "Trophies.Hidden": "Versteckte Trophäe",
   "Trophies.HiddenDescription": "Klicken, um diese Trophäe anzuzeigen.",

@@ -75,6 +75,7 @@
   "Library.Stat.Version": "Version",
   "Library.Stat.Installed": "Installeret",
   "Library.Stat.TitleId": "Titel-id",
+  "Library.Stat.CompatibilityMode": "Kompatibilitetstilstand",
   "Common.Back": "Tilbage",
 
   "Library.Music.Volume": "Lydstyrke for spilmusik",
@@ -274,6 +275,9 @@
   "Options.Hdr.Label": "HDR-output",
   "Options.Hdr.Desc": "Brug HDR, når den valgte skærm og grafik-backend understøtter det. Automatisk falder tilbage til SDR.",
   "Options.Hdr.Auto": "Automatisk",
+  "Options.GpuReadbacks.Label": "GPU-tilbagelæsning",
+  "Options.GpuReadbacks.Desc": "Fuld: kommandoprocessoren venter på de værdier, som GPU'en skriver. Mest nøjagtig, men kan give hakken.\nFra: ventninger fortsætter med den værdi, der allerede ligger i hukommelsen, hvis den opfylder betingelsen. Mere flydende, men nogle spil kan vise grafiske fejl.\nTræder i kraft næste gang spillet startes.",
+  "Options.GpuReadbacks.Full": "Fuld",
   "Options.Env.BinkPlayback.Label": "Bink-videoafspilning",
   "Options.Env.BinkPlayback.Desc": "Host afspiller Bink-videoer via FFmpeg-broen, men nogle spil kan opleve problemer.\nGuest bruger spilmotorens egen dekoder.\nSkip springer Bink-videoer over, hvilket kan gøre udviklingen nemmere.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -284,10 +288,16 @@
   "Options.Env.TrophyTest.Desc": "Vælg et spil og et trofæ, og vis derefter oplåsningsnotifikationen. Intet bliver låst op.",
   "Options.Env.TrophyTest.Show": "Vis notifikation",
   "Options.Env.TrophySound.Label": "Trofæ-lyd",
-  "Options.Env.TrophySound.Desc": "Afspiller en kort lyd, når et trofæ låses op."
-,
+  "Options.Env.TrophySound.Desc": "Afspiller en kort lyd, når et trofæ låses op.",
+
+  "Options.GnmMode.TrophyKey.Label": "Trofænøgle",
+  "Options.GnmMode.TrophyKey.Desc": "PS4-trofænøgle til krypterede trofænavne og beskrivelser. Bruges af trofælister og oplåsningsnotifikationer i GnmMode. Gemmes lokalt; genstart et kørende spil efter ændring.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 hexadecimale tegn",
+  "Options.GnmMode.TrophyKey.Invalid": "Indtast præcis 32 hexadecimale tegn (0–9, A–F), eller ryd feltet for at fjerne nøglen. Den tidligere gyldige nøgle beholdes, indtil indtastningen er gyldig.",
+
   "Trophies.Title": "Trofæer",
   "Trophies.None": "Dette spil har ingen trofæer.",
+  "Trophies.GnmMode.KeyHint": "Der kan være brug for en trofænøgle til at indlæse PS4-trofæer. Indtast den under {0} → GnmMode → {1}.",
   "Trophies.Loading": "Indlæser trofæer…",
   "Trophies.Hidden": "Skjult trofæ",
   "Trophies.HiddenDescription": "Klik for at afsløre dette trofæ.",

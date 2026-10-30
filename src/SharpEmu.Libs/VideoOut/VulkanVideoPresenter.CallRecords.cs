@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Runtime.InteropServices;
+using SharpEmu.Libs.Gpu.Rendering;
 using SharpEmu.ShaderCompiler.Resources;
 
 namespace SharpEmu.Libs.VideoOut;
@@ -22,10 +23,9 @@ internal static unsafe partial class VulkanVideoPresenter
         private readonly uint[] _callRecordNext = new uint[BindlessHeap.ArrayCount];
         private int _callRecordReports;
 
-        private void PrepareCallRecords(PreparedStageBindings prepared)
+        internal (uint[] Words, DeviceAddressRange[] Ranges) PrepareCallRecords(ShaderProgramInfo program, ShaderStageResources stage)
         {
-            var callees = prepared.Program.CallRecordCallees;
-            var stage = prepared.Stage;
+            var callees = program.CallRecordCallees;
             var targets = stage.CallTargets ?? [];
             var slotOf = new Dictionary<ulong, int>(targets.Length);
             for (var slot = 0; slot < targets.Length; slot++)
@@ -51,7 +51,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 {
                     Console.Error.WriteLine(
                         $"[GPU][WARN] A dispatch has more call records than the shader searches: records={rows.Count} " +
-                        $"searched={BindlessHeap.CallRecordMaximumRows} hash=0x{prepared.Program.Hash:X16}.");
+                        $"searched={BindlessHeap.CallRecordMaximumRows} hash=0x{program.Hash:X16}.");
                 }
 
                 rows.RemoveRange((int)BindlessHeap.CallRecordMaximumRows, rows.Count - (int)BindlessHeap.CallRecordMaximumRows);
@@ -106,8 +106,7 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             ranges.AddRange(stage.CallRecordRanges ?? []);
-            prepared.CallRecordWords = words;
-            prepared.CallRecordRanges = MergeCallRecordRanges(ranges);
+            return (words, MergeCallRecordRanges(ranges));
         }
 
         // The element of set 1 that holds the descriptor a record's callee reads Immediate bytes past its argument: one per

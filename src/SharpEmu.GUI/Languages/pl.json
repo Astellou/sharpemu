@@ -78,6 +78,7 @@
   "Library.Stat.Version": "Wersja",
   "Library.Stat.Installed": "Zainstalowano",
   "Library.Stat.TitleId": "Numer seryjny",
+  "Library.Stat.CompatibilityMode": "Tryb zgodności",
   "Common.Back": "Wstecz",
 
   "Library.Music.Volume": "Głośność muzyki w grze",
@@ -140,6 +141,9 @@
   "Options.Hdr.Label": "Wyjście HDR",
   "Options.Hdr.Desc": "Używaj HDR, gdy wybrany wyświetlacz i backend graficzny to obsługują. Automatyczny przełącza na SDR.",
   "Options.Hdr.Auto": "Automatyczny",
+  "Options.GpuReadbacks.Label": "Odczyt zwrotny GPU",
+  "Options.GpuReadbacks.Desc": "Pełny: procesor poleceń czeka na wartości zapisane przez GPU. Najdokładniejsze ustawienie, ale może powodować przycięcia.\nWyłącz: oczekiwanie jest kontynuowane z wartością już obecną w pamięci, jeśli spełnia ona warunek. Płynniej, ale w niektórych grach mogą wystąpić błędy grafiki.\nZostanie zastosowane przy następnym uruchomieniu gry.",
+  "Options.GpuReadbacks.Full": "Pełny",
   "Options.Env.BinkPlayback.Label": "Odtwarzanie wideo Bink",
   "Options.Env.BinkPlayback.Desc": "Host odtwarza filmy Bink przez most FFmpeg, ale w niektórych grach mogą wystąpić problemy.\nGuest używa dekodera silnika gry.\nSkip pomija filmy Bink, co może ułatwić rozwój.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -151,6 +155,11 @@
   "Options.Env.TrophyTest.Show": "Pokaż powiadomienie",
   "Options.Env.TrophySound.Label": "Dźwięk trofeów",
   "Options.Env.TrophySound.Desc": "Odtwarza krótki sygnał po odblokowaniu trofeum.",
+
+  "Options.GnmMode.TrophyKey.Label": "Klucz trofeów",
+  "Options.GnmMode.TrophyKey.Desc": "Klucz trofeów PS4 do zaszyfrowanych nazw i opisów trofeów. Używany przez listy trofeów i powiadomienia o ich odblokowaniu w GnmMode. Zapisywany lokalnie; po zmianie uruchom ponownie działającą grę.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 znaki szesnastkowe",
+  "Options.GnmMode.TrophyKey.Invalid": "Wpisz dokładnie 32 znaki szesnastkowe (0–9, A–F) lub wyczyść pole, aby usunąć klucz. Poprzedni poprawny klucz zostanie zachowany, dopóki wpisana wartość nie będzie poprawna.",
 
   "Options.CpuEngine.Label": "Silnik CPU",
   "Options.CpuEngine.Desc": "Silnik wykonawczy używany do uruchamiania kodu gry.",
@@ -293,6 +302,7 @@
 ,
   "Trophies.Title": "Trofea",
   "Trophies.None": "Ta gra nie ma trofeów.",
+  "Trophies.GnmMode.KeyHint": "Do wczytania trofeów PS4 może być wymagany klucz trofeów. Wpisz go w {0} → GnmMode → {1}.",
   "Trophies.Loading": "Ładowanie trofeów…",
   "Trophies.Hidden": "Ukryte trofeum",
   "Trophies.HiddenDescription": "Kliknij, aby odkryć to trofeum.",

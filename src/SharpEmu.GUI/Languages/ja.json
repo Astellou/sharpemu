@@ -75,6 +75,7 @@
   "Library.Stat.Version": "バージョン",
   "Library.Stat.Installed": "インストール済み",
   "Library.Stat.TitleId": "タイトルID",
+  "Library.Stat.CompatibilityMode": "互換モード",
   "Common.Back": "戻る",
 
   "Library.Music.Volume": "ゲーム音楽の音量",
@@ -274,6 +275,9 @@
   "Options.Hdr.Label": "HDR出力",
   "Options.Hdr.Desc": "選択したディスプレイとグラフィックスバックエンドが対応している場合にHDRを使用します。自動ではSDRにフォールバックします。",
   "Options.Hdr.Auto": "自動",
+  "Options.GpuReadbacks.Label": "GPUリードバック",
+  "Options.GpuReadbacks.Desc": "フル：コマンドプロセッサーはGPUが書き込んだ値を待ちます。最も正確ですが、カクつきが発生することがあります。\nオフ：メモリ上の現在の値が条件を満たしていれば、待たずに続行します。より滑らかになりますが、一部のゲームで描画の不具合が出ることがあります。\n次回のゲーム起動時から適用されます。",
+  "Options.GpuReadbacks.Full": "フル",
   "Options.Env.BinkPlayback.Label": "Bink 動画再生",
   "Options.Env.BinkPlayback.Desc": "Host は FFmpeg ブリッジ経由で Bink 動画を再生しますが、一部のゲームで問題が発生する場合があります。\nGuest はゲームエンジン独自のデコーダーを使用します。\nSkip は Bink 動画をスキップし、開発を容易にする場合があります。",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -284,10 +288,16 @@
   "Options.Env.TrophyTest.Desc": "ゲームとトロフィーを選び、解除通知を表示します。実際には獲得されません。",
   "Options.Env.TrophyTest.Show": "通知を表示",
   "Options.Env.TrophySound.Label": "トロフィー音",
-  "Options.Env.TrophySound.Desc": "トロフィーを獲得したときに短い効果音を再生します。"
-,
+  "Options.Env.TrophySound.Desc": "トロフィーを獲得したときに短い効果音を再生します。",
+
+  "Options.GnmMode.TrophyKey.Label": "トロフィーキー",
+  "Options.GnmMode.TrophyKey.Desc": "暗号化されたトロフィー名と説明に使用するPS4トロフィーキーです。GnmModeのトロフィー一覧と獲得通知に使用されます。ローカルに保存されます。変更後は実行中のゲームを再起動してください。",
+  "Options.GnmMode.TrophyKey.Placeholder": "32桁の16進数",
+  "Options.GnmMode.TrophyKey.Invalid": "16進数（0–9、A–F）を正確に32桁入力してください。キーを削除するには欄を空にしてください。入力が有効になるまで、以前の有効なキーが保持されます。",
+
   "Trophies.Title": "トロフィー",
   "Trophies.None": "このゲームにはトロフィーがありません。",
+  "Trophies.GnmMode.KeyHint": "PS4のトロフィーを読み込むにはトロフィーキーが必要な場合があります。{0} → GnmMode → {1}で入力してください。",
   "Trophies.Loading": "トロフィーを読み込み中…",
   "Trophies.Hidden": "隠しトロフィー",
   "Trophies.HiddenDescription": "クリックしてこのトロフィーを表示します。",

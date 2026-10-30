@@ -23,6 +23,9 @@ public static partial class Gen5ShaderTranslator
     private const uint MaximumDeclaredShaderSizeBytes = 1024 * 1024;
     private const uint NullScalarRegister = 125;
     private static readonly ConditionalWeakTable<object, FusedProgramRegistry> _fusedProgramsByMemory = new();
+    private static long _fusedProgramRegistrations;
+
+    public static long FusedProgramRegistrations => Interlocked.Read(ref _fusedProgramRegistrations);
 
     private sealed class FusedProgramRegistry
     {
@@ -96,6 +99,7 @@ public static partial class Gen5ShaderTranslator
             entryHeaderAddress,
             continuationAddress,
             continuationHeaderAddress));
+        Interlocked.Increment(ref _fusedProgramRegistrations);
     }
 
     public static bool UnregisterFusedProgram(CpuContext ctx, ulong entryAddress)
@@ -297,6 +301,18 @@ public static partial class Gen5ShaderTranslator
             Control = null,
         });
 
+        // Fused hull bindings can own a copy of a shared LS entry. Its header
+        // still names the original code, where PC-relative constants reside.
+        if (ctx.TryReadUInt64(parts.EntryHeaderAddress + 0x10, out var originalEntry) &&
+            originalEntry != 0 && originalEntry != entryAddress)
+        {
+            for (var index = 0; index < instructions.Count; index++)
+                instructions[index] = instructions[index] with
+                {
+                    AddressOffset = unchecked(originalEntry - entryAddress + instructions[index].ProgramOffset),
+                };
+        }
+
         foreach (var instruction in continuationProgram.Instructions)
         {
             var rebasedPc = (ulong)continuationPc + instruction.Pc;
@@ -312,7 +328,7 @@ public static partial class Gen5ShaderTranslator
                 : instruction with { Pc = (uint)rebasedPc, AddressOffset = unchecked(continuationDistance + instruction.ProgramOffset) });
         }
 
-        program = new Gen5ShaderProgram(entryAddress, instructions) { IsFusedProgram = true };
+        program = new Gen5ShaderProgram(entryAddress, instructions) { IsFusedProgram = true, FusedContinuationPc = continuationPc };
         error = string.Empty;
         return true;
     }
@@ -1648,6 +1664,22 @@ public static partial class Gen5ShaderTranslator
             out error);
     }
 
+    public static bool TryCreateDataShareInstruction(
+        uint pc,
+        uint word,
+        uint extra,
+        out Gen5ShaderInstruction instruction)
+    {
+        instruction = default!;
+        if (!DecodeDs(word, out var name, out _, out _))
+        {
+            return false;
+        }
+
+        instruction = CreateInstruction(pc, Gen5ShaderEncoding.Ds, name, [word, extra]);
+        return true;
+    }
+
     private static bool DecodeBuffer(
         uint word,
         string prefix,
@@ -1706,9 +1738,16 @@ public static partial class Gen5ShaderTranslator
         out uint sizeDwords,
         out string error)
     {
-        // GFX10 MUBUF has eight opcode bits at 18..25; bit zero belongs to OFFSET.
         var opcode = (word >> 18) & 0xFF;
-        name = opcode switch
+        name = MubufOpcodeName(opcode);
+        sizeDwords = (extra >> 24) == 0xFF ? 3u : 2u;
+        error = string.Empty;
+        return true;
+    }
+
+    public static string MubufOpcodeName(uint opcode)
+    {
+        return opcode switch
         {
             0x00 => "BufferLoadFormatX",
             0x01 => "BufferLoadFormatXy",
@@ -1780,9 +1819,6 @@ public static partial class Gen5ShaderTranslator
             0x87 => "BufferStoreFormatD16Xyzw",
             _ => $"MubufRaw{opcode:X2}",
         };
-        sizeDwords = (extra >> 24) == 0xFF ? 3u : 2u;
-        error = string.Empty;
-        return true;
     }
 
     private static bool DecodeFlat(
@@ -1906,7 +1942,14 @@ public static partial class Gen5ShaderTranslator
             return true;
         }
 
-        name = opcode switch
+        name = MimgOpcodeName(opcode);
+
+        return FinishDecode(name, $"unknown-mimg op=0x{opcode:X2}", out error);
+    }
+
+    public static string MimgOpcodeName(uint opcode)
+    {
+        return opcode switch
         {
             0x00 => "ImageLoad",
             0x01 => "ImageLoadMip",
@@ -2005,8 +2048,6 @@ public static partial class Gen5ShaderTranslator
             0xE7 => "ImageBvh64IntersectRay",
             _ => string.Empty,
         };
-
-        return FinishDecode(name, $"unknown-mimg op=0x{opcode:X2}", out error);
     }
 
     private static bool DecodeVintrp(uint word, out string name, out uint sizeDwords, out string error)

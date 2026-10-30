@@ -75,6 +75,7 @@
   "Library.Stat.Version": "Versão",
   "Library.Stat.Installed": "Instalado",
   "Library.Stat.TitleId": "ID do título",
+  "Library.Stat.CompatibilityMode": "Modo de compatibilidade",
   "Common.Back": "Voltar",
 
   "Library.Music.Volume": "Volume da música do jogo",
@@ -275,6 +276,9 @@
   "Options.Hdr.Label": "Saída HDR",
   "Options.Hdr.Desc": "Utiliza HDR quando o ecrã selecionado e o backend gráfico o suportam. O modo automático regressa a SDR.",
   "Options.Hdr.Auto": "Automático",
+  "Options.GpuReadbacks.Label": "Leitura de retorno da GPU",
+  "Options.GpuReadbacks.Desc": "Completa: o processador de comandos espera pelos valores escritos pela GPU. É a opção mais precisa, mas pode causar engasgos.\nDesativado: as esperas continuam com o valor já existente na memória se este cumprir a condição. Mais fluido, mas alguns jogos podem apresentar erros gráficos.\nAplica-se no próximo arranque do jogo.",
+  "Options.GpuReadbacks.Full": "Completa",
   "Options.Env.BinkPlayback.Label": "Reprodução de vídeo Bink",
   "Options.Env.BinkPlayback.Desc": "Host reproduz vídeos Bink pela ponte FFmpeg, mas alguns jogos podem apresentar problemas.\nGuest usa o descodificador do próprio motor do jogo.\nSkip ignora os vídeos Bink, o que pode facilitar o desenvolvimento.",
   "Options.Env.BinkPlayback.Host": "Host (FFmpeg)",
@@ -285,10 +289,16 @@
   "Options.Env.TrophyTest.Desc": "Escolhe um jogo e um troféu e mostra a respetiva notificação de desbloqueio. Nada é desbloqueado.",
   "Options.Env.TrophyTest.Show": "Mostrar notificação",
   "Options.Env.TrophySound.Label": "Som dos troféus",
-  "Options.Env.TrophySound.Desc": "Reproduz um breve som quando um troféu é desbloqueado."
-,
+  "Options.Env.TrophySound.Desc": "Reproduz um breve som quando um troféu é desbloqueado.",
+
+  "Options.GnmMode.TrophyKey.Label": "Chave de troféus",
+  "Options.GnmMode.TrophyKey.Desc": "Chave de troféus da PS4 para nomes e descrições de troféus encriptados. Utilizada nas listas de troféus e notificações de desbloqueio do GnmMode. Guardada localmente; reinicie o jogo em execução após a alterar.",
+  "Options.GnmMode.TrophyKey.Placeholder": "32 carateres hexadecimais",
+  "Options.GnmMode.TrophyKey.Invalid": "Introduza exatamente 32 carateres hexadecimais (0–9, A–F) ou esvazie o campo para remover a chave. A chave válida anterior é mantida até que o valor introduzido seja válido.",
+
   "Trophies.Title": "Troféus",
   "Trophies.None": "Este jogo não tem troféus.",
+  "Trophies.GnmMode.KeyHint": "Pode ser necessária uma chave de troféus para carregar os troféus da PS4. Introduza a chave em {0} → GnmMode → {1}.",
   "Trophies.Loading": "A carregar troféus…",
   "Trophies.Hidden": "Troféu oculto",
   "Trophies.HiddenDescription": "Clica para revelar este troféu.",

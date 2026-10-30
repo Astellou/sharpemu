@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Text.Json;
+using SharpEmu.GnmMode.Libraries.Np;
 
 namespace SharpEmu.GUI;
 
@@ -44,6 +45,8 @@ public sealed class GuiSettings
 
     public bool TrophySound { get; set; } = true;
 
+    public string GnmTrophyKey { get; set; } = string.Empty;
+
     public string LibraryLayout { get; set; } = "Carousel";
 
     public double EmbeddedConsoleHeight { get; set; } = 240;
@@ -83,6 +86,8 @@ public sealed class GuiSettings
     public bool VSync { get; set; } = true;
 
     public string HdrMode { get; set; } = "Auto";
+
+    public string GpuReadbacks { get; set; } = "Full";
 
     public bool OverlayEnabled { get; set; } = true;
     public string OverlayCorner { get; set; } = "TopRight";
@@ -138,6 +143,8 @@ public sealed class GuiSettings
         settings.EnvironmentToggles = FilterNullOrEmpty(settings.EnvironmentToggles ?? ["SHARPEMU_WRITABLE_APP0", "SHARPEMU_DISABLE_IMPORT_LOOP_GUARD"]);
         settings.LogLevel ??= "Info";
         settings.Language ??= "en";
+        settings.GnmTrophyKey = GnmTrophyPackageReader.TryNormalizeKey(settings.GnmTrophyKey, out var trophyKey)
+            ? trophyKey : string.Empty;
         var legacyProfile = settings.EnvironmentToggles
             .Select(entry => entry.Split('=', 2, StringSplitOptions.TrimEntries))
             .FirstOrDefault(parts =>
@@ -193,6 +200,7 @@ public sealed class GuiSettings
         settings.Resolution = NormalizeResolution(settings.Resolution);
         settings.ScalingMode = NormalizeChoice(settings.ScalingMode, "Fit", "Cover", "Stretch", "Integer");
         settings.HdrMode = NormalizeChoice(settings.HdrMode, "Auto", "On", "Off");
+        settings.GpuReadbacks = NormalizeChoice(settings.GpuReadbacks, "Full", "Off");
         settings.BinkPlaybackMode = NormalizeChoice(settings.BinkPlaybackMode, "Guest", "Host", "Skip");
         settings.OverlayCorner = NormalizeChoice(settings.OverlayCorner, "TopRight", "TopLeft", "BottomRight", "BottomLeft");
         settings.OverlayMode = NormalizeChoice(settings.OverlayMode, "TitleBar", "Full", "Minimal");

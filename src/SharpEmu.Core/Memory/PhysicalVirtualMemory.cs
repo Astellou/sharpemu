@@ -2229,6 +2229,17 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         // their owners dirtied before the copy; guest addresses are
         // host-identical, matching the tracker's fault addresses.
         GuestImageWriteTracker.NotifyManagedWrite(virtualAddress, (ulong)source.Length);
+        if (!source.IsEmpty && _backedSpace is { } backed && !_disposed)
+        {
+            GuestGpuMemoryHook.PrepareEmulatorWrite(virtualAddress, (ulong)source.Length);
+            if (backed.TryWriteSingleView(virtualAddress, source))
+            {
+                GuestGpuMemoryHook.NoteEmulatorWrite(virtualAddress, (ulong)source.Length);
+                NotifyGuestWriteWatch(virtualAddress, source);
+                return true;
+            }
+        }
+
         GuestGpuMemoryHook.MarkCpuWrite(virtualAddress, (ulong)source.Length);
         var written = TryWriteCore(virtualAddress, source);
 
@@ -2240,13 +2251,6 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
 
     private bool TryWriteCore(ulong virtualAddress, ReadOnlySpan<byte> source)
     {
-        if (!source.IsEmpty && _backedSpace is { } backed && !_disposed &&
-            backed.TryWriteSingleView(virtualAddress, source))
-        {
-            NotifyGuestWriteWatch(virtualAddress, source);
-            return true;
-        }
-
         var requiresExclusiveAccess = false;
         _gate.EnterReadLock();
         try
@@ -2343,6 +2347,17 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         // Match TryWrite's managed-write notification before touching an
         // identity-mapped guest page protected by the image tracker.
         GuestImageWriteTracker.NotifyManagedWrite(destinationAddress, length);
+        if (_backedSpace is { } backed && !_disposed)
+        {
+            GuestGpuMemoryHook.PrepareEmulatorWrite(destinationAddress, length);
+            if (backed.TryCopySingleView(destinationAddress, sourceAddress, length))
+            {
+                GuestGpuMemoryHook.NoteEmulatorWrite(destinationAddress, length);
+                NotifyBackedWriteWatch(destinationAddress, length);
+                return true;
+            }
+        }
+
         GuestGpuMemoryHook.MarkCpuWrite(destinationAddress, length);
         var copied = TryCopyCore(destinationAddress, sourceAddress, length);
 

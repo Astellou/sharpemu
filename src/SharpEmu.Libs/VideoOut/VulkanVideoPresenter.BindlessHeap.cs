@@ -218,7 +218,7 @@ internal static unsafe partial class VulkanVideoPresenter
 
         // Before the images of a draw or dispatch that reads set 1 are found: set 1 exists, its images stay in use, and those
         // whose contents or layout changed are made current.
-        private void PrepareBindlessHeap(object preparation)
+        internal void PrepareBindlessHeap(object preparation)
         {
             if (ReferenceEquals(_heapPreparedFor, preparation))
             {
@@ -335,7 +335,7 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             var view = _imageCache.AcquireTextureView(identifier, resolution.Request);
-            image.Transition(ImageLayout.General, AccessFlags.ShaderReadBit, null, BeginBatchedGuestCommands());
+            image.Transition(AccessFlags.ShaderReadBit, null, BeginBatchedGuestCommands());
             entry.Image = image;
             entry.ImageIdentifier = identifier;
             entry.Request = resolution.Request;
@@ -460,7 +460,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     _ = _imageCache.AcquireTextureView(first.ImageIdentifier, first.Request);
                 }
 
-                image.Transition(ImageLayout.General, AccessFlags.ShaderReadBit, null, BeginBatchedGuestCommands());
+                image.Transition(AccessFlags.ShaderReadBit, null, BeginBatchedGuestCommands());
             }
 
             if (waiting is not null)
