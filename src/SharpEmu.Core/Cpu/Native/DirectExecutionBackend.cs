@@ -1389,6 +1389,10 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 				LastError = "Failed to create import trampoline for NID " + text2;
 				return false;
 			}
+			if (TryCreateNativeAgc(text2, num5, out var nativeAgc))
+			{
+				num5 = nativeAgc;
+			}
 			if (_logAllImports)
 			{
 				Console.Error.WriteLine($"[LOADER][DEBUG] SetupImportStubs: Trampoline for {text2} -> 0x{num5:X16}");
@@ -1500,7 +1504,13 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 
 	private unsafe bool TryCreateNativeImportIntrinsic(string nid, out nint address)
 	{
-		if (IsHlePreferredNid(nid))
+		// memcpy/memmove and memset run as native code on the guest thread, without the import gateway: their stores
+		// fault on tracked pages exactly like the title's own stores.
+		if (nid is "Q3VBxCXhUHs" or "+P6FRGH4LfA")
+		{
+			nid = "native-memmove";
+		}
+		else if (nid != "8zTFvBIAIN8" && IsHlePreferredNid(nid))
 		{
 			address = 0;
 			return false;
@@ -1734,6 +1744,23 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 				0x48, 0xFF, 0xCA,
 				0x75, 0xEF,
 				0xC3,
+			],
+			"native-memmove" =>
+			[
+				0x48, 0x89, 0xF8,             // mov rax, rdi
+				0x48, 0x89, 0xD1,             // mov rcx, rdx
+				0x49, 0x89, 0xF8,             // mov r8, rdi
+				0x49, 0x29, 0xF0,             // sub r8, rsi
+				0x49, 0x39, 0xD0,             // cmp r8, rdx
+				0x72, 0x03,                   // jb backward (destination inside the source)
+				0xF3, 0xA4,                   // rep movsb
+				0xC3,                         // ret
+				0x48, 0x8D, 0x74, 0x0E, 0xFF, // backward: lea rsi, [rsi+rcx-1]
+				0x48, 0x8D, 0x7C, 0x0F, 0xFF, // lea rdi, [rdi+rcx-1]
+				0xFD,                         // std
+				0xF3, 0xA4,                   // rep movsb
+				0xFC,                         // cld
+				0xC3,                         // ret
 			],
 			"8zTFvBIAIN8" =>
 			[
