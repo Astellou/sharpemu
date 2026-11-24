@@ -218,7 +218,9 @@ public sealed partial class GpuCommandInterpreter
         return 4;
     }
 
-    // Read bounded blocks when the packet executes. Apply entries in table order.
+    // Read bounded blocks when the packet executes. Apply entries in table order. An entry that rewrites the value its
+    // register holds changes nothing and is skipped (context and user config; see RegisterBanks.HoldsContextWord).
+    [System.Runtime.CompilerServices.SkipLocalsInit]
     private void ApplyRegisterTable(RegisterBank bank, ulong tableAddress, uint count, in PacketContext packet,
         ReadOnlySpan<uint> payload)
     {
@@ -239,11 +241,12 @@ public sealed partial class GpuCommandInterpreter
             throw _host.Fatal($"The register table range exceeds the address space: address=0x{tableAddress:X16} count={count}.");
         }
 
-        if (bank == RegisterBank.Context && ScissorTrace.Instance is { Active: true } scissorTrace)
+        var scissorTrace = ScissorTrace.Instance is { Active: true } activeTrace ? activeTrace : null;
+        if (bank == RegisterBank.Context && scissorTrace is not null)
             scissorTrace.RegisterTable(TypedRegisters, SubmitId, QueueId, in packet, tableAddress, count);
 
         Span<byte> tableBlock = stackalloc byte[entriesPerBlock * entryBytes];
-        Span<byte> beforeSynchronization = stackalloc byte[entriesPerBlock * entryBytes];
+        Span<byte> beforeSynchronization = TraceRegisterTables ? stackalloc byte[entriesPerBlock * entryBytes] : default;
         // A shader table inside an open run is logged before its check, so a member finalized after the check that writes it
         // rolls the run back; a table the check finds GPU-written closes the run before the live read.
         if (_runs is { IsOpen: true } runs)
@@ -267,124 +270,147 @@ public sealed partial class GpuCommandInterpreter
         if (_submittedRegisterTables is { } tables && tables.TryGetValue(packet.PacketAddress, out var submitted) &&
             (ulong)submitted.Length == (ulong)count * entryBytes && !gpuWritten)
             retained = submitted;
-        for (var index = 0u; index < count; index++)
+        var banks = TypedRegisters;
+        for (var blockStart = 0u; blockStart < count; blockStart += entriesPerBlock)
         {
-            var blockEntry = (int)(index % entriesPerBlock);
-            if (blockEntry == 0)
+            var blockEntries = (int)Math.Min(count - blockStart, entriesPerBlock);
+            var blockBytes = blockEntries * entryBytes;
+            var blockAddress = tableAddress + (ulong)blockStart * entryBytes;
+            RenderPhaseProfile.RecordCommandRead(RenderPhaseProfile.CommandReadKind.RegisterTable, blockBytes);
+            var capturedBeforeSynchronization = TraceRegisterTables &&
+                _host.Memory.TryRead(blockAddress, beforeSynchronization[..blockBytes]);
+            if (retained is not null)
             {
-                var blockBytes = (int)Math.Min(count - index, entriesPerBlock) * entryBytes;
-                var blockAddress = tableAddress + (ulong)index * entryBytes;
-                RenderPhaseProfile.RecordCommandRead(RenderPhaseProfile.CommandReadKind.RegisterTable, blockBytes);
-                var capturedBeforeSynchronization = TraceRegisterTables &&
-                    _host.Memory.TryRead(blockAddress, beforeSynchronization[..blockBytes]);
-                if (retained is not null)
-                {
-                    retained.AsSpan((int)index * entryBytes, blockBytes).CopyTo(tableBlock);
-                }
-                else if (!(gpuWritten
-                    ? _host.TryReadGuest(blockAddress, tableBlock[..blockBytes])
-                    : TryReadCommand(blockAddress, tableBlock[..blockBytes])))
-                {
-                    throw _host.Fatal($"The register table cannot be read: address=0x{blockAddress:X16} size={blockBytes}.");
-                }
-                if (TraceRegisterTables)
-                {
-                    TraceRegisterTableRead(bank, packet, tableAddress, count, index,
-                        capturedBeforeSynchronization ? beforeSynchronization[..blockBytes] : default,
-                        tableBlock[..blockBytes]);
-                }
+                retained.AsSpan((int)blockStart * entryBytes, blockBytes).CopyTo(tableBlock);
+            }
+            else if (!(gpuWritten
+                ? _host.TryReadGuest(blockAddress, tableBlock[..blockBytes])
+                : TryReadCommand(blockAddress, tableBlock[..blockBytes])))
+            {
+                throw _host.Fatal($"The register table cannot be read: address=0x{blockAddress:X16} size={blockBytes}.");
             }
 
-            var entryOffset = blockEntry * entryBytes;
-            var rawOffset = BinaryPrimitives.ReadUInt32LittleEndian(tableBlock[entryOffset..]);
-            var value = BinaryPrimitives.ReadUInt32LittleEndian(tableBlock[(entryOffset + sizeof(uint))..]);
-            var offset = RegisterBankLayout.Normalize(rawOffset);
-            if (bank == RegisterBank.Context && offset == 0 && (value & 0xCu) != 0)
+            if (TraceRegisterTables)
             {
-                var blockStart = index - (uint)blockEntry;
-                var capturedBytes = (int)Math.Min(count - blockStart, 16u) * entryBytes;
-                Console.Error.WriteLine($"[GPU][ERROR] Register table before unsupported depth copy: " +
-                    $"header=0x{packet.Header:X8} packet=0x{packet.PacketAddress:X16} table=0x{tableAddress:X16} " +
-                    $"entry={index} count={count} raw=0x{rawOffset:X8} value=0x{value:X8} " +
-                    $"payload={string.Join(',', payload.ToArray().Select(word => word.ToString("X8")))} " +
-                    $"block_start={blockStart} bytes={Convert.ToHexString(tableBlock[..capturedBytes])}");
+                TraceRegisterTableRead(bank, packet, tableAddress, count, blockStart,
+                    capturedBeforeSynchronization ? beforeSynchronization[..blockBytes] : default,
+                    tableBlock[..blockBytes]);
             }
-            switch (bank)
+
+            var words = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(tableBlock[..blockBytes]);
+            for (var blockEntry = 0; blockEntry < blockEntries; blockEntry++)
             {
-                case RegisterBank.Context:
-                    if (offset == RegisterBankLayout.ContextNop || rawOffset == RegisterTableSentinel)
-                    {
-                        continue;
-                    }
-
-                    if (offset >= RegisterBankLayout.ContextRegisterCount)
-                    {
-                        if (Interlocked.Increment(ref _contextTableSkipWarnings) <= 16)
+                var index = blockStart + (uint)blockEntry;
+                var rawOffset = words[2 * blockEntry];
+                var value = words[2 * blockEntry + 1];
+                var offset = RegisterBankLayout.Normalize(rawOffset);
+                switch (bank)
+                {
+                    case RegisterBank.Context:
+                        if (offset == 0 && (value & 0xCu) != 0)
                         {
-                            Console.Error.WriteLine($"[LOADER][WARN] command_stream.context_table_skip offset=0x{offset:X8} value=0x{value:X8}");
+                            LogUnsupportedDepthCopyEntry(packet, payload, tableAddress, count, index, blockStart, rawOffset, value, tableBlock);
                         }
 
-                        continue;
-                    }
-
-                    ClearCompositeDepthExtent(offset);
-                    RegisterWriteTable.WriteContextEntry(TypedRegisters, offset, value, tableAddress);
-                    if (ScissorTrace.Instance is { Active: true } trace)
-                        trace.RegisterWrite(TypedRegisters, SubmitId, QueueId, in packet, offset, value, tableAddress, index, count);
-                    break;
-                case RegisterBank.Shader:
-                    if (offset == RegisterBankLayout.ShaderRegisterNop || rawOffset == RegisterTableSentinel)
-                    {
-                        continue;
-                    }
-
-                    if (offset >= RegisterBankLayout.ShaderRegisterCount)
-                    {
-                        throw _host.Fatal($"The shader table register is outside the bank: offset=0x{offset:X8} raw=0x{rawOffset:X8} value=0x{value:X8} table=0x{tableAddress:X16}.");
-                    }
-
-                    // A rollback restores only the compute registers, so an entry outside them closes the run first.
-                    if (_runs is { IsOpen: true })
-                    {
-                        if (offset < RunComputeRangeStart && CloseRunInHandler())
+                        if (offset == RegisterBankLayout.ContextNop || rawOffset == RegisterTableSentinel)
                         {
-                            return;
+                            continue;
                         }
 
-                        if (_runs.IsOpen)
+                        if (offset >= RegisterBankLayout.ContextRegisterCount)
                         {
-                            NoteRunUndo(offset);
+                            if (Interlocked.Increment(ref _contextTableSkipWarnings) <= 16)
+                            {
+                                Console.Error.WriteLine($"[LOADER][WARN] command_stream.context_table_skip offset=0x{offset:X8} value=0x{value:X8}");
+                            }
+
+                            continue;
                         }
-                    }
 
-                    Registers.Shader[offset] = value;
-                    RegisterWriteTable.WriteShaderEntry(TypedRegisters, offset, value, tableAddress);
-                    break;
-                case RegisterBank.UserConfig:
-                    if (offset == RegisterBankLayout.UserConfigNop)
-                    {
-                        continue;
-                    }
+                        if (offset is RegisterBankLayout.DepthZInfo or RegisterBankLayout.DepthSizeXy)
+                        {
+                            // A direct attachment or extent write supersedes a composite binding's extent.
+                            banks.CompositeDepthSizeXy = null;
+                        }
 
-                    if (offset >= RegisterBankLayout.UserConfigRegisterCount)
-                    {
-                        throw _host.Fatal($"The user-config table register is outside the bank: offset=0x{offset:X8} raw=0x{rawOffset:X8} value=0x{value:X8} table=0x{tableAddress:X16}.");
-                    }
+                        if (scissorTrace is null && banks.HoldsContextWord(offset, value))
+                        {
+                            continue;
+                        }
 
-                    // A depth extent in a user-config table belongs to the context bank.
-                    if (offset == RegisterBankLayout.DepthSizeXy)
-                    {
-                        ClearCompositeDepthExtent(offset);
-                        RegisterWriteTable.WriteContextEntry(TypedRegisters, offset, value, tableAddress);
-                        continue;
-                    }
+                        RegisterWriteTable.WriteContextEntry(banks, offset, value, tableAddress);
+                        scissorTrace?.RegisterWrite(banks, SubmitId, QueueId, in packet, offset, value, tableAddress, index, count);
+                        break;
+                    case RegisterBank.Shader:
+                        if (offset == RegisterBankLayout.ShaderRegisterNop || rawOffset == RegisterTableSentinel)
+                        {
+                            continue;
+                        }
 
-                    WriteUserConfigRegister(offset, value);
-                    RegisterWriteTable.WriteUserConfigEntry(TypedRegisters, offset, value, tableAddress,
-                        packet, index, count, rawOffset, payload);
-                    break;
+                        if (offset >= RegisterBankLayout.ShaderRegisterCount)
+                        {
+                            throw _host.Fatal($"The shader table register is outside the bank: offset=0x{offset:X8} raw=0x{rawOffset:X8} value=0x{value:X8} table=0x{tableAddress:X16}.");
+                        }
+
+                        // A rollback restores only the compute registers, so an entry outside them closes the run first.
+                        if (_runs is { IsOpen: true })
+                        {
+                            if (offset < RunComputeRangeStart && CloseRunInHandler())
+                            {
+                                return;
+                            }
+
+                            if (_runs.IsOpen)
+                            {
+                                NoteRunUndo(offset);
+                            }
+                        }
+
+                        Registers.Shader[offset] = value;
+                        RegisterWriteTable.WriteShaderEntry(banks, offset, value, tableAddress);
+                        break;
+                    case RegisterBank.UserConfig:
+                        if (offset == RegisterBankLayout.UserConfigNop)
+                        {
+                            continue;
+                        }
+
+                        if (offset >= RegisterBankLayout.UserConfigRegisterCount)
+                        {
+                            throw _host.Fatal($"The user-config table register is outside the bank: offset=0x{offset:X8} raw=0x{rawOffset:X8} value=0x{value:X8} table=0x{tableAddress:X16}.");
+                        }
+
+                        // A depth extent in a user-config table belongs to the context bank.
+                        if (offset == RegisterBankLayout.DepthSizeXy)
+                        {
+                            ClearCompositeDepthExtent(offset);
+                            RegisterWriteTable.WriteContextEntry(banks, offset, value, tableAddress);
+                            continue;
+                        }
+
+                        WriteUserConfigRegister(offset, value);
+                        if (banks.HoldsUserConfigWord(offset, value))
+                        {
+                            continue;
+                        }
+
+                        RegisterWriteTable.WriteUserConfigEntry(banks, offset, value, tableAddress,
+                            packet, index, count, rawOffset, payload);
+                        break;
+                }
             }
         }
+    }
+
+    private static void LogUnsupportedDepthCopyEntry(in PacketContext packet, ReadOnlySpan<uint> payload, ulong tableAddress,
+        uint count, uint index, uint blockStart, uint rawOffset, uint value, ReadOnlySpan<byte> tableBlock)
+    {
+        var capturedBytes = (int)Math.Min(count - blockStart, 16u) * 2 * sizeof(uint);
+        Console.Error.WriteLine($"[GPU][ERROR] Register table before unsupported depth copy: " +
+            $"header=0x{packet.Header:X8} packet=0x{packet.PacketAddress:X16} table=0x{tableAddress:X16} " +
+            $"entry={index} count={count} raw=0x{rawOffset:X8} value=0x{value:X8} " +
+            $"payload={string.Join(',', payload.ToArray().Select(word => word.ToString("X8")))} " +
+            $"block_start={blockStart} bytes={Convert.ToHexString(tableBlock[..capturedBytes])}");
     }
 
     private void TraceRegisterTableRead(RegisterBank bank, in PacketContext packet, ulong tableAddress,

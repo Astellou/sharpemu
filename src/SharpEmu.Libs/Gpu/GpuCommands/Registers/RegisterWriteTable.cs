@@ -30,6 +30,7 @@ public static class RegisterWriteTable
     {
         banks.PrepareContextWrite();
         var consumed = WritePacket(banks, in packet, offset, values, Context, ContextIndirect, "context", emptyIsHandled: true);
+        banks.NoteContextWords(offset, values[..Math.Min((int)consumed, values.Length)]);
         banks.MarkWritten(RegisterStamps.ContextBitsFor(offset, consumed));
         if (Rendering.RenderTrace.Enabled)
         {
@@ -66,6 +67,7 @@ public static class RegisterWriteTable
     {
         banks.PrepareUserConfigWrite();
         var consumed = WritePacket(banks, in packet, offset, values, UserConfig, UserConfigIndirect, "user-config", emptyIsHandled: true);
+        banks.NoteUserConfigWords(offset, values[..Math.Min((int)consumed, values.Length)]);
         banks.MarkWritten(RegisterStamps.UserConfigBits);
         return consumed;
     }
@@ -83,6 +85,7 @@ public static class RegisterWriteTable
             WriteEntry(banks, offset, value, ContextIndirect, "context", tableAddress);
         }
 
+        banks.NoteContextWords(offset, [value]);
         banks.MarkWritten(RegisterStamps.ContextBitsFor(offset, 1));
         if (Rendering.RenderTrace.Enabled)
         {
@@ -137,6 +140,7 @@ public static class RegisterWriteTable
         }
 
         UserConfigIndirect[offset]!(banks, offset, value);
+        banks.NoteUserConfigWords(offset, [value]);
         banks.MarkWritten(RegisterStamps.UserConfigBits);
     }
 

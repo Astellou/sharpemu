@@ -16,6 +16,54 @@ public sealed class RegisterBanks
     public RegisterBanks(Func<string, Exception> fatal)
         : this(fatal, new ContextRegisters(), new ShaderProgramRegisters(), new UserConfigRegisters())
     {
+        _contextWords = new uint[RegisterBankLayout.ContextRegisterCount];
+        _userConfigWords = new uint[RegisterBankLayout.UserConfigRegisterCount];
+    }
+
+    // The raw value each context register last received through the write table, kept by the live banks only (a copy or
+    // a snapshot has none). A context word decodes into fields of its own, from its value alone, so writing a value the
+    // register already holds changes nothing. Zero means unknown: a cleared or replaced context starts at zero.
+    private readonly uint[]? _contextWords;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public bool HoldsContextWord(uint offset, uint value) =>
+        value != 0 && _contextWords is { } words && offset < (uint)words.Length && words[offset] == value;
+
+    // The same for the user config bank, except the ordered-append registers: a counter or address write lands in the
+    // counter the control register selects, so its effect depends on more than its own value.
+    private readonly uint[]? _userConfigWords;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public bool HoldsUserConfigWord(uint offset, uint value) =>
+        value != 0 && _userConfigWords is { } words && offset < (uint)words.Length && words[offset] == value &&
+        offset is not (UserConfigRegisterOffset.GdsOaCntl or UserConfigRegisterOffset.GdsOaCounter or UserConfigRegisterOffset.GdsOaAddress);
+
+    internal void NoteUserConfigWords(uint offset, ReadOnlySpan<uint> values)
+    {
+        if (_userConfigWords is not { } words || offset >= (uint)words.Length)
+        {
+            return;
+        }
+
+        values[..Math.Min(values.Length, words.Length - (int)offset)].CopyTo(words.AsSpan((int)offset));
+    }
+
+    internal void NoteContextWords(uint offset, ReadOnlySpan<uint> values)
+    {
+        if (_contextWords is not { } words || offset >= (uint)words.Length)
+        {
+            return;
+        }
+
+        values[..Math.Min(values.Length, words.Length - (int)offset)].CopyTo(words.AsSpan((int)offset));
+    }
+
+    private void ForgetContextWords()
+    {
+        if (_contextWords is { } words)
+        {
+            Array.Clear(words);
+        }
     }
 
     // Banks over given parts, so a copy or a snapshot does not first build empty ones.
@@ -421,8 +469,13 @@ public sealed class RegisterBanks
         _contextShared = _vertexShared = _pixelShared = _computeShared = _userConfigShared = false;
         _pixelScalarsShared = _hullScalarsShared = _geometryScalarsShared = _legacyVertexScalarsShared = _exportScalarsShared = _computeScalarsShared = false;
         OwnContext(new ContextRegisters());
+        ForgetContextWords();
         Shader = new ShaderProgramRegisters();
         UserConfig = new UserConfigRegisters();
+        if (_userConfigWords is { } userConfigWords)
+        {
+            Array.Clear(userConfigWords);
+        }
         _savedContext = null;
         _savedCompositeDepthSizeXy = null;
         CompositeDepthSizeXy = null;
@@ -438,6 +491,7 @@ public sealed class RegisterBanks
         {
             case ContextStateOperation.Clear:
                 OwnContext(new ContextRegisters());
+                ForgetContextWords();
                 CompositeDepthSizeXy = null;
                 break;
             case ContextStateOperation.Push:
@@ -450,6 +504,7 @@ public sealed class RegisterBanks
                 }
 
                 OwnContext(_savedContext);
+                ForgetContextWords();
                 CompositeDepthSizeXy = _savedCompositeDepthSizeXy;
                 _savedContext = null;
                 _savedCompositeDepthSizeXy = null;
@@ -457,6 +512,7 @@ public sealed class RegisterBanks
             case ContextStateOperation.PushClear:
                 Push();
                 OwnContext(new ContextRegisters());
+                ForgetContextWords();
                 CompositeDepthSizeXy = null;
                 break;
             default:
