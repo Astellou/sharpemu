@@ -27,11 +27,17 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
     private readonly Action? _toggleBackendHud;
     private readonly object _gamepadGate = new();
     private SDL_Window* _window;
+    private bool _textInputActive;
     private SDL_Gamepad* _gamepad;
     private readonly Pad.TouchContactIds _touchIds = new();
     private HostGamepadType _gamepadType;
     private byte _leftTriggerRumble;
     private byte _rightTriggerRumble;
+    private byte _padLargeRumble;
+    private byte _padSmallRumble;
+    private byte _hapticLargeRumble;
+    private byte _hapticSmallRumble;
+    private long _hapticRumbleExpires;
     private int _closeRequested;
     private bool _closedByUser;
     private bool _fullscreen;
@@ -218,15 +224,42 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
     {
         lock (_gamepadGate)
         {
-            if (IsGamepadConnected())
-            {
-                SDL_RumbleGamepad(
-                    _gamepad,
-                    ExpandByte(largeMotor),
-                    ExpandByte(smallMotor),
-                    OutputDurationMs);
-            }
+            _padLargeRumble = largeMotor;
+            _padSmallRumble = smallMotor;
+            ApplyRumble();
         }
+    }
+
+    public void SetHapticRumble(byte largeMotor, byte smallMotor, uint durationMs)
+    {
+        lock (_gamepadGate)
+        {
+            _hapticLargeRumble = largeMotor;
+            _hapticSmallRumble = smallMotor;
+            _hapticRumbleExpires = Environment.TickCount64 + durationMs;
+            ApplyRumble();
+        }
+    }
+
+    private void ApplyRumble()
+    {
+        if (!IsGamepadConnected())
+        {
+            return;
+        }
+
+        var hapticRemaining = _hapticRumbleExpires - Environment.TickCount64;
+        var hapticActive = hapticRemaining > 0;
+        var large = Math.Max(_padLargeRumble, hapticActive ? _hapticLargeRumble : (byte)0);
+        var small = Math.Max(_padSmallRumble, hapticActive ? _hapticSmallRumble : (byte)0);
+        var duration = (_padLargeRumble | _padSmallRumble) == 0 && hapticActive
+            ? (uint)hapticRemaining
+            : OutputDurationMs;
+        SDL_RumbleGamepad(
+            _gamepad,
+            ExpandByte(large),
+            ExpandByte(small),
+            duration);
     }
 
     public void SetTriggerRumble(byte? leftTrigger, byte? rightTrigger)
@@ -421,6 +454,7 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
             }
             _lastEventPumpTimestamp = timestamp;
         }
+        SyncTextInput();
         SDL_Event windowEvent;
         while (PollWindowEvent(&windowEvent))
         {
@@ -465,6 +499,9 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
                 case SDL_EventType.SDL_EVENT_KEY_UP:
                     HandleKey(windowEvent.key);
                     break;
+                case SDL_EventType.SDL_EVENT_TEXT_INPUT:
+                    SystemDialogInput.OnText(PtrToStringUTF8(windowEvent.text.text) ?? string.Empty);
+                    break;
                 case SDL_EventType.SDL_EVENT_MOUSE_MOTION:
                     ShowCursorTemporarily();
                     break;
@@ -497,6 +534,25 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
                     ApplySensorEvent(in windowEvent);
                     break;
             }
+        }
+    }
+
+    private void SyncTextInput()
+    {
+        var wanted = SystemDialogInput.WantsText;
+        if (wanted == _textInputActive || _window is null)
+        {
+            return;
+        }
+
+        _textInputActive = wanted;
+        if (wanted)
+        {
+            SDL_StartTextInput(_window);
+        }
+        else
+        {
+            SDL_StopTextInput(_window);
         }
     }
 
@@ -774,6 +830,11 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
             _gamepadType = HostGamepadType.Generic;
             _leftTriggerRumble = 0;
             _rightTriggerRumble = 0;
+            _padLargeRumble = 0;
+            _padSmallRumble = 0;
+            _hapticLargeRumble = 0;
+            _hapticSmallRumble = 0;
+            _hapticRumbleExpires = 0;
         }
 
         HostWindowInput.ClearGamepad();
@@ -893,6 +954,7 @@ internal sealed unsafe class SdlHostWindow : IDisposable, IHostGamepadOutput
             SDL_Keycode.SDLK_UP => 0x26,
             SDL_Keycode.SDLK_RIGHT => 0x27,
             SDL_Keycode.SDLK_DOWN => 0x28,
+            SDL_Keycode.SDLK_DELETE => 0x2E,
             >= SDL_Keycode.SDLK_A and <= SDL_Keycode.SDLK_Z => 0x41 + (int)(key - SDL_Keycode.SDLK_A),
             _ => 0,
         };
