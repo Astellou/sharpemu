@@ -49,6 +49,7 @@ internal static unsafe partial class VulkanVideoPresenter
         internal bool _supportsDepthBiasClamp;
         private bool _supportsShaderSignedZeroInfNanPreserveFloat32;
         internal bool _robustBufferAccess2Enabled;
+        internal bool _nullDescriptorEnabled;
         private bool _nativeFloat16Conversions;
         private bool _supportsPipelineBinaries;
         private uint _maxColorAttachments;
@@ -644,25 +645,16 @@ internal static unsafe partial class VulkanVideoPresenter
                 SType = StructureType.PhysicalDeviceSubgroupProperties,
                 PNext = &subgroupSizeControl,
             };
-            var driverProperties = new PhysicalDeviceDriverProperties
-            {
-                SType = StructureType.PhysicalDeviceDriverProperties,
-                PNext = &subgroup,
-            };
             var properties2 = new PhysicalDeviceProperties2
             {
                 SType = StructureType.PhysicalDeviceProperties2,
-                PNext = &driverProperties,
+                PNext = &subgroup,
             };
             if (IsDeviceExtensionAvailable(MeshShaderExtensionName))
             {
                 pushDescriptorProperties.PNext = &meshProperties;
             }
             _vk.GetPhysicalDeviceProperties2(_physicalDevice, &properties2);
-            _unoptimizedFirstComputePipelines = UnoptimizedFirstComputePipelines(properties.VendorID, driverProperties.DriverID);
-            Console.Error.WriteLine(
-                $"[LOADER][INFO] Vulkan unoptimized first compute pipelines: {(_unoptimizedFirstComputePipelines ? "on" : "off")} " +
-                "(SHARPEMU_PIPELINE_FAST_BUILD=1 or 0 chooses on any GPU)");
             _supportsShaderSignedZeroInfNanPreserveFloat32 =
                 floatControls.ShaderSignedZeroInfNanPreserveFloat32;
             // The 16-bit float controls of NativeFloat16Conversions, which must not need the same modes for 32 or 64 bits;
@@ -1360,6 +1352,8 @@ internal static unsafe partial class VulkanVideoPresenter
                 _robustBufferAccess2Enabled = supportsRobustness2 && (bool)robustness2Features.RobustBufferAccess2;
                 robustness2Features.RobustImageAccess2 = supportsRobustImageAccess2;
                 robustness2Features.NullDescriptor = supportsNullDescriptor;
+                _nullDescriptorEnabled = supportsNullDescriptor;
+                ShaderCompiler.Resources.ResourceMaterializer.PredictNullBufferFormats = supportsNullDescriptor;
                 robustness2Features.PNext = supportsMaintenance8 ? &maintenance8Features : null;
                 if (!supportsTimelineSemaphore)
                 {
