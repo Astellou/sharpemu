@@ -41,6 +41,7 @@ internal static unsafe partial class VulkanVideoPresenter
         public ulong ProfileVertexHash;
         public ulong ProfilePixelHash;
         public ulong ProfileComputeHash;
+        public Task<Pipeline>? OptimizedCompute;
 
         // Laid out for pipeline libraries, and linked from them unless built whole: SetLayout is the vertex stage's set 0,
         // PixelSetLayout the pixel stage's set 2.
@@ -269,12 +270,16 @@ internal static unsafe partial class VulkanVideoPresenter
 
         // A held-back command write or label lands in guest memory only when its publication runs; a resource
         // read behind it in the command stream must see it, as the command processor's own reads do.
-        private void CompletePendingPublicationsForResourceRead(ulong address, ulong size)
+        private bool CompletePendingPublicationsForResourceRead(ulong address, ulong size)
         {
-            if (!HasPendingMemoryPublication(address, size)) return;
+            if (!HasPendingMemoryPublication(address, size)) return true;
             if (OnResolveWorker)
+            {
+                if (ResourceMaterializer.TryRefuseSpeculativeRead()) return false;
                 throw new Gpu.GpuCommands.SerialResolveRequiredException("pending publication read");
+            }
             CompleteOverlappingPublications(address, size);
+            return true;
         }
 
         public string DescribeCleanRead(ulong address) =>
@@ -282,33 +287,42 @@ internal static unsafe partial class VulkanVideoPresenter
             $"gpu_dirty_pages={_bufferCache.HasGpuDirtyPages(address, sizeof(uint))} image_modified={_imageCache.HasGpuModifiedImageBytes(address, sizeof(uint))} " +
             $"pending_publication={HasPendingMemoryPublication(address, sizeof(uint))} buffer={_bufferCache.IsRegionRegistered(address, sizeof(uint))}";
 
+        private bool RefuseResourceRead(string reason)
+        {
+            if (TryRefuseStrictRead()) return false;
+            return RefuseOnTicketWorker(reason);
+        }
+
+        private bool TryRefuseStrictRead() => ResourceMaterializer.SpeculativeReadActive && OnResolveWorker &&
+            (_resolveWorker!.Ticket || _resolveWorker.Strict) && ResourceMaterializer.TryRefuseSpeculativeRead();
+
         // Refused while a GPU buffer or image write may still own the range.
         public bool TryReadCleanGuestWord(ulong address, out uint word)
         {
             using var profile = ResourceMaterializationProfile.Measure(ResourceMaterializationProfile.Phase.CleanGuestRead);
             word = 0;
-            CompletePendingPublicationsForResourceRead(address, sizeof(uint));
+            if (ResourceMaterializer.SpeculativeReadRefused || !CompletePendingPublicationsForResourceRead(address, sizeof(uint))) return false;
             if (!_guestMemory.CanRead(address, sizeof(uint)))
             {
-                return RefuseOnTicketWorker("unreadable");
+                return RefuseResourceRead("unreadable");
             }
 
             if (OnResolveWorker)
             {
                 if (IsGpuOwnedForWorkerCleanRead(address, sizeof(uint)))
                 {
-                    return RefuseOnTicketWorker("gpu owned");
+                    return RefuseResourceRead("gpu owned");
                 }
 
                 if (IsPendingForWorker(address, sizeof(uint)))
                 {
-                    return RefuseOnTicketWorker("pending");
+                    return RefuseResourceRead("pending");
                 }
 
                 Span<byte> cleanBytes = stackalloc byte[sizeof(uint)];
                 if (!_commandThread!.ReadOverlayBefore(address, cleanBytes, _resolveWorker!.Sequence))
                 {
-                    return RefuseOnTicketWorker("overlay");
+                    return RefuseResourceRead("overlay");
                 }
 
                 _resolveWorker.Reads.Add(address, cleanBytes, clean: true);
@@ -350,7 +364,10 @@ internal static unsafe partial class VulkanVideoPresenter
         private bool ReadWordOnResolveWorker(ulong address, out uint word)
         {
             Span<byte> bytes = stackalloc byte[sizeof(uint)];
-            if (!ReadOnResolveWorker(address, bytes))
+            var read = ResourceMaterializer.SpeculativeReadActive && (_resolveWorker!.Ticket || _resolveWorker.Strict)
+                ? !ResourceMaterializer.SpeculativeReadRefused && ReadResidentBytesOnResolveWorker(address, bytes, clean: false, scalar: true)
+                : ReadOnResolveWorker(address, bytes);
+            if (!read)
             {
                 word = 0;
                 return false;
@@ -362,11 +379,12 @@ internal static unsafe partial class VulkanVideoPresenter
 
         private static readonly bool DirectPageReads = Environment.GetEnvironmentVariable("SHARPEMU_DIRECT_PAGE_READS") != "0";
 
-        private bool ReadResidentBytesOnResolveWorker(ulong address, Span<byte> destination, bool clean)
+        private bool ReadResidentBytesOnResolveWorker(ulong address, Span<byte> destination, bool clean, bool scalar = false)
         {
+            if (ResourceMaterializer.SpeculativeReadRefused) return false;
             var size = (ulong)destination.Length;
             var worker = _resolveWorker!;
-            if (!clean && DirectPageReads && TryGetCleanReadPage(address, size, out var directPage, out _) && directPage == worker.DirectPage &&
+            if (!scalar && !clean && DirectPageReads && TryGetCleanReadPage(address, size, out var directPage, out _) && directPage == worker.DirectPage &&
                 ReferenceEquals(_guestBacking.BackingAliasSnapshot, worker.DirectSnapshot) && _guestBacking.TryEnterBackingAliasAccess())
             {
                 try
@@ -382,17 +400,17 @@ internal static unsafe partial class VulkanVideoPresenter
                 return true;
             }
 
-            CompletePendingPublicationsForResourceRead(address, size);
+            if (!CompletePendingPublicationsForResourceRead(address, size)) return false;
             if (!clean && IsCleanReadPage(address, size) && TryReadAliasBytes(address, destination))
             {
                 worker.Reads.Add(address, destination);
-                RememberDirectPage(worker, address, size);
+                if (!scalar) RememberDirectPage(worker, address, size);
                 return true;
             }
 
             if (!_guestMemory.CanRead(address, size))
             {
-                return RefuseOnTicketWorker("unreadable");
+                return RefuseResourceRead("unreadable");
             }
 
             if (!clean && _commandThread!.TryReadShadowBefore(address, destination, worker.Sequence, out var shadowSequence, out var shadowSource))
@@ -400,9 +418,10 @@ internal static unsafe partial class VulkanVideoPresenter
                 if ((_translation.PendingWrites is { } pending && pending.HasPendingBetween(address, size, shadowSequence, worker.Sequence)) ||
                     _commandThread.HasPendingRangeBetween(address, size, shadowSequence, worker.Sequence))
                 {
-                    return RefuseOnTicketWorker("shadowed pending");
+                    return RefuseResourceRead("shadowed pending");
                 }
 
+                if (TryRefuseStrictRead()) return false;
                 RefuseOnTicketWorker("shadow");
                 SharpEmu.Libs.Agc.AgcExports.NoteWorkerShadowRead((int)shadowSource);
                 return true;
@@ -410,17 +429,17 @@ internal static unsafe partial class VulkanVideoPresenter
 
             if (clean ? IsGpuOwnedForWorkerCleanRead(address, size) : IsGpuOwnedForWorkerRead(address, size))
             {
-                return RefuseOnTicketWorker("gpu owned");
+                return RefuseResourceRead("gpu owned");
             }
 
             if (IsPendingForWorker(address, size))
             {
-                return RefuseOnTicketWorker("pending");
+                return RefuseResourceRead("pending");
             }
 
             if (!_commandThread!.ReadOverlayBefore(address, destination, worker.Sequence))
             {
-                return RefuseOnTicketWorker("overlay");
+                return RefuseResourceRead("overlay");
             }
 
             worker.Reads.Add(address, destination, clean);
@@ -1893,6 +1912,7 @@ internal static unsafe partial class VulkanVideoPresenter
             public long StartTimestamp;
             public long CompileMilliseconds;
             public long CompletedTimestamp;
+            public Task<Pipeline>? Optimized;
 
             // A linked program's own pipeline cache (CreateLinkedPipelineCache), written once its pipeline is registered.
             public DriverCacheShard? LinkedCache;
@@ -1911,21 +1931,111 @@ internal static unsafe partial class VulkanVideoPresenter
         private static readonly SemaphoreSlim _computeCompileSlots =
             new(Math.Max(2, Environment.ProcessorCount / 2));
 
+        private static readonly SemaphoreSlim _optimizedComputeCompileSlots =
+            new(Math.Max(2, Environment.ProcessorCount / 4));
+
+        private bool _unoptimizedFirstComputePipelines;
+        private volatile bool _optimizedComputeBuildsStopped;
+        private readonly List<Pipeline> _replacedComputePipelines = [];
+
+        private static bool UnoptimizedFirstComputePipelines(uint vendorId, DriverId driverId) =>
+            Environment.GetEnvironmentVariable("SHARPEMU_PIPELINE_FAST_BUILD") switch
+            {
+                "0" => false,
+                "1" => true,
+                _ => vendorId == NvidiaVendorId || driverId == DriverId.MesaRadv,
+            };
+
+        private Task<Pipeline> StartOptimizedComputePipeline(PipelineCache cache, ShaderModule module, PipelineLayout layout,
+            uint requiredSubgroupSize, ulong hash, int spirvBytes) =>
+            Task.Factory.StartNew(
+                () =>
+                {
+                    Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+                    _optimizedComputeCompileSlots.Wait();
+                    try
+                    {
+                        if (_optimizedComputeBuildsStopped)
+                        {
+                            return default;
+                        }
+
+                        var started = Stopwatch.GetTimestamp();
+                        var pipeline = CompileComputePipeline(_vk, _device, cache, module, layout, requiredSubgroupSize);
+                        var milliseconds = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                        if (milliseconds >= SlowPipelineCreationMilliseconds)
+                        {
+                            Console.Error.WriteLine(
+                                $"[GPU][INFO] Optimized compute pipeline built in the background: cs=0x{hash:X16} spirv_bytes={spirvBytes} ms={milliseconds}");
+                        }
+
+                        return pipeline;
+                    }
+                    finally
+                    {
+                        _optimizedComputeCompileSlots.Release();
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+
+        internal void PromoteOptimizedComputePipeline(RenderPipelineEntry entry)
+        {
+            if (Interlocked.Exchange(ref entry.OptimizedCompute, null) is not { } build)
+            {
+                return;
+            }
+
+            var optimized = build.GetAwaiter().GetResult();
+            if (optimized.Handle == 0)
+            {
+                return;
+            }
+
+            SetDebugName(ObjectType.Pipeline, optimized.Handle, $"SharpEmu compute cs=0x{entry.ProfileComputeHash:X16}");
+            lock (_replacedComputePipelines)
+            {
+                _replacedComputePipelines.Add(entry.Pipeline);
+                entry.Pipeline = optimized;
+            }
+        }
+
+        private void DestroyOptimizedComputePipeline(Task<Pipeline>? build)
+        {
+            if (build is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var pipeline = build.GetAwaiter().GetResult();
+                if (pipeline.Handle != 0) _vk.DestroyPipeline(_device, pipeline, null);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"[LOADER][WARN] Optimized compute pipeline failed during shutdown: {exception.Message}");
+            }
+        }
+
         // A linked compile starts only when LinkedCompileAdmission admits it (free commit for its estimate beside
         // the linked compiles already running, one large one at a time). Until then the fallback that serves a pending
         // linked program keeps serving it. Shutdown abandons the ones still waiting.
         private static readonly LinkedCompileAdmission _linkedCompileAdmission =
-            new(SharpEmu.Logging.HostSystemInfo.AvailableCommitBytes);
+            new(SharpEmu.Logging.HostSystemInfo.GetMemoryAvailability);
         private volatile bool _linkedAdmissionClosed;
 
-        // Waits until the compile is admitted; false when shutdown abandons it. Without mayWait it answers at once (the
-        // prewarm's linked records). An admitted compile calls ReleaseLinkedAdmission when it ends.
-        private bool WaitForLinkedAdmission(ulong hash, long spirvBytes, bool mayWait = true)
+        // Boot prewarm asks once. Demand and background work retry until admitted or shutdown closes admission.
+        private bool WaitForLinkedAdmission(ulong hash, long spirvBytes, LinkedCompileAdmission.Source source = LinkedCompileAdmission.Source.Demand)
         {
             var reported = false;
+            var reportedRam = false;
             while (!_linkedAdmissionClosed)
             {
-                if (_linkedCompileAdmission.TryAdmit(spirvBytes, out var available, out var reserved))
+                var result = _linkedCompileAdmission.Admit(spirvBytes, out var memory, out var reserved, source);
+                var available = memory.AvailableCommitBytes;
+                if (result == LinkedCompileAdmission.Result.Admitted)
                 {
                     if (reported)
                     {
@@ -1944,20 +2054,26 @@ internal static unsafe partial class VulkanVideoPresenter
                     return true;
                 }
 
-                if (!mayWait)
+                if (source == LinkedCompileAdmission.Source.BootPrewarm)
                 {
                     return false;
                 }
 
-                if (!reported)
+                if (result == LinkedCompileAdmission.Result.WaitForRam && !reportedRam)
                 {
-                    reported = true;
+                    reportedRam = true;
+                    Console.Error.WriteLine($"[GPU][LINKED_ADMISSION] background waiting hash=0x{hash:X16} reason=low_ram " +
+                        $"available_ram_mib={memory.AvailablePhysicalBytes >> 20} reserved_mib={reserved >> 20}");
+                }
+                else if (!reported)
+                {
                     var needed = LinkedCompileAdmission.Estimate(spirvBytes) + LinkedCompileAdmission.MarginBytes;
                     Console.Error.WriteLine($"[GPU][LINKED_ADMISSION] waiting hash=0x{hash:X16} spirv_mb={spirvBytes / 1048576.0:F1} " +
                         $"needed_gb={needed / (double)(1L << 30):F1} available_gb={available / (double)(1L << 30):F1} " +
                         $"reserved_gb={reserved / (double)(1L << 30):F1}");
                 }
 
+                reported = true;
                 Thread.Sleep(500);
             }
 
@@ -2005,7 +2121,7 @@ internal static unsafe partial class VulkanVideoPresenter
                 ComputeCompileProfile.Record(ComputeCompileProfile.Part.ConsumeDelay, pending.CompletedTimestamp);
                 ReportPipelineCreation(
                     Interlocked.Read(ref pending.CompileMilliseconds),
-                    "compute-async",
+                    pending.Optimized is null ? "compute-async" : "compute-async-unoptimized",
                     $"cs=0x{pending.Hash:X16} waited_ms={(long)Stopwatch.GetElapsedTime(pending.StartTimestamp).TotalMilliseconds}",
                     pending.SpirvBytes.ToString());
                 MarkPipelineCacheDirty();
@@ -2020,6 +2136,7 @@ internal static unsafe partial class VulkanVideoPresenter
                     UsesPushDescriptors = pending.UsesPushDescriptors,
                     UsesBindlessHeap = pending.UsesBindlessHeap,
                     ProfileComputeHash = pending.Hash,
+                    OptimizedCompute = pending.Optimized,
                 }, () => _pendingComputePipelines.Remove(key));
                 ReleaseLinkedPipelineCache(pending.LinkedCache, pending.Hash, save: true);
 
@@ -2120,7 +2237,23 @@ internal static unsafe partial class VulkanVideoPresenter
                         try { cache = ResolveGuestPipelineCache(cacheSource); }
                         finally { ComputeCompileProfile.Record(ComputeCompileProfile.Part.CacheLoad, cacheStart); }
                         var driverStart = ComputeCompileProfile.Start();
-                        try { return CompileComputePipeline(vk, device, cache, computeModule, layout, requiredSubgroupSize); }
+                        try
+                        {
+                            if (started.Linked || !_unoptimizedFirstComputePipelines)
+                            {
+                                return CompileComputePipeline(vk, device, cache, computeModule, layout, requiredSubgroupSize);
+                            }
+
+                            var first = CompileComputePipeline(vk, device, cache, computeModule, layout, requiredSubgroupSize,
+                                prewarm: false, unoptimizedOnMiss: true, out var unoptimized);
+                            if (unoptimized)
+                            {
+                                started.Optimized = StartOptimizedComputePipeline(cache, computeModule, layout, requiredSubgroupSize,
+                                    started.Hash, started.SpirvBytes);
+                            }
+
+                            return first;
+                        }
                         finally { ComputeCompileProfile.Record(ComputeCompileProfile.Part.DriverCompile, driverStart); }
                     }
                     finally
@@ -2157,7 +2290,20 @@ internal static unsafe partial class VulkanVideoPresenter
             PipelineCache cache,
             ShaderModule module,
             PipelineLayout layout,
-            uint requiredSubgroupSize)
+            uint requiredSubgroupSize,
+            bool prewarm = false) =>
+            CompileComputePipeline(vk, device, cache, module, layout, requiredSubgroupSize, prewarm, unoptimizedOnMiss: false, out _);
+
+        private Pipeline CompileComputePipeline(
+            Vk vk,
+            Device device,
+            PipelineCache cache,
+            ShaderModule module,
+            PipelineLayout layout,
+            uint requiredSubgroupSize,
+            bool prewarm,
+            bool unoptimizedOnMiss,
+            out bool unoptimized)
         {
             var entryPoint = (byte*)SilkMarshal.StringToPtr("main");
             try
@@ -2181,8 +2327,19 @@ internal static unsafe partial class VulkanVideoPresenter
                     Stage = stageInfo,
                     Layout = layout,
                 };
-                var result = CreatePipelineWithBinaries(&pipelineInfo, &pipelineInfo.PNext, cache,
-                    &CreateComputePipelineCall, out var pipeline, out _);
+                Pipeline pipeline;
+                Result result;
+                if (unoptimizedOnMiss)
+                {
+                    result = CreateComputePipelineUnoptimizedOnMiss(&pipelineInfo, out pipeline, out unoptimized);
+                }
+                else
+                {
+                    result = CreatePipelineWithBinaries(&pipelineInfo, &pipelineInfo.PNext, cache,
+                        &CreateComputePipelineCall, out pipeline, out _, prewarmCompute: prewarm);
+                    unoptimized = false;
+                }
+
                 if (result != Result.Success)
                 {
                     throw SubmissionScheduler.Fatal($"vkCreateComputePipelines(async) failed: {result}.");
@@ -2198,6 +2355,7 @@ internal static unsafe partial class VulkanVideoPresenter
 
         private void DrainPendingComputePipelines()
         {
+            _optimizedComputeBuildsStopped = true;
             foreach (var pending in _pendingComputePipelines.Values)
             {
                 try
@@ -2209,12 +2367,17 @@ internal static unsafe partial class VulkanVideoPresenter
                 {
                     Console.Error.WriteLine($"[LOADER][WARN] Pending compute pipeline failed during shutdown: {exception.Message}");
                 }
+                DestroyOptimizedComputePipeline(pending.Optimized);
                 ReleaseLinkedPipelineCache(pending.LinkedCache, pending.Hash, save: false);
                 _vk.DestroyPipelineLayout(_device, pending.Layout, null);
                 _vk.DestroyDescriptorSetLayout(_device, pending.SetLayout, null);
             }
             _pendingComputePipelines.Clear();
             _linkedComputeCompiles.Clear();
+            foreach (var entry in _pipelineEntries.Values)
+            {
+                DestroyOptimizedComputePipeline(Interlocked.Exchange(ref entry.OptimizedCompute, null));
+            }
         }
 
         private void DrainPendingGraphicsPipelines()
@@ -2257,6 +2420,16 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             _pipelineEntries.Clear();
+            lock (_replacedComputePipelines)
+            {
+                foreach (var pipeline in _replacedComputePipelines)
+                {
+                    _vk.DestroyPipeline(_device, pipeline, null);
+                }
+
+                _replacedComputePipelines.Clear();
+            }
+
             DestroyGraphicsLibraries();
             foreach (var module in _shaderModules.Values)
             {

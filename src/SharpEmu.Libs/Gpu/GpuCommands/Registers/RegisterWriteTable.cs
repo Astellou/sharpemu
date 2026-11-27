@@ -65,6 +65,12 @@ public static class RegisterWriteTable
 
     public static uint WriteUserConfigPacket(RegisterBanks banks, in PacketContext packet, uint offset, ReadOnlySpan<uint> values)
     {
+        if (values.Length == 1 && !Rendering.RenderTrace.Enabled &&
+            TryWriteWithoutConfigCopy(banks, offset, values[0]))
+        {
+            banks.MarkWritten(RegisterStamps.UserConfigBits);
+            return 1;
+        }
         banks.PrepareUserConfigWrite();
         var consumed = WritePacket(banks, in packet, offset, values, UserConfig, UserConfigIndirect, "user-config", emptyIsHandled: true);
         banks.NoteUserConfigWords(offset, values[..Math.Min((int)consumed, values.Length)]);
@@ -74,6 +80,20 @@ public static class RegisterWriteTable
 
     public static void WriteContextEntry(RegisterBanks banks, uint offset, uint value, ulong tableAddress)
     {
+        if (!Rendering.RenderTrace.Enabled && offset switch
+        {
+            ContextRegisterOffset.SpiPsInputEna => banks.Context.ShaderInterface.PixelInputEnable == value,
+            ContextRegisterOffset.SpiPsInputAddr => banks.Context.ShaderInterface.PixelInputAddress == value,
+            ContextRegisterOffset.SpiPsInControl => banks.Context.ShaderInterface.PixelInputControl == value,
+            ContextRegisterOffset.CbShaderMask => banks.Context.ShaderInterface.ColorShaderMask == value,
+            ContextRegisterOffset.SpiVsOutConfig => banks.Context.ShaderInterface.VertexOutputConfiguration == value,
+            ContextRegisterOffset.PaClVsOutCntl => banks.Context.ShaderInterface.VertexOutputControl == value,
+            _ => false,
+        })
+        {
+            banks.MarkWritten(RegisterStamps.ContextBitsFor(offset, 1));
+            return;
+        }
         banks.PrepareContextWrite();
         if (offset < ContextIndirect.Length && ContextIndirect[offset] is null)
         {
@@ -130,6 +150,11 @@ public static class RegisterWriteTable
         PacketContext packet = default, uint entryIndex = 0, uint entryCount = 0, uint rawOffset = 0,
         ReadOnlySpan<uint> payload = default)
     {
+        if (!Rendering.RenderTrace.Enabled && TryWriteWithoutConfigCopy(banks, offset, value))
+        {
+            banks.MarkWritten(RegisterStamps.UserConfigBits);
+            return;
+        }
         banks.PrepareUserConfigWrite();
         if (offset >= UserConfigIndirect.Length || UserConfigIndirect[offset] is null)
         {
@@ -142,6 +167,24 @@ public static class RegisterWriteTable
         UserConfigIndirect[offset]!(banks, offset, value);
         banks.NoteUserConfigWords(offset, [value]);
         banks.MarkWritten(RegisterStamps.UserConfigBits);
+    }
+
+    private static bool TryWriteWithoutConfigCopy(RegisterBanks banks, uint offset, uint value)
+    {
+        if (offset == UserConfigRegisterOffset.VgtIndexType)
+        {
+            // The index type is a value on the live shell, independent of the shared bank.
+            banks.IndexTypeAndSize = value & 3u;
+            return true;
+        }
+        return offset switch
+        {
+            UserConfigRegisterOffset.VgtPrimitiveType => banks.UserConfig.PrimitiveType == (value & 0x3fu),
+            UserConfigRegisterOffset.VgtObjectId => banks.UserConfig.ObjectId == value,
+            UserConfigRegisterOffset.GeIndexOffset => banks.UserConfig.IndexOffset == value,
+            UserConfigRegisterOffset.GeMultiPrimIbResetEn => banks.UserConfig.PrimitiveResetControl == value,
+            _ => false,
+        };
     }
 
     private static uint WritePacket(

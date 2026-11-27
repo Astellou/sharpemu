@@ -644,16 +644,25 @@ internal static unsafe partial class VulkanVideoPresenter
                 SType = StructureType.PhysicalDeviceSubgroupProperties,
                 PNext = &subgroupSizeControl,
             };
+            var driverProperties = new PhysicalDeviceDriverProperties
+            {
+                SType = StructureType.PhysicalDeviceDriverProperties,
+                PNext = &subgroup,
+            };
             var properties2 = new PhysicalDeviceProperties2
             {
                 SType = StructureType.PhysicalDeviceProperties2,
-                PNext = &subgroup,
+                PNext = &driverProperties,
             };
             if (IsDeviceExtensionAvailable(MeshShaderExtensionName))
             {
                 pushDescriptorProperties.PNext = &meshProperties;
             }
             _vk.GetPhysicalDeviceProperties2(_physicalDevice, &properties2);
+            _unoptimizedFirstComputePipelines = UnoptimizedFirstComputePipelines(properties.VendorID, driverProperties.DriverID);
+            Console.Error.WriteLine(
+                $"[LOADER][INFO] Vulkan unoptimized first compute pipelines: {(_unoptimizedFirstComputePipelines ? "on" : "off")} " +
+                "(SHARPEMU_PIPELINE_FAST_BUILD=1 or 0 chooses on any GPU)");
             _supportsShaderSignedZeroInfNanPreserveFloat32 =
                 floatControls.ShaderSignedZeroInfNanPreserveFloat32;
             // The 16-bit float controls of NativeFloat16Conversions, which must not need the same modes for 32 or 64 bits;
@@ -857,8 +866,11 @@ internal static unsafe partial class VulkanVideoPresenter
             _supportsRectangleGeometry = supportedFeatures.GeometryShader;
             _supportsTessellation = supportedFeatures.TessellationShader;
             _supportsPreciseOcclusion = supportedFeatures.OcclusionQueryPrecise;
+            var sparseTable = SparseAddressTable.CanEnable(_vk, _physicalDevice, _queueFamilyIndex, supportedFeatures);
             var enabledFeatures = new PhysicalDeviceFeatures
             {
+                SparseBinding = sparseTable,
+                SparseResidencyBuffer = sparseTable,
                 TessellationShader = supportedFeatures.TessellationShader,
                 DepthBounds = supportedFeatures.DepthBounds,
                 GeometryShader = supportedFeatures.GeometryShader,
@@ -1221,6 +1233,15 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             var swapchainExtension = (byte*)SilkMarshal.StringToPtr("VK_KHR_swapchain");
+            const string memoryBudgetName = "VK_EXT_memory_budget";
+            var useMemoryBudget = IsDeviceExtensionAvailable(memoryBudgetName);
+            PhysicalDevicePageableDeviceLocalMemoryFeaturesEXT pageable = default;
+            PhysicalDeviceMemoryPriorityFeaturesEXT memoryPriority = default;
+            var usePriority = IsDeviceExtensionAvailable(GpuResidency.PriorityExtension) &&
+                IsDeviceExtensionAvailable(GpuResidency.PageableExtension) && GpuResidency.QueryFeatures(_vk, _physicalDevice, &memoryPriority, &pageable);
+            var priorityExtension = usePriority ? (byte*)SilkMarshal.StringToPtr(GpuResidency.PriorityExtension) : null;
+            var pageableExtension = usePriority ? (byte*)SilkMarshal.StringToPtr(GpuResidency.PageableExtension) : null;
+            var memoryBudgetExtension = useMemoryBudget ? (byte*)SilkMarshal.StringToPtr(memoryBudgetName) : null;
             var pushDescriptorExtension = (byte*)SilkMarshal.StringToPtr(PushDescriptorExtensionName);
             var maintenance8Extension = (byte*)SilkMarshal.StringToPtr("VK_KHR_maintenance8");
             var robustness2Extension = (byte*)SilkMarshal.StringToPtr("VK_EXT_robustness2");
@@ -1243,9 +1264,16 @@ internal static unsafe partial class VulkanVideoPresenter
             var deviceFaultExtension = (byte*)SilkMarshal.StringToPtr("VK_EXT_device_fault");
             try
             {
-                var extensions = stackalloc byte*[24];
+                var extensions = stackalloc byte*[26];
                 var extensionCount = 0u;
                 extensions[extensionCount++] = swapchainExtension;
+                if (useMemoryBudget)
+                    extensions[extensionCount++] = memoryBudgetExtension;
+                if (usePriority)
+                {
+                    extensions[extensionCount++] = priorityExtension;
+                    extensions[extensionCount++] = pageableExtension;
+                }
                 extensions[extensionCount++] = pushDescriptorExtension;
                 if (supportsViewportIndexLayer)
                 {
@@ -1502,6 +1530,11 @@ internal static unsafe partial class VulkanVideoPresenter
                     renderingChain = &graphicsPipelineLibraryFeatures;
                 }
                 var faultFeatures = new PhysicalDeviceFaultFeaturesEXT { SType = StructureType.PhysicalDeviceFaultFeaturesExt };
+                if (usePriority)
+                {
+                    pageable.PNext = renderingChain;
+                    renderingChain = &memoryPriority;
+                }
                 var reportDeviceFaults = false;
                 if (SharpEmu.Libs.Gpu.Vulkan.DeviceFaultReport.Requested && IsDeviceExtensionAvailable("VK_EXT_device_fault"))
                 {
@@ -1569,6 +1602,13 @@ internal static unsafe partial class VulkanVideoPresenter
             finally
             {
                 SilkMarshal.Free((nint)swapchainExtension);
+                if (useMemoryBudget)
+                    SilkMarshal.Free((nint)memoryBudgetExtension);
+                if (usePriority)
+                {
+                    SilkMarshal.Free((nint)priorityExtension);
+                    SilkMarshal.Free((nint)pageableExtension);
+                }
                 SilkMarshal.Free((nint)maintenance8Extension);
                 SilkMarshal.Free((nint)maintenance5Extension);
                 SilkMarshal.Free((nint)imageViewMinLodExtension);
@@ -1592,7 +1632,14 @@ internal static unsafe partial class VulkanVideoPresenter
             }
 
             _vk.GetDeviceQueue(_device, _queueFamilyIndex, 0, out _queue);
-            _deviceInfo = new GpuDeviceInfo(_vk, _physicalDevice, _device) { ImageViewMinLodSupported = _supportsImageViewMinLod };
+            _deviceInfo = new GpuDeviceInfo(_vk, _physicalDevice, _device)
+            {
+                ImageViewMinLodSupported = _supportsImageViewMinLod,
+                MemoryBudgetSupported = useMemoryBudget,
+                SparseQueueFamily = _queueFamilyIndex,
+                SparseQueue = sparseTable ? _queue : default,
+            };
+            _deviceInfo.ConfigureResidency(usePriority);
             if (_readbackQueueFamilyIndex is { } readbackQueueFamily)
             {
                 _vk.GetDeviceQueue(_device, readbackQueueFamily, 0, out _readbackQueue);
